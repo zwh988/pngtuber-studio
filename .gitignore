@@ -1,0 +1,35 @@
+# Python
+__pycache__/
+*.pyc
+.venv/
+.pytest_cache/
+.ruff_cache/
+
+# Node
+node_modules/
+frontend/dist/
+
+# Heavy / local-only (never commit)
+bin/*
+!bin/.gitkeep
+models/
+weights/
+*.ckpt
+*.safetensors
+*.pt
+
+# User projects and media
+projects/
+scripts/spike/out/
+*.mp4
+*.mov
+*.mkv
+*.webm
+*.wav
+!tests/fixtures/**
+
+# OS / editor
+.DS_Store
+Thumbs.db
+.vscode/
+.idea/
