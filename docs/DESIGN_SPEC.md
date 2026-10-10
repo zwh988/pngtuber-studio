@@ -109,17 +109,19 @@ MyRack/
   exports/
 ```
 
+**Conventions:** all times are integer milliseconds (anchor times are source time). Ids are 12-character lowercase hex strings. Paths in `project.json` are relative POSIX strings.
+
 **Entities**
 
 | Entity | Key fields |
 |---|---|
-| Source | id, relative path, duration, fps, resolution |
+| Source | id, relative path, duration_ms, fps (stored as fps_num / fps_den), width, height, audio track count |
+| Take | id, line id, seed, text snapshot, params used (exaggeration, cfg_weight), voice profile id, model version, raw cache key, raw file, duration_ms, starred, created |
+| Placement | id, line id, anchor (clip id, source_ms), take override, orphaned flag |
+| Keyframe | id, lane id, anchor (clip id, source_ms), value (number, or expression name), interpolation (hold or smooth), orphaned flag |
+| Reaction | id, type, anchor, intensity, duration_ms, orphaned flag |
 | Clip | id, source id, in, out, speed, track, overlay on/off, effects list |
 | Line | id, text, emotion, exaggeration override, cfg_weight override, active take id, allow-overlap flag |
-| Take | id, line id, seed, params used, voice profile id, raw file, duration, starred, created |
-| Placement | line id, anchor (clip id, source time), take override |
-| Keyframe | lane id, anchor (clip id, source time), value, interpolation (hold or smooth) |
-| Reaction | type, anchor, intensity, duration |
 | VoiceProfile | id, name, reference clip(s), optional per-emotion reference clips (reserved) |
 | FxChain | EQ gains, compressor settings, effects list, loudness target |
 | ChannelTemplate | bookend clips, voice profile, FX chain, avatar defaults, export settings |
