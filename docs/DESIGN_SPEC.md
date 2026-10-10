@@ -236,7 +236,7 @@ Progress streams to the UI over a WebSocket, with cancel support. Export unloads
 
 **Frontend:** Svelte + TypeScript with Vite, built to static files and bundled (no Node needed at runtime). The timeline is a custom canvas component.
 
-**Bundled binaries:** ffmpeg and ffprobe with NVENC in `bin/`.
+**Bundled binaries:** ffmpeg and ffprobe with NVENC in `bin/`, from a pinned release-branch build (BtbN GPL 8.1.x). Do not use `master` or 9.0 builds: they need NVENC API 13.1 (driver 610+) and fail on older drivers (verified on driver 581.42).
 
 **Python dependencies:** torch (CUDA), chatterbox-tts, pedalboard, pyloudnorm, numpy, soundfile, opencv or Pillow, fastapi, uvicorn, pydantic, pywebview.
 
@@ -249,5 +249,5 @@ Progress streams to the UI over a WebSocket, with cancel support. Export unloads
 - Voice source: own voice or acted character.
 - Effects slot contents: which effects first (reverb, pitch shift, chorus, others).
 - Avatar art naming: confirm the convention against real files.
-- Recording frame rate (30 or 60).
+- Recording frame rate: resolved in M0. OBS recordings are 2560x1440 at 60 fps (H.264, one mixed stereo AAC track).
 - Emotion preset numbers are guesses to tune in M3.
