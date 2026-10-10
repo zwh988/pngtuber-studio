@@ -33,11 +33,11 @@ Dependencies: M2 needs M1. M3 needs M1. M4 needs M3. M5 needs M2, M3 (envelopes 
 
 Goal: prove the three risky pieces work on the user's machine before building around them.
 
-- [ ] M0-1 Environment: uv project, Python 3.11, CUDA torch, confirm `torch.cuda.is_available()`
-- [ ] M0-2 Chatterbox clone test: reference clip, generate 3 lines at different settings; record model load time, per-line latency, peak VRAM
-- [ ] M0-3 pywebview shell: FastAPI serves a page that plays a local video through HTTP range requests; confirm smooth seeking
-- [ ] M0-4 ffmpeg NVENC: bundled ffmpeg encodes a 10 s clip with `h264_nvenc`; record the working command
-- [ ] M0-5 Write findings and go/no-go into `PROJECT_STATE.md`
+- [x] M0-1 Environment: uv project, Python 3.11, CUDA torch, confirm `torch.cuda.is_available()`
+- [x] M0-2 Chatterbox clone test: reference clip, generate 3 lines at different settings; record model load time, per-line latency, peak VRAM
+- [x] M0-3 pywebview shell: FastAPI serves a page that plays a local video through HTTP range requests; confirm smooth seeking
+- [x] M0-4 ffmpeg NVENC: bundled ffmpeg encodes a 10 s clip with `h264_nvenc`; record the working command
+- [x] M0-5 Write findings and go/no-go into `PROJECT_STATE.md`
 
 Done when: all three work on the user's machine and the user has heard one cloned line they would use.
 
