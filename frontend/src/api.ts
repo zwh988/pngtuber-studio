@@ -8,6 +8,13 @@ export type ProjectSummary = {
   avatar_status: string;
 };
 
+export type RecentItem = {
+  name: string;
+  folder: string;
+  last_opened: string;
+  exists: boolean;
+};
+
 async function request<T>(url: string, init?: RequestInit): Promise<T> {
   const response = await fetch(url, init);
   if (!response.ok) {
@@ -43,6 +50,14 @@ export function newProject(name: string, parent: string): Promise<ProjectSummary
 
 export function openProject(folder: string): Promise<ProjectSummary> {
   return post<ProjectSummary>("/api/project/open", { folder });
+}
+
+export function getRecent(): Promise<RecentItem[]> {
+  return request<RecentItem[]>("/api/recent");
+}
+
+export function removeRecent(folder: string): Promise<RecentItem[]> {
+  return post<RecentItem[]>("/api/recent/remove", { folder });
 }
 
 /** Native folder dialog; null when cancelled or not running in the app window. */

@@ -1,13 +1,17 @@
 <script lang="ts">
   import {
     getProject,
+    getRecent,
     newProject,
     openProject,
     pickFolder,
+    removeRecent,
     type ProjectSummary,
+    type RecentItem,
   } from "./api";
 
   let current = $state<ProjectSummary | null>(null);
+  let recent = $state<RecentItem[]>([]);
   let error = $state<string | null>(null);
   let busy = $state(false);
 
@@ -15,15 +19,29 @@
   let newParent = $state("");
   let openPath = $state("");
 
+  function message(err: unknown): string {
+    return err instanceof Error ? err.message : String(err);
+  }
+
   async function run(action: () => Promise<ProjectSummary>): Promise<void> {
     busy = true;
     error = null;
     try {
       current = await action();
+      recent = await getRecent();
     } catch (err) {
-      error = err instanceof Error ? err.message : String(err);
+      error = message(err);
     } finally {
       busy = false;
+    }
+  }
+
+  async function forget(folder: string): Promise<void> {
+    error = null;
+    try {
+      recent = await removeRecent(folder);
+    } catch (err) {
+      error = message(err);
     }
   }
 
@@ -37,9 +55,15 @@
   async function restore(): Promise<void> {
     try {
       current = await getProject();
+      recent = await getRecent();
     } catch (err) {
-      error = err instanceof Error ? err.message : String(err);
+      error = message(err);
     }
+  }
+
+  function when(iso: string): string {
+    const date = new Date(iso);
+    return Number.isNaN(date.getTime()) ? iso : date.toLocaleString();
   }
 
   void restore();
@@ -71,6 +95,36 @@
       </dl>
     </section>
   {/if}
+
+  <section>
+    <h2>Recent projects</h2>
+    {#if recent.length === 0}
+      <p>No recent projects yet.</p>
+    {:else}
+      <ul class="recent">
+        {#each recent as item (item.folder)}
+          <li class:missing={!item.exists}>
+            <div class="info">
+              <strong>{item.name}</strong>
+              {#if !item.exists}<span class="tag">missing</span>{/if}
+              <div class="path">{item.folder}</div>
+              <div class="path">Last opened {when(item.last_opened)}</div>
+            </div>
+            <button
+              type="button"
+              onclick={() => run(() => openProject(item.folder))}
+              disabled={busy || !item.exists}
+            >
+              Open
+            </button>
+            <button type="button" onclick={() => forget(item.folder)} disabled={busy}>
+              Remove
+            </button>
+          </li>
+        {/each}
+      </ul>
+    {/if}
+  </section>
 
   <section>
     <h2>New project</h2>
@@ -140,6 +194,35 @@
   }
   dd {
     margin: 0;
+  }
+  .recent {
+    list-style: none;
+    padding: 0;
+    margin: 0;
+  }
+  .recent li {
+    display: flex;
+    align-items: center;
+    gap: 0.5rem;
+    padding: 0.5rem 0;
+    border-bottom: 1px solid #8884;
+  }
+  .info {
+    flex: 1;
+    min-width: 0;
+  }
+  .path {
+    font-size: 0.85rem;
+    opacity: 0.7;
+    overflow-wrap: anywhere;
+  }
+  .missing .info {
+    opacity: 0.6;
+  }
+  .tag {
+    margin-left: 0.5rem;
+    color: #b00020;
+    font-size: 0.8rem;
   }
   .error {
     color: #b00020;

@@ -11,6 +11,8 @@ import uvicorn
 import webview
 
 from backend.app import APP_NAME, create_app
+from backend.project.recent import default_recent_path
+from backend.project.session import Session
 
 
 class Api:
@@ -43,8 +45,12 @@ def _free_port() -> int:
 
 def main() -> None:
     port = _free_port()
+    session = Session(recent_path=default_recent_path())
     config = uvicorn.Config(
-        create_app(), host="127.0.0.1", port=port, log_level="warning"
+        create_app(session=session),
+        host="127.0.0.1",
+        port=port,
+        log_level="warning",
     )
     server = uvicorn.Server(config)
     thread = threading.Thread(target=server.run, daemon=True)

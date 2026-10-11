@@ -2,17 +2,26 @@
 
 ``clean_folder_name`` is pure. ``Session`` does file I/O through ``store`` and
 optionally runs ffprobe for template bookend clips (the probe is injectable).
+Pass ``recent_path`` to record opened projects; ``None`` records nothing.
 """
 
 import re
 import threading
 from collections.abc import Callable
+from datetime import UTC, datetime
 from pathlib import Path
 from typing import Any
 
 from backend.project.commands import CommandStack
 from backend.project.footage import parse_probe, run_ffprobe
-from backend.project.schema import Source
+from backend.project.recent import (
+    RecentItem,
+    add_recent,
+    load_recent,
+    remove_recent,
+    save_recent,
+)
+from backend.project.schema import Project, Source
 from backend.project.store import create_project, load_project, project_file
 from backend.project.summary import ProjectSummary, summarize
 from backend.project.template import (
@@ -58,10 +67,12 @@ class Session:
         *,
         template_path: Path | None = None,
         probe: Probe | None = None,
+        recent_path: Path | None = None,
     ) -> None:
         self._lock = threading.Lock()
         self._template_path = template_path
         self._probe: Probe = probe if probe is not None else run_ffprobe
+        self._recent_path = recent_path
         self._folder: Path | None = None
         self._stack: CommandStack | None = None
 
@@ -103,10 +114,43 @@ class Session:
         with self._lock:
             return self._set_open(folder_path, project)
 
-    def _set_open(self, folder: Path, project: Any) -> ProjectSummary:
+    def recent(self) -> list[RecentItem]:
+        if self._recent_path is None:
+            return []
+        return [
+            RecentItem(
+                **entry.model_dump(),
+                exists=project_file(Path(entry.folder)).is_file(),
+            )
+            for entry in load_recent(self._recent_path)
+        ]
+
+    def forget_recent(self, folder: str) -> None:
+        if self._recent_path is None:
+            return
+        with self._lock:
+            entries = load_recent(self._recent_path)
+            save_recent(self._recent_path, remove_recent(entries, folder))
+
+    def _set_open(self, folder: Path, project: Project) -> ProjectSummary:
         self._folder = folder
         self._stack = CommandStack(project)
+        self._record_recent(folder, project)
         return summarize(str(folder), project)
+
+    def _record_recent(self, folder: Path, project: Project) -> None:
+        if self._recent_path is None:
+            return
+        opened_at = datetime.now(UTC).isoformat(timespec="seconds")
+        try:
+            entries = load_recent(self._recent_path)
+            save_recent(
+                self._recent_path,
+                add_recent(entries, project.name, str(folder), opened_at),
+            )
+        except OSError:
+            # A failure to write the recent list must never block opening.
+            return
 
     def _probe_bookend(self, raw_path: str) -> Source:
         data = self._probe(Path(raw_path))

@@ -8,6 +8,7 @@ from fastapi.staticfiles import StaticFiles
 from pydantic import BaseModel
 
 from backend.project.footage import FootageError
+from backend.project.recent import RecentItem
 from backend.project.schema import SCHEMA_VERSION
 from backend.project.session import Session, SessionError
 from backend.project.store import ProjectError
@@ -33,6 +34,10 @@ class NewProjectRequest(BaseModel):
 
 
 class OpenProjectRequest(BaseModel):
+    folder: str
+
+
+class ForgetRecentRequest(BaseModel):
     folder: str
 
 
@@ -72,6 +77,18 @@ def create_app(
             return active.open_project(request.folder)
         except _API_ERRORS as exc:
             raise HTTPException(status_code=400, detail=str(exc)) from exc
+
+    @app.get("/api/recent")
+    def get_recent() -> list[RecentItem]:
+        return active.recent()
+
+    @app.post("/api/recent/remove")
+    def remove_recent(request: ForgetRecentRequest) -> list[RecentItem]:
+        try:
+            active.forget_recent(request.folder)
+        except OSError as exc:
+            raise HTTPException(status_code=500, detail=str(exc)) from exc
+        return active.recent()
 
     folder = static_dir if static_dir is not None else default_static_dir()
     if (folder / "index.html").is_file():
