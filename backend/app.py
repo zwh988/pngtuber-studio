@@ -41,6 +41,11 @@ class ForgetRecentRequest(BaseModel):
     folder: str
 
 
+class RelinkRequest(BaseModel):
+    source_id: str
+    path: str
+
+
 def default_static_dir() -> Path:
     """``<repo>/frontend/dist``."""
     return Path(__file__).resolve().parents[1] / "frontend" / "dist"
@@ -89,6 +94,13 @@ def create_app(
     def rescan_footage() -> FootageReport:
         try:
             return active.rescan_footage()
+        except _API_ERRORS as exc:
+            raise HTTPException(status_code=400, detail=str(exc)) from exc
+
+    @app.post("/api/footage/relink")
+    def relink_footage(request: RelinkRequest) -> FootageReport:
+        try:
+            return active.relink_source(request.source_id, request.path)
         except _API_ERRORS as exc:
             raise HTTPException(status_code=400, detail=str(exc)) from exc
 

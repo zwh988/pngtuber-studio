@@ -87,6 +87,16 @@ export function rescanFootage(): Promise<FootageReport> {
   return post<FootageReport>("/api/footage/rescan");
 }
 
+export function relinkSource(sourceId: string, path: string): Promise<FootageReport> {
+  return post<FootageReport>("/api/footage/relink", { source_id: sourceId, path });
+}
+
+/** Native file dialog; null when cancelled or not running in the app window. */
+export async function pickFile(): Promise<string | null> {
+  const result = await window.pywebview?.api?.pick_file?.();
+  return result ?? null;
+}
+
 /** Native folder dialog; null when cancelled or not running in the app window. */
 export async function pickFolder(): Promise<string | null> {
   const result = await window.pywebview?.api?.pick_folder?.();

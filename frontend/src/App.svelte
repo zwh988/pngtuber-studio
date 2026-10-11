@@ -5,7 +5,9 @@
     getRecent,
     newProject,
     openProject,
+    pickFile,
     pickFolder,
+    relinkSource,
     removeRecent,
     rescanFootage,
     type FootageReport,
@@ -51,6 +53,23 @@
     error = null;
     try {
       footage = await rescanFootage();
+      current = await getProject();
+    } catch (err) {
+      error = message(err);
+    } finally {
+      busy = false;
+    }
+  }
+
+  async function relink(sourceId: string): Promise<void> {
+    const path = await pickFile();
+    if (path === null) {
+      return;
+    }
+    busy = true;
+    error = null;
+    try {
+      footage = await relinkSource(sourceId, path);
       current = await getProject();
     } catch (err) {
       error = message(err);
@@ -156,6 +175,7 @@
               <th>Length</th>
               <th>Audio</th>
               <th>Status</th>
+              <th></th>
             </tr>
           </thead>
           <tbody>
@@ -167,6 +187,13 @@
                 <td>{duration(item.duration_ms)}</td>
                 <td>{item.audio_tracks}</td>
                 <td>{item.exists ? "ok" : "missing"}</td>
+                <td>
+                  {#if !item.exists && !item.external}
+                    <button type="button" onclick={() => relink(item.id)} disabled={busy}>
+                      Relink...
+                    </button>
+                  {/if}
+                </td>
               </tr>
             {/each}
           </tbody>

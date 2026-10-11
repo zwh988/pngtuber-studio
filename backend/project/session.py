@@ -13,7 +13,12 @@ from datetime import UTC, datetime
 from pathlib import Path
 from typing import Any
 
-from backend.project.commands import AddSource, CommandError, CommandStack
+from backend.project.commands import (
+    AddSource,
+    CommandError,
+    CommandStack,
+    RelinkSource,
+)
 from backend.project.footage import (
     FootageError,
     parse_probe,
@@ -27,6 +32,7 @@ from backend.project.recent import (
     remove_recent,
     save_recent,
 )
+from backend.project.relink import relink_mismatches, to_footage_relpath
 from backend.project.schema import Project, Source
 from backend.project.store import (
     ProjectError,
@@ -149,6 +155,42 @@ class Session:
             folder, stack = self._require_open()
             added = self._scan(folder, stack)
             return self._report(folder, stack.project, added=added)
+
+    def relink_source(self, source_id: str, new_path: str) -> FootageReport:
+        """Point a footage source at a moved file, after checking it matches."""
+        with self._lock:
+            folder, stack = self._require_open()
+            source = next(
+                (s for s in stack.project.sources if s.id == source_id), None
+            )
+            if source is None:
+                raise SessionError("unknown footage source")
+            if source.external:
+                raise SessionError(
+                    "relinking template bookend clips is not supported yet"
+                )
+            picked = Path(new_path.strip())
+            if not picked.is_file():
+                raise SessionError(f"file not found: {picked}")
+            try:
+                rel = to_footage_relpath(folder.resolve(), picked.resolve())
+            except ValueError as exc:
+                raise SessionError(str(exc)) from exc
+            if rel.casefold() == source.path.casefold():
+                return self._report(folder, stack.project, added=0)
+
+            probed = parse_probe(self._probe(picked), rel)
+            problems = relink_mismatches(source, probed)
+            if problems:
+                raise SessionError(
+                    "that file does not match the original footage: "
+                    + "; ".join(problems)
+                )
+            try:
+                stack.execute(RelinkSource(source.id, rel))
+            except CommandError as exc:
+                raise SessionError(str(exc)) from exc
+            return self._report(folder, stack.project, added=0)
 
     # ---- recent projects ---------------------------------------------------
 

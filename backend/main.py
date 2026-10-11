@@ -6,6 +6,7 @@ Run from the repo root: ``uv run python -m backend.main``
 import socket
 import threading
 import time
+from typing import Any
 
 import uvicorn
 import webview
@@ -13,6 +14,19 @@ import webview
 from backend.app import APP_NAME, create_app
 from backend.project.recent import default_recent_path
 from backend.project.session import Session
+
+VIDEO_FILE_TYPES = (
+    "Video files (*.mkv;*.mp4;*.mov;*.avi;*.webm;*.m4v;*.flv;*.ts)",
+    "All files (*.*)",
+)
+
+
+def _dialog_mode(name: str, legacy_name: str) -> Any:
+    """Newer pywebview has ``FileDialog.<name>``; older has ``<legacy_name>``."""
+    file_dialog = getattr(webview, "FileDialog", None)
+    if file_dialog is not None:
+        return getattr(file_dialog, name)
+    return getattr(webview, legacy_name)
 
 
 class Api:
@@ -25,16 +39,18 @@ class Api:
     def pick_folder(self) -> str | None:
         if not webview.windows:
             return None
-        file_dialog = getattr(webview, "FileDialog", None)
-        mode = (
-            file_dialog.FOLDER
-            if file_dialog is not None
-            else webview.FOLDER_DIALOG
-        )
+        mode = _dialog_mode("FOLDER", "FOLDER_DIALOG")
         result = webview.windows[0].create_file_dialog(mode)
-        if not result:
+        return str(result[0]) if result else None
+
+    def pick_file(self) -> str | None:
+        if not webview.windows:
             return None
-        return str(result[0])
+        mode = _dialog_mode("OPEN", "OPEN_DIALOG")
+        result = webview.windows[0].create_file_dialog(
+            mode, allow_multiple=False, file_types=VIDEO_FILE_TYPES
+        )
+        return str(result[0]) if result else None
 
 
 def _free_port() -> int:
