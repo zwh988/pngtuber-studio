@@ -2,9 +2,9 @@
 
 Living document: how the project works right now and where everything lives. **Update it at the end of every task** (see the checklist in `CLAUDE.md`). Keep it factual and short; link to files instead of copying code.
 
-- **Last updated:** 2026-10-11 (M1 chat A finished: schema and persistence)
-- **Current milestone:** M1 in progress on branch `m1-foundation`. M1-1 and M1-2 done (user confirmed: 57 tests pass, ruff clean). Next: chat B (M1-3 footage/ffprobe, M1-4 commands/undo).
-- **Overall status:** M0 verdict GO (see "M0 findings"). App code started: project schema, store, migrations, autosave timing under `backend/project/`. No runnable app yet (no `install.bat` / `run.bat`, no FastAPI app, no frontend).
+- **Last updated:** 2026-10-11 (M1 chat B finished: footage detection and command layer)
+- **Current milestone:** M1 in progress on branch `m1-foundation`. M1-1, M1-2, M1-3, M1-4 done (user confirmed: pytest passes, ruff clean). Next: chat C (M1-5 channel template, M1-6 backend API and project screen, M1-7 tests and wrap-up).
+- **Overall status:** M0 verdict GO (see "M0 findings"). App code started: project schema, store, migrations, autosave timing, footage detection, and command/undo layer under `backend/project/`. No runnable app yet (no `install.bat` / `run.bat`, no FastAPI app, no frontend).
 
 ## How to run / test
 
@@ -15,7 +15,7 @@ The app itself is not runnable yet. Backend logic is tested with pytest; spike s
 uv sync                      # Python 3.11, torch 2.6.0+cu126, chatterbox-tts, fastapi, uvicorn, pywebview, pydantic, pytest, ruff
 
 # tests and lint (from repo root)
-uv run pytest                # 57 tests (user confirmed passing)
+uv run pytest                # all passing (user confirmed); by my count about 115 tests: 57 + 25 footage + 33 commands
 uv run ruff check .
 
 # ffmpeg (not committed, bin/ is git-ignored): BtbN 8.1 release branch, NOT master or 9.0 (see M0 findings)
@@ -24,6 +24,11 @@ Invoke-WebRequest -Uri "https://github.com/BtbN/FFmpeg-Builds/releases/download/
 Expand-Archive -Path $zip -DestinationPath $dir -Force
 Copy-Item "$dir\*\bin\ffmpeg.exe" bin\ -Force
 Copy-Item "$dir\*\bin\ffprobe.exe" bin\ -Force
+
+# manual footage scan of a throwaway project (M1-3 check; uses a 10 s stream copy, original untouched)
+New-Item -ItemType Directory -Force "$env:TEMP\m1_scan_test\footage" | Out-Null
+.\bin\ffmpeg.exe -hide_banner -y -ss 20 -t 10 -i "<path to video.mkv>" -c copy "$env:TEMP\m1_scan_test\footage\clip10.mkv"
+uv run python -c "from pathlib import Path; import os; from backend.project.footage import scan_footage; r = scan_footage(Path(os.environ['TEMP']) / 'm1_scan_test'); print(r.errors); [print(s.model_dump_json(indent=2)) for s in r.new_sources]"
 
 # spike scripts
 uv run python scripts\spike\check_cuda.py
@@ -51,13 +56,13 @@ Status values: `empty` (placeholder only), `partial`, `done`.
 | `scripts/spike/*` | M0 spike scripts (check_cuda, tts_test, tts_grid, player_spike with reusable `parse_range`/`iter_file`) | done (spike) |
 | `scripts/spike/out/` | spike output, git-ignored | n/a |
 | `backend/__init__.py` | package marker | done |
-| `backend/app.py` | FastAPI entry point | not created |
+| `backend/app.py` | FastAPI entry point | not created (M1-6) |
 | `backend/project/schema.py` | pydantic v2 schema, `SCHEMA_VERSION = 1`, `new_id()` | done (M1-1) |
 | `backend/project/store.py` | folder layout, create/load/save, atomic write, `.bak` rotation | done (M1-2) |
 | `backend/project/migrations.py` | `migrate()` chain, `MIGRATIONS` registry (empty at v1) | done (M1-2) |
 | `backend/project/autosave.py` | pure `AutosaveTracker` (debounce + max wait); no scheduler thread yet | done (M1-2) |
-| `backend/project/footage.py` | ffprobe wrapper, Source detection | not created (M1-3) |
-| `backend/project/commands.py` | command objects, undo/redo stack | not created (M1-4) |
+| `backend/project/footage.py` | ffprobe wrapper, probe parsing, `footage/` scan producing Sources | done (M1-3) |
+| `backend/project/commands.py` | `Command` base, M1 commands, `CommandStack` undo/redo with groups | done (M1-4) |
 | `backend/project/template.py` | channel template load/apply | not created (M1-5) |
 | `backend/edl/` | clip list, time mapping, anchoring, ffmpeg graph builder | empty |
 | `backend/voice/` | GPU worker, takes, cache keys, queue | empty |
@@ -70,6 +75,8 @@ Status values: `empty` (placeholder only), `partial`, `done`.
 | `scripts/` | install/run helpers | spike only |
 | `tests/test_schema.py` | schema tests (29) | done |
 | `tests/test_persistence.py` | migrations, autosave tracker, store tests (28) | done |
+| `tests/test_footage.py` | ffprobe parsing (canned JSON), scan planning, folder scan with fake probe (about 25) | done |
+| `tests/test_commands.py` | commands, undo/redo, groups, rollback, on_change (about 33) | done |
 
 ## Project folder layout (user data, not in this repo)
 
@@ -95,9 +102,21 @@ MyRack/
 
 **Migrations** (`backend/project/migrations.py`): `migrate(data, target=SCHEMA_VERSION, migrations=None)`; register `MIGRATIONS[n] = fn` upgrading version n to n+1. Raises `MigrationError` / `ProjectTooNewError` (wrapped in `ProjectLoadError` by `load_project`).
 
-**Autosave** (`backend/project/autosave.py`): `AutosaveTracker(AutosavePolicy(debounce_s=2.0, max_wait_s=15.0))`: `mark_dirty(now)`, `begin_save()` / `finish_save(token)`, `should_save(now)`, `seconds_until_due(now)`. The scheduler that drives it arrives with the backend API (M1-6).
+**Autosave** (`backend/project/autosave.py`): `AutosaveTracker(AutosavePolicy(debounce_s=2.0, max_wait_s=15.0))`: `mark_dirty(now)`, `begin_save()` / `finish_save(token)`, `should_save(now)`, `seconds_until_due(now)`. The scheduler that drives it arrives with the backend API (M1-6); `CommandStack(on_change=...)` is the intended `mark_dirty` hook.
 
-Command API and backend endpoints: not implemented yet.
+**Footage API** (`backend/project/footage.py`):
+- Pure: `parse_rate(text) -> (num, den)`, `parse_probe(data, rel_path, source_id=None) -> Source` (ffprobe JSON from `-show_streams -show_format`), `plan_scan(found, known) -> ScanPlan(to_probe, present, missing)`.
+- I/O: `default_ffprobe_path()` (= `<repo>/bin/ffprobe.exe`), `run_ffprobe(path, ffprobe=None, timeout_s=60)`, `list_footage_files(project_folder)` (relative POSIX paths under `footage/`, recursive), `scan_footage(project_folder, known=(), *, probe=None) -> ScanResult(new_sources, present, missing, errors)`.
+- `scan_footage` never modifies the project and never touches the files; the caller adds `new_sources` through `AddSource`. A missing ffprobe raises `FfprobeNotFoundError`; a bad single file lands in `errors` as `(rel_path, message)`.
+- Frame rate comes from `avg_frame_rate`, falling back to `r_frame_rate` when it is `0/0`. Duration comes from `format.duration` (fallback: stream duration), rounded to integer ms. Audio tracks = count of audio streams. Recognised extensions: `.mkv .mp4 .mov .avi .webm .m4v .flv .ts`. Known sources are matched to files case-insensitively.
+- Errors: `FootageError` (base), `FfprobeNotFoundError`, `ProbeError`.
+
+**Command API** (`backend/project/commands.py`):
+- `Command` (abstract): `label`, `apply(project)`, `revert(project)`. `apply` validates first and raises `CommandError` before changing anything; it records what it needs to undo itself, and may be re-applied after `revert` (redo).
+- Commands: `AddSource(source)` (rejects duplicate id or case-insensitive duplicate path; stores a deep copy), `RemoveSource(source_id)` (refused with `CommandError` while any clip uses the source; undo restores the original list position), `RenameProject(name)` (strips; empty name rejected at construction), `RelinkSource(source_id, new_path)` (path only, no re-probe; rejects invalid paths and paths used by another source).
+- `CommandStack(project, on_change=None)`: `execute(cmd)`, `group(label)` context manager, `undo()` / `redo()` (return the label or `None`), `clear()`, `can_undo`, `can_redo`, `undo_label`, `redo_label`, `in_group`, `project`. A new command clears redo. A group is one undo step; if its block raises, applied commands are reverted, nothing is recorded, and the previous redo stack is restored. Nested groups merge into the outermost. Undo, redo and clear raise `CommandError` while a group is open. `on_change` fires once per top-level change (execute outside a group, committed group, undo, redo) and never for failures, empty groups or rollbacks.
+
+Backend endpoints: not implemented yet (M1-6).
 
 ## M0 findings (2026-10-10, user's machine)
 
@@ -119,6 +138,10 @@ Command API and backend endpoints: not implemented yet.
 **Footage facts (user's OBS recordings):** MKV, H.264 High yuv420p bt709, 2560x1440, 60 fps, single stereo AAC track (48 kHz), about 62 Mbps. Recording frame rate is 60.
 
 **Go / no-go: GO.** All three risks cleared. Caveat: emotional range from the voice clone is limited with a neutral reference clip, so emotion presets alone may not be enough. Treat in M3 (tune by ear, try an expressive reference clip).
+
+## M1 manual checks (user confirmed)
+
+- M1-3 scan of a real OBS clip (10 s `-c copy` cut) produced: path `footage/clip10.mkv`, 2560x1440, 60/1, 1 audio track, duration 12812 ms. Resolution, rate and audio match. The duration is above the requested 10 s, probably because a stream copy starts at a keyframe (not verified; not a detection bug as far as known).
 
 ## Decisions log
 
@@ -153,6 +176,12 @@ Command API and backend endpoints: not implemented yet.
 | 2026-10-11 | M1: `.bak` is only rotated from a `project.json` that parses as JSON, so a corrupt file never replaces a good backup; `load_project(use_backup=True)` is the recovery path |
 | 2026-10-11 | M1: autosave policy defaults: 2 s debounce, 15 s max wait; timing logic is pure, scheduler comes with the API |
 | 2026-10-11 | M1: pytest finds `backend` through a repo-root `conftest.py`; no pyproject pytest config needed |
+| 2026-10-11 | M1: fps for a Source comes from ffprobe `avg_frame_rate` (fallback `r_frame_rate` when `0/0`); duration from container `format.duration` rounded to integer ms. Variable-frame-rate files are not specially handled |
+| 2026-10-11 | M1: footage scan is recursive under `footage/`, recognises `.mkv .mp4 .mov .avi .webm .m4v .flv .ts`, matches known sources to files case-insensitively (Windows), and only builds Source objects; adding them is a command |
+| 2026-10-11 | M1: command contract: validate then mutate, raise `CommandError` before any change; each command records its own undo data (no project snapshots); groups are atomic (rollback on exception, redo stack restored); undo/redo not allowed while a group is open |
+| 2026-10-11 | M1: `RemoveSource` is refused while any clip references the source (guards the missing cross-reference validation); `AddSource` rejects duplicate id or duplicate path |
+| 2026-10-11 | M1: `RelinkSource` changes the path only and does not re-probe metadata |
+| 2026-10-11 | M1: `CommandStack` takes an optional `on_change` callback (fires once per top-level change) as the autosave hook |
 
 ## Known issues / open questions
 
@@ -168,10 +197,16 @@ Command API and backend endpoints: not implemented yet.
 - Harmless warnings seen: `pkg_resources` deprecation (from perth), diffusers `LoRACompatibleLinear` deprecation, `sdpa` attention note, unauthenticated Hugging Face Hub notice.
 - Seek latency was measured on a 4.8 GB file by eye from the page log; no systematic benchmark.
 - The folder-layout tree from a real `create_project` run was not pasted back in chat A (covered by `test_create_makes_layout_and_valid_file`).
-- Schema validates unique ids but not cross-references (for example `Clip.source_id` pointing at a real source). Revisit when commands and orphan handling land.
+- Schema validates unique ids but not cross-references (for example `Clip.source_id` pointing at a real source). Only `RemoveSource` guards the source-in-use case today; M2 clip commands need the same care.
+- `scan_footage` probes files one after another (sync, 60 s timeout each). Fine for a few recordings; the API layer (M1-6) should run it off the request thread or accept a short wait.
+- `default_ffprobe_path()` assumes `bin/ffprobe.exe` at the repo root. Revisit when `install.bat`/packaging lands (M7).
+- `RelinkSource` does not re-probe, so relinking to a different file with another duration or fps leaves stale Source metadata. Re-probe on relink is a candidate for M1-6 or M2.
+- If a command's `revert` fails partway through an undo (should only happen on a bug), the undo entry is dropped and state may be partly reverted. Not handled; revisit if it ever appears.
+- ffprobe reports a 12.8 s duration for a nominal 10 s `-c copy` clip (probably keyframe alignment; not verified).
 
 ## Next up
 
-1. Commit M1-1/M1-2 on `m1-foundation` (see commit commands in chat), and commit this file.
-2. Chat B: M1-3 footage/ffprobe and M1-4 commands/undo. Paste `CLAUDE.md`, this file, `M1-foundation.md`, and spec section 5 "Source" row + anchoring rule, section 9 "Undo/redo" bullet, section 3 step 2.
-3. Chat C: M1-5 to M1-7, then merge and tag `m1-done`.
+1. Commit this file on `m1-foundation` (commands below in chat), tick M1-3 and M1-4 in `IMPLEMENTATION_PLAN.md`.
+2. Chat C: M1-5 channel template, M1-6 backend API and project screen, M1-7 tests and wrap-up. Paste `CLAUDE.md`, this file, `docs/tasks/M1-foundation.md`, and spec section 2 "Intro/outro" row, section 3 step 1, section 4.1, section 5 "ChannelTemplate" row, section 11 "Frontend" paragraph. Also paste `backend/project/schema.py` again (template and API need it).
+3. Decisions waiting in chat C: how bookend clips outside the project folder are represented (see Known issues), where recent projects are stored (assumption: per-user config under `%APPDATA%`), and who runs the autosave scheduler (wire `CommandStack.on_change` to `AutosaveTracker.mark_dirty`).
+4. After chat C: merge `m1-foundation` to `main`, tag `m1-done`.
