@@ -1,16 +1,20 @@
 <script lang="ts">
   import {
+    getFootage,
     getProject,
     getRecent,
     newProject,
     openProject,
     pickFolder,
     removeRecent,
+    rescanFootage,
+    type FootageReport,
     type ProjectSummary,
     type RecentItem,
   } from "./api";
 
   let current = $state<ProjectSummary | null>(null);
+  let footage = $state<FootageReport | null>(null);
   let recent = $state<RecentItem[]>([]);
   let error = $state<string | null>(null);
   let busy = $state(false);
@@ -23,12 +27,31 @@
     return err instanceof Error ? err.message : String(err);
   }
 
+  async function refreshProject(): Promise<void> {
+    current = await getProject();
+    footage = current === null ? null : await getFootage();
+  }
+
   async function run(action: () => Promise<ProjectSummary>): Promise<void> {
     busy = true;
     error = null;
     try {
       current = await action();
+      footage = await getFootage();
       recent = await getRecent();
+    } catch (err) {
+      error = message(err);
+    } finally {
+      busy = false;
+    }
+  }
+
+  async function rescan(): Promise<void> {
+    busy = true;
+    error = null;
+    try {
+      footage = await rescanFootage();
+      current = await getProject();
     } catch (err) {
       error = message(err);
     } finally {
@@ -54,7 +77,7 @@
 
   async function restore(): Promise<void> {
     try {
-      current = await getProject();
+      await refreshProject();
       recent = await getRecent();
     } catch (err) {
       error = message(err);
@@ -64,6 +87,13 @@
   function when(iso: string): string {
     const date = new Date(iso);
     return Number.isNaN(date.getTime()) ? iso : date.toLocaleString();
+  }
+
+  function duration(ms: number): string {
+    const total = Math.round(ms / 1000);
+    const minutes = Math.floor(total / 60);
+    const seconds = String(total % 60).padStart(2, "0");
+    return `${minutes}:${seconds}`;
   }
 
   void restore();
@@ -77,6 +107,9 @@
   {/if}
 
   {#if current !== null}
+    {#if current.save_error !== null}
+      <p class="error">Could not save the project: {current.save_error}</p>
+    {/if}
     <section>
       <h2>Open project: {current.name}</h2>
       <dl>
@@ -93,6 +126,52 @@
         <dt>Avatar art</dt>
         <dd>{current.avatar_status}</dd>
       </dl>
+    </section>
+
+    <section>
+      <h2>Footage</h2>
+      <p class="hint">
+        Put recordings in <code>{current.folder}\footage</code>, then click Rescan.
+      </p>
+      <button type="button" onclick={rescan} disabled={busy}>Rescan</button>
+      {#if footage !== null && footage.added > 0}
+        <span class="note">Added {footage.added} new file(s).</span>
+      {/if}
+      {#if footage !== null && footage.errors.length > 0}
+        <ul class="error">
+          {#each footage.errors as item}
+            <li>{item}</li>
+          {/each}
+        </ul>
+      {/if}
+      {#if footage === null || footage.items.length === 0}
+        <p>No footage found yet.</p>
+      {:else}
+        <table>
+          <thead>
+            <tr>
+              <th>File</th>
+              <th>Resolution</th>
+              <th>FPS</th>
+              <th>Length</th>
+              <th>Audio</th>
+              <th>Status</th>
+            </tr>
+          </thead>
+          <tbody>
+            {#each footage.items as item (item.id)}
+              <tr class:missing={!item.exists}>
+                <td class="file">{item.path}</td>
+                <td>{item.width}x{item.height}</td>
+                <td>{Number(item.fps.toFixed(3))}</td>
+                <td>{duration(item.duration_ms)}</td>
+                <td>{item.audio_tracks}</td>
+                <td>{item.exists ? "ok" : "missing"}</td>
+              </tr>
+            {/each}
+          </tbody>
+        </table>
+      {/if}
     </section>
   {/if}
 
@@ -167,7 +246,7 @@
   main {
     font-family: system-ui, sans-serif;
     padding: 2rem;
-    max-width: 48rem;
+    max-width: 52rem;
   }
   section {
     margin-bottom: 1.5rem;
@@ -194,6 +273,28 @@
   }
   dd {
     margin: 0;
+    overflow-wrap: anywhere;
+  }
+  table {
+    width: 100%;
+    border-collapse: collapse;
+    margin-top: 0.75rem;
+  }
+  th,
+  td {
+    text-align: left;
+    padding: 0.3rem 0.5rem;
+    border-bottom: 1px solid #8884;
+  }
+  td.file {
+    overflow-wrap: anywhere;
+  }
+  tr.missing td {
+    color: #b00020;
+  }
+  .hint,
+  .note {
+    opacity: 0.75;
   }
   .recent {
     list-style: none;
@@ -216,7 +317,7 @@
     opacity: 0.7;
     overflow-wrap: anywhere;
   }
-  .missing .info {
+  .recent li.missing .info {
     opacity: 0.6;
   }
   .tag {

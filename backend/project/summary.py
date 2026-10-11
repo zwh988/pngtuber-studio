@@ -1,8 +1,8 @@
-"""Pure summary of a project for the project screen (M1-6)."""
+"""Pure summaries of a project for the project screen (M1-6)."""
 
-from pydantic import BaseModel
+from pydantic import BaseModel, Field
 
-from backend.project.schema import Project
+from backend.project.schema import Project, Source
 
 NOT_CONFIGURED = "not configured"
 PATH_SET = "path set"
@@ -16,6 +16,26 @@ class ProjectSummary(BaseModel):
     clip_count: int
     voice_status: str
     avatar_status: str
+    # Set when the last automatic save failed; None when saving works.
+    save_error: str | None = None
+
+
+class FootageItem(BaseModel):
+    id: str
+    path: str
+    external: bool
+    exists: bool
+    width: int
+    height: int
+    fps: float
+    duration_ms: int
+    audio_tracks: int
+
+
+class FootageReport(BaseModel):
+    items: list[FootageItem] = Field(default_factory=list)
+    added: int = 0
+    errors: list[str] = Field(default_factory=list)
 
 
 def voice_status(project: Project) -> str:
@@ -39,4 +59,18 @@ def summarize(folder: str, project: Project) -> ProjectSummary:
         clip_count=len(project.clips),
         voice_status=voice_status(project),
         avatar_status=avatar_status(project),
+    )
+
+
+def describe_source(source: Source, exists: bool) -> FootageItem:
+    return FootageItem(
+        id=source.id,
+        path=source.path,
+        external=source.external,
+        exists=exists,
+        width=source.width,
+        height=source.height,
+        fps=source.fps,
+        duration_ms=source.duration_ms,
+        audio_tracks=source.audio_tracks,
     )

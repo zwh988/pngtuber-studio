@@ -12,7 +12,7 @@ from backend.project.recent import RecentItem
 from backend.project.schema import SCHEMA_VERSION
 from backend.project.session import Session, SessionError
 from backend.project.store import ProjectError
-from backend.project.summary import ProjectSummary
+from backend.project.summary import FootageReport, ProjectSummary
 from backend.project.template import TemplateError
 
 APP_NAME = "PNGtuber Studio"
@@ -75,6 +75,20 @@ def create_app(
     def open_project(request: OpenProjectRequest) -> ProjectSummary:
         try:
             return active.open_project(request.folder)
+        except _API_ERRORS as exc:
+            raise HTTPException(status_code=400, detail=str(exc)) from exc
+
+    @app.get("/api/footage")
+    def get_footage() -> FootageReport:
+        try:
+            return active.footage()
+        except _API_ERRORS as exc:
+            raise HTTPException(status_code=400, detail=str(exc)) from exc
+
+    @app.post("/api/footage/rescan")
+    def rescan_footage() -> FootageReport:
+        try:
+            return active.rescan_footage()
         except _API_ERRORS as exc:
             raise HTTPException(status_code=400, detail=str(exc)) from exc
 
