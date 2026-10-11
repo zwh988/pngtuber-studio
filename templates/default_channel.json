@@ -1,0 +1,41 @@
+{
+  "name": "Default",
+  "intro": null,
+  "outro": null,
+  "voice_profile": {
+    "id": "000000000000",
+    "name": "Default voice",
+    "reference_clips": [],
+    "emotion_reference_clips": {}
+  },
+  "fx_chain": {
+    "eq_bass_db": 0.0,
+    "eq_mid_db": 0.0,
+    "eq_treble_db": 0.0,
+    "compressor": {
+      "enabled": false,
+      "threshold_db": -18.0,
+      "ratio": 3.0,
+      "attack_ms": 10.0,
+      "release_ms": 100.0
+    },
+    "effects": [],
+    "loudness_target_lufs": -16.0
+  },
+  "avatar": {
+    "art_folder": null,
+    "x": 0.85,
+    "y": 0.75,
+    "scale": 1.0,
+    "rotation_deg": 0.0,
+    "auto_key_expression": true
+  },
+  "export": {
+    "height": 1080,
+    "fps": "match",
+    "include_avatar_overlay": false,
+    "include_raw_video_link": true,
+    "unload_tts_before_export": false
+  },
+  "game_audio_db": 0.0
+}

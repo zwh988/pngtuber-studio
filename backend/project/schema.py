@@ -19,6 +19,8 @@ from pydantic import (
     ConfigDict,
     Field,
     StringConstraints,
+    ValidationInfo,
+    field_validator,
     model_validator,
 )
 
@@ -45,6 +47,19 @@ def _check_relative_posix(value: str) -> str:
         raise ValueError("path must use forward slashes")
     if value.startswith("/") or (len(value) >= 2 and value[1] == ":"):
         raise ValueError("path must be relative, not absolute")
+    if ".." in value.split("/"):
+        raise ValueError("path must not contain '..'")
+    return value
+
+
+def _check_absolute_posix(value: str) -> str:
+    if not value:
+        raise ValueError("path must not be empty")
+    if "\\" in value:
+        raise ValueError("path must use forward slashes")
+    is_drive = len(value) >= 3 and value[1] == ":" and value[2] == "/"
+    if not (value.startswith("/") or is_drive):
+        raise ValueError("external path must be absolute")
     if ".." in value.split("/"):
         raise ValueError("path must not contain '..'")
     return value
@@ -95,13 +110,24 @@ class EffectSpec(_Model):
 
 class Source(_Model):
     id: EntityId
-    path: RelPath
+    # ``external`` must stay declared before ``path``: the path validator reads it.
+    external: bool = False
+    # Relative POSIX path, or an absolute POSIX path when ``external`` is true
+    # (template bookend clips live outside the project folder).
+    path: str
     duration_ms: Ms
     fps_num: int = Field(gt=0)
     fps_den: int = Field(gt=0, default=1)
     width: int = Field(gt=0)
     height: int = Field(gt=0)
     audio_tracks: int = Field(ge=0, default=0)
+
+    @field_validator("path")
+    @classmethod
+    def _check_path(cls, value: str, info: ValidationInfo) -> str:
+        if info.data.get("external", False):
+            return _check_absolute_posix(value)
+        return _check_relative_posix(value)
 
     @property
     def fps(self) -> float:
