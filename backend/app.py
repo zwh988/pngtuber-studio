@@ -2,13 +2,21 @@
 
 from pathlib import Path
 
-from fastapi import FastAPI
+from fastapi import FastAPI, HTTPException
 from fastapi.responses import HTMLResponse
 from fastapi.staticfiles import StaticFiles
+from pydantic import BaseModel
 
+from backend.project.footage import FootageError
 from backend.project.schema import SCHEMA_VERSION
+from backend.project.session import Session, SessionError
+from backend.project.store import ProjectError
+from backend.project.summary import ProjectSummary
+from backend.project.template import TemplateError
 
 APP_NAME = "PNGtuber Studio"
+
+_API_ERRORS = (SessionError, ProjectError, TemplateError, FootageError)
 
 _MISSING_FRONTEND_HTML = (
     "<!doctype html><title>PNGtuber Studio</title>"
@@ -19,13 +27,25 @@ _MISSING_FRONTEND_HTML = (
 )
 
 
+class NewProjectRequest(BaseModel):
+    name: str
+    parent: str
+
+
+class OpenProjectRequest(BaseModel):
+    folder: str
+
+
 def default_static_dir() -> Path:
     """``<repo>/frontend/dist``."""
     return Path(__file__).resolve().parents[1] / "frontend" / "dist"
 
 
-def create_app(static_dir: Path | None = None) -> FastAPI:
+def create_app(
+    static_dir: Path | None = None, session: Session | None = None
+) -> FastAPI:
     app = FastAPI(title=APP_NAME)
+    active = session if session is not None else Session()
 
     @app.get("/api/hello")
     def hello() -> dict[str, str | int]:
@@ -34,6 +54,24 @@ def create_app(static_dir: Path | None = None) -> FastAPI:
             "status": "ok",
             "schema_version": SCHEMA_VERSION,
         }
+
+    @app.get("/api/project")
+    def get_project() -> ProjectSummary | None:
+        return active.current()
+
+    @app.post("/api/project/new")
+    def new_project(request: NewProjectRequest) -> ProjectSummary:
+        try:
+            return active.new_project(request.parent, request.name)
+        except _API_ERRORS as exc:
+            raise HTTPException(status_code=400, detail=str(exc)) from exc
+
+    @app.post("/api/project/open")
+    def open_project(request: OpenProjectRequest) -> ProjectSummary:
+        try:
+            return active.open_project(request.folder)
+        except _API_ERRORS as exc:
+            raise HTTPException(status_code=400, detail=str(exc)) from exc
 
     folder = static_dir if static_dir is not None else default_static_dir()
     if (folder / "index.html").is_file():

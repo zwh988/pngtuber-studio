@@ -13,6 +13,28 @@ import webview
 from backend.app import APP_NAME, create_app
 
 
+class Api:
+    """Methods callable from the page as ``window.pywebview.api.<name>()``.
+
+    Keep this object free of attributes holding the window: pywebview walks
+    the object and recursion on a window handle causes trouble.
+    """
+
+    def pick_folder(self) -> str | None:
+        if not webview.windows:
+            return None
+        file_dialog = getattr(webview, "FileDialog", None)
+        mode = (
+            file_dialog.FOLDER
+            if file_dialog is not None
+            else webview.FOLDER_DIALOG
+        )
+        result = webview.windows[0].create_file_dialog(mode)
+        if not result:
+            return None
+        return str(result[0])
+
+
 def _free_port() -> int:
     with socket.socket(socket.AF_INET, socket.SOCK_STREAM) as sock:
         sock.bind(("127.0.0.1", 0))
@@ -34,7 +56,13 @@ def main() -> None:
             raise RuntimeError("backend server failed to start")
         time.sleep(0.05)
 
-    webview.create_window(APP_NAME, f"http://127.0.0.1:{port}/", width=1280, height=800)
+    webview.create_window(
+        APP_NAME,
+        f"http://127.0.0.1:{port}/",
+        width=1280,
+        height=800,
+        js_api=Api(),
+    )
     webview.start()
 
     server.should_exit = True
