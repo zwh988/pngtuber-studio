@@ -14,6 +14,7 @@ from backend.project.session import Session, SessionError
 from backend.project.store import ProjectError
 from backend.project.summary import FootageReport, ProjectSummary
 from backend.project.template import TemplateError
+from backend.project.timeline import TimelineState
 
 APP_NAME = "PNGtuber Studio"
 
@@ -101,6 +102,13 @@ def create_app(
     def relink_footage(request: RelinkRequest) -> FootageReport:
         try:
             return active.relink_source(request.source_id, request.path)
+        except _API_ERRORS as exc:
+            raise HTTPException(status_code=400, detail=str(exc)) from exc
+
+    @app.get("/api/timeline")
+    def get_timeline() -> TimelineState:
+        try:
+            return active.timeline()
         except _API_ERRORS as exc:
             raise HTTPException(status_code=400, detail=str(exc)) from exc
 

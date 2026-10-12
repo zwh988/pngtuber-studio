@@ -52,6 +52,7 @@ from backend.project.template import (
     external_source,
     load_template_file,
 )
+from backend.project.timeline import TimelineState, build_timeline
 
 Probe = Callable[[Path], dict[str, Any]]
 
@@ -192,6 +193,12 @@ class Session:
                 raise SessionError(str(exc)) from exc
             return self._report(folder, stack.project, added=0)
 
+    # ---- timeline ----------------------------------------------------------
+
+    def timeline(self) -> TimelineState:
+        with self._lock:
+            return self._timeline_state()
+
     # ---- recent projects ---------------------------------------------------
 
     def recent(self) -> list[RecentItem]:
@@ -218,6 +225,23 @@ class Session:
         if self._folder is None or self._stack is None:
             raise SessionError("no project is open")
         return self._folder, self._stack
+
+    def _timeline_state(self) -> TimelineState:
+        folder, stack = self._require_open()
+        missing = {
+            source.id
+            for source in stack.project.sources
+            if not self._source_exists(folder, source)
+        }
+        state = build_timeline(
+            stack.project,
+            can_undo=stack.can_undo,
+            can_redo=stack.can_redo,
+            undo_label=stack.undo_label,
+            redo_label=stack.redo_label,
+            missing_source_ids=missing,
+        )
+        return state.model_copy(update={"save_error": self._save_error})
 
     def _summary(self) -> ProjectSummary:
         folder, stack = self._require_open()

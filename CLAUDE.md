@@ -33,9 +33,11 @@ The user works in a plain chat. You cannot see the repository, run code, install
 
 ## Delivering changes
 
-- Label every code block with its repo-relative path (for example `backend/edl/timemap.py`).
-- New files and files with more than a few changes: give the complete file. If file creation is available in the chat, deliver changed files as downloadable files in a zip that mirrors the repo layout, so the user can drop them into the folder.
-- Small edits: give an exact "find this / replace with" pair, with enough surrounding lines to be unique. Never say "update the function" without showing the exact change.
+- **Standing rule: deliver code as a zip.** Whenever file creation is available in the chat, every code drop (new or changed files, tests, `PROJECT_STATE.md`, `CLAUDE.md`) is delivered as one downloadable zip that mirrors the repo layout, with paths relative to the repo root. The user extracts it in the repo root and overwrites. Do not paste code into the reply for the user to copy by hand, and do not ask first. Name it after the step (for example `m2-s6a.zip`) and include the extract command below.
+- A zip contains **complete files**, never fragments. For an edited file the user already pasted, apply the change to that pasted file, keep everything else identical (including line endings), and ship the whole file. Never ship a file that was not pasted this session unless creating it new; ask for it by path instead.
+- Briefly list what is in the zip (path plus one line each) and which files are new versus overwritten, so the user can check `git diff` after extracting.
+- Extract command (PowerShell, from the repo root; adjust the zip path): `Expand-Archive -Path "$env:USERPROFILE\Downloads\<name>.zip" -DestinationPath . -Force`
+- Only when file creation is not available: label every code block with its repo-relative path (for example `backend/edl/timemap.py`), give complete files for new files and files with more than a few changes, and use exact "find this / replace with" pairs for small edits. Never say "update the function" without showing the exact change.
 - Windows commands are PowerShell, one block per step, copy-pasteable, with the working directory stated (assume the repo root).
 - After the code, list "Run this" commands and "Paste back" items (what output you need to see).
 - Write tests for pure logic, but remember the user runs them. Give the exact `pytest` command.

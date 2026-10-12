@@ -91,6 +91,56 @@ export function relinkSource(sourceId: string, path: string): Promise<FootageRep
   return post<FootageReport>("/api/footage/relink", { source_id: sourceId, path });
 }
 
+export type TimelineSource = {
+  id: string;
+  external: boolean;
+  fps_num: number;
+  fps_den: number;
+  fps: number;
+  width: number;
+  height: number;
+  duration_ms: number;
+  file_missing: boolean;
+};
+
+export type TimelineClip = {
+  id: string;
+  position: number;
+  source_id: string;
+  start_ms: number;
+  end_ms: number;
+  duration_ms: number;
+  in_ms: number;
+  out_ms: number;
+  speed: number;
+  overlay: boolean;
+  source: TimelineSource | null;
+};
+
+export type TimelineProblem = {
+  kind: string;
+  owner_id: string;
+  missing_id: string;
+  message: string;
+};
+
+export type TimelineState = {
+  clips: TimelineClip[];
+  duration_ms: number;
+  other_track_clips: number;
+  orphan_count: number;
+  problems: TimelineProblem[];
+  can_undo: boolean;
+  can_redo: boolean;
+  undo_label: string | null;
+  redo_label: string | null;
+  save_error: string | null;
+};
+
+export function getTimeline(): Promise<TimelineState> {
+  return request<TimelineState>("/api/timeline");
+}
+
 /** Native file dialog; null when cancelled or not running in the app window. */
 export async function pickFile(): Promise<string | null> {
   const result = await window.pywebview?.api?.pick_file?.();
