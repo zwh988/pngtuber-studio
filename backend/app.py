@@ -3,11 +3,12 @@
 from collections.abc import Sequence
 from pathlib import Path
 
-from fastapi import FastAPI, HTTPException
-from fastapi.responses import HTMLResponse
+from fastapi import FastAPI, HTTPException, Request
+from fastapi.responses import HTMLResponse, Response
 from fastapi.staticfiles import StaticFiles
 from pydantic import BaseModel
 
+from backend.media.serve import range_response
 from backend.project.edit_ops import (
     EditBatch,
     EditOp,
@@ -160,6 +161,14 @@ def create_app(
         except OSError as exc:
             raise HTTPException(status_code=500, detail=str(exc)) from exc
         return active.recent()
+
+    @app.get("/media/source/{source_id}")
+    def get_source_media(source_id: str, request: Request) -> Response:
+        # The file comes from the open project's source list, never from the URL.
+        path = active.source_path(source_id)
+        if path is None or not path.is_file():
+            raise HTTPException(status_code=404, detail="footage file not found")
+        return range_response(path, request.headers.get("range"))
 
     def run_edit(ops: Sequence[EditOp], label: str | None = None) -> TimelineState:
         try:

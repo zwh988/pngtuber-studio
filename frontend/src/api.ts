@@ -213,6 +213,11 @@ export function editBatch(label: string, ops: EditOp[]): Promise<TimelineState> 
   return post<TimelineState>("/api/timeline/batch", { label, ops });
 }
 
+/** URL a <video> tag can play for a source of the open project (Range supported). */
+export function sourceMediaUrl(sourceId: string): string {
+  return `/media/source/${encodeURIComponent(sourceId)}`;
+}
+
 /** Native file dialog; null when cancelled or not running in the app window. */
 export async function pickFile(): Promise<string | null> {
   const result = await window.pywebview?.api?.pick_file?.();

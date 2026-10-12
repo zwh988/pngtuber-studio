@@ -196,6 +196,24 @@ class Session:
                 raise SessionError(str(exc)) from exc
             return self._report(folder, stack.project, added=0)
 
+    # ---- media -------------------------------------------------------------
+
+    def source_path(self, source_id: str) -> Path | None:
+        """Disk path of a source of the open project, for the media endpoint.
+
+        None when no project is open or the id is not one of its sources. The
+        path comes only from the project's source list, never from the browser.
+        """
+        with self._lock:
+            if self._folder is None or self._stack is None:
+                return None
+            source = next(
+                (s for s in self._stack.project.sources if s.id == source_id), None
+            )
+            if source is None:
+                return None
+            return Path(source.path) if source.external else self._folder / source.path
+
     # ---- timeline ----------------------------------------------------------
 
     def timeline(self) -> TimelineState:
