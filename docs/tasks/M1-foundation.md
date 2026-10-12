@@ -2,7 +2,7 @@
 
 - **Milestone items:** M1-1 to M1-7 in `IMPLEMENTATION_PLAN.md`
 - **Spec sections:** 2 (decisions), 3 (workflow steps 1 and 2), 4.1 (project screen), 5 (data model), 9 (undo/redo bullet only), 11 (persistence, frontend)
-- **Status:** not started
+- **Status:** done (tag m1-done)
 
 ## Goal
 

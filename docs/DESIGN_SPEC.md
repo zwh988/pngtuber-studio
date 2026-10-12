@@ -51,9 +51,12 @@ A one-stop local desktop app that turns a recorded pool rack into a finished PNG
 ## 4. Screens
 
 ### 4.1 Project screen
-- New project (from channel template), open recent, open folder.
-- Shows footage files found, avatar art validation result, voice profile status.
-- Relink dialog if a referenced file moved.
+- New project from the channel template (name plus parent folder; the project folder is `<parent>\<name>`), open recent, open folder (native folder picker).
+- Recent projects: up to 10, newest first, stored per user outside any project. Entries whose folder no longer exists are marked missing; the user can remove an entry from the list (the project folder is never touched).
+- Shows footage files found in `footage/` (resolution, frame rate, length, audio tracks, status) with a Rescan button. New files are detected on open and on Rescan; missing files are flagged, never removed automatically.
+- Voice profile and avatar art show as "not configured" or "path set" until real validation arrives (voice profile with M3, avatar art with M5).
+- Relink: a missing footage file is relinked by picking the moved file. It must be inside the project's `footage/` folder and is re-probed; it is refused unless resolution, frame rate and audio track count match and length is within 100 ms.
+- A failed save is shown as a banner; edits are never lost silently.
 
 ### 4.2 Editor (95% of the user's time)
 
@@ -109,13 +112,13 @@ MyRack/
   exports/
 ```
 
-**Conventions:** all times are integer milliseconds (anchor times are source time). Ids are 12-character lowercase hex strings. Paths in `project.json` are relative POSIX strings.
+**Conventions:** all times are integer milliseconds (anchor times are source time). Ids are 12-character lowercase hex strings. Paths in `project.json` are relative POSIX strings, except `external` sources (template bookend clips that live outside the project folder), which use absolute POSIX paths.
 
 **Entities**
 
 | Entity | Key fields |
 |---|---|
-| Source | id, relative path, duration_ms, fps (stored as fps_num / fps_den), width, height, audio track count |
+| Source | id, path, external flag, duration_ms, fps (stored as fps_num / fps_den), width, height, audio track count. Project footage uses a relative path; `external` sources (template bookends) use an absolute path |
 | Take | id, line id, seed, text snapshot, params used (exaggeration, cfg_weight), voice profile id, model version, raw cache key, raw file, duration_ms, starred, created |
 | Placement | id, line id, anchor (clip id, source_ms), take override, orphaned flag |
 | Keyframe | id, lane id, anchor (clip id, source_ms), value (number, or expression name), interpolation (hold or smooth), orphaned flag |
@@ -124,7 +127,7 @@ MyRack/
 | Line | id, text, emotion, exaggeration override, cfg_weight override, active take id, allow-overlap flag |
 | VoiceProfile | id, name, reference clip(s), optional per-emotion reference clips (reserved) |
 | FxChain | EQ gains, compressor settings, effects list, loudness target |
-| ChannelTemplate | bookend clips, voice profile, FX chain, avatar defaults, export settings |
+| ChannelTemplate | bookend clips (referenced by absolute path, stored in the project as `external` sources), voice profile, FX chain, avatar defaults, export settings |
 
 **The anchoring rule:** every timed item (placements, keyframes, reactions) is anchored to footage, meaning a clip plus a source time. Timeline time is computed by mapping through the clip list.
 - Re-trimming, reordering, or changing speed never makes lines drift.
@@ -242,7 +245,7 @@ Progress streams to the UI over a WebSocket, with cancel support. Export unloads
 
 **Python dependencies:** torch (CUDA), chatterbox-tts, pedalboard, pyloudnorm, numpy, soundfile, opencv or Pillow, fastapi, uvicorn, pydantic, pywebview.
 
-**Persistence:** `project.json` is the single source of truth with atomic writes (temp then replace), autosave on change, and a rotating backup. A `schema_version` field supports migrations.
+**Persistence:** `project.json` is the single source of truth with atomic writes (temp then replace), autosave on change, and a rotating backup. A `schema_version` field supports migrations. The per-user recent-projects list lives at `%APPDATA%\PNGtuberStudio\recent.json`, outside any project.
 
 **Packaging:** start with `install.bat` (uv creates the environment, installs CUDA torch, downloads model weights) and `run.bat`. A single exe is deferred because CUDA torch makes it a multi-gigabyte build.
 

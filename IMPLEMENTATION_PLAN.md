@@ -43,13 +43,13 @@ Done when: all three work on the user's machine and the user has heard one clone
 
 ## M1. Project foundation (M)
 
-- [ ] M1-1 Pydantic schema for `project.json` v1 (entities from spec section 5) with `schema_version`
-- [ ] M1-2 Project create/open/save: folder layout, atomic writes, autosave, rotating `.bak`
-- [ ] M1-3 Footage detection and ffprobe, producing Source entities
-- [ ] M1-4 Command layer and undo/redo stack
-- [ ] M1-5 Channel template load/apply (default bookend clips, voice profile, FX, avatar, export defaults)
-- [ ] M1-6 Project screen UI: new, open, recent, relink missing files
-- [ ] M1-7 Tests: round-trip save/load, atomic write failure, migration stub
+- [x] M1-1 Pydantic schema for `project.json` v1 (entities from spec section 5) with `schema_version`
+- [x] M1-2 Project create/open/save: folder layout, atomic writes, autosave, rotating `.bak`
+- [x] M1-3 Footage detection and ffprobe, producing Source entities
+- [x] M1-4 Command layer and undo/redo stack
+- [x] M1-5 Channel template load/apply (default bookend clips, voice profile, FX, avatar, export defaults)
+- [x] M1-6 Project screen UI: new, open, recent, relink missing files
+- [x] M1-7 Tests: round-trip save/load, atomic write failure, migration stub
 
 Done when: create a project, add footage, restart the app, and everything is intact.
 

@@ -2,21 +2,31 @@
 
 Living document: how the project works right now and where everything lives. **Update it at the end of every task** (see the checklist in `CLAUDE.md`). Keep it factual and short; link to files instead of copying code.
 
-- **Last updated:** 2026-10-11 (M1 chat B finished: footage detection and command layer)
-- **Current milestone:** M1 in progress on branch `m1-foundation`. M1-1, M1-2, M1-3, M1-4 done (user confirmed: pytest passes, ruff clean). Next: chat C (M1-5 channel template, M1-6 backend API and project screen, M1-7 tests and wrap-up).
-- **Overall status:** M0 verdict GO (see "M0 findings"). App code started: project schema, store, migrations, autosave timing, footage detection, and command/undo layer under `backend/project/`. No runnable app yet (no `install.bat` / `run.bat`, no FastAPI app, no frontend).
+- **Last updated:** 2026-10-12 (M1 finished: template, backend API, project screen, wrap-up)
+- **Current milestone:** M1 complete (user confirmed: all tests pass, manual acceptance run passed). Branch `m1-foundation` is ready to merge to `main` and tag `m1-done`. Next: M2 (timeline, clip operations, time mapping, orphan handling).
+- **Overall status:** M0 verdict GO (see "M0 findings"). The app now runs: a pywebview window shows a Svelte project screen backed by FastAPI. You can create a project from the channel template, open one (folder picker or Recent list), see footage found, rescan, and relink moved footage. No editor, voice, audio, avatar or export yet. No `install.bat` / `run.bat` yet.
 
 ## How to run / test
 
-The app itself is not runnable yet. Backend logic is tested with pytest; spike scripts remain runnable from the repo root in PowerShell. **Always run commands from the repo root**, not from `docs\`.
+**Always run commands from the repo root**, not from `docs\`.
 
 ```powershell
 # setup (manual, until install.bat exists)
-uv sync                      # Python 3.11, torch 2.6.0+cu126, chatterbox-tts, fastapi, uvicorn, pywebview, pydantic, pytest, ruff
+uv sync                      # Python 3.11, torch 2.6.0+cu126, chatterbox-tts, fastapi, uvicorn, pywebview, pydantic, pytest, ruff, httpx (dev)
 
 # tests and lint (from repo root)
-uv run pytest                # all passing (user confirmed); by my count about 115 tests: 57 + 25 footage + 33 commands
+uv run pytest                # 222 tests, all passing (user confirmed)
 uv run ruff check .
+
+# frontend (needs Node.js LTS: node v24.21.0 / npm 11.19.0 on the dev machine; build-time only)
+cd frontend
+npm install
+npm run build                # writes frontend/dist (git-ignored); the backend serves it
+npm run check                # svelte-check, TypeScript strict
+cd ..
+
+# run the app (window titled "PNGtuber Studio"); rebuild the frontend first after any frontend change
+uv run python -m backend.main
 
 # ffmpeg (not committed, bin/ is git-ignored): BtbN 8.1 release branch, NOT master or 9.0 (see M0 findings)
 $zip = "$env:TEMP\ffmpeg-n81.zip"; $dir = "$env:TEMP\ffmpeg-n81"
@@ -24,11 +34,6 @@ Invoke-WebRequest -Uri "https://github.com/BtbN/FFmpeg-Builds/releases/download/
 Expand-Archive -Path $zip -DestinationPath $dir -Force
 Copy-Item "$dir\*\bin\ffmpeg.exe" bin\ -Force
 Copy-Item "$dir\*\bin\ffprobe.exe" bin\ -Force
-
-# manual footage scan of a throwaway project (M1-3 check; uses a 10 s stream copy, original untouched)
-New-Item -ItemType Directory -Force "$env:TEMP\m1_scan_test\footage" | Out-Null
-.\bin\ffmpeg.exe -hide_banner -y -ss 20 -t 10 -i "<path to video.mkv>" -c copy "$env:TEMP\m1_scan_test\footage\clip10.mkv"
-uv run python -c "from pathlib import Path; import os; from backend.project.footage import scan_footage; r = scan_footage(Path(os.environ['TEMP']) / 'm1_scan_test'); print(r.errors); [print(s.model_dump_json(indent=2)) for s in r.new_sources]"
 
 # spike scripts
 uv run python scripts\spike\check_cuda.py
@@ -39,6 +44,8 @@ uv run python scripts\spike\player_spike.py --video "<path to video.mkv>"       
 ```
 
 First run of `tts_test.py` downloads the Chatterbox weights from Hugging Face (several GB, one-time network step). Later runs are offline.
+
+Per-user data outside the repo: recent projects list at `%APPDATA%\PNGtuberStudio\recent.json`.
 
 ## Repo map
 
@@ -51,32 +58,43 @@ Status values: `empty` (placeholder only), `partial`, `done`.
 | `IMPLEMENTATION_PLAN.md` | milestones and task checklist | done |
 | `docs/DESIGN_SPEC.md` | full design spec (source of truth for behavior) | done |
 | `docs/tasks/` | per-task breakdown files (`_TEMPLATE.md`, `M0-spike.md`, `M1-foundation.md`) | partial |
-| `pyproject.toml`, `uv.lock`, `.python-version` | uv project: Python 3.11 only, torch pinned to 2.6.0 from the cu126 index; pydantic, pytest, ruff added | partial |
+| `pyproject.toml`, `uv.lock`, `.python-version` | uv project: Python 3.11 only, torch pinned to 2.6.0 from the cu126 index; pydantic, fastapi, uvicorn, pywebview; dev: pytest, ruff, httpx | partial |
 | `conftest.py` | repo-root marker so pytest can import `backend` | done |
 | `scripts/spike/*` | M0 spike scripts (check_cuda, tts_test, tts_grid, player_spike with reusable `parse_range`/`iter_file`) | done (spike) |
 | `scripts/spike/out/` | spike output, git-ignored | n/a |
 | `backend/__init__.py` | package marker | done |
-| `backend/app.py` | FastAPI entry point | not created (M1-6) |
-| `backend/project/schema.py` | pydantic v2 schema, `SCHEMA_VERSION = 1`, `new_id()` | done (M1-1) |
+| `backend/app.py` | FastAPI app factory `create_app(static_dir=None, session=None)`, `/api/*` routes, serves `frontend/dist` | done (M1-6) |
+| `backend/main.py` | app shell: uvicorn in a thread on a free 127.0.0.1 port plus pywebview window; `Api` class with `pick_folder` / `pick_file` | done (M1-6) |
+| `backend/project/schema.py` | pydantic v2 schema, `SCHEMA_VERSION = 1`, `new_id()` | done (M1-1, extended M1-5) |
 | `backend/project/store.py` | folder layout, create/load/save, atomic write, `.bak` rotation | done (M1-2) |
 | `backend/project/migrations.py` | `migrate()` chain, `MIGRATIONS` registry (empty at v1) | done (M1-2) |
-| `backend/project/autosave.py` | pure `AutosaveTracker` (debounce + max wait); no scheduler thread yet | done (M1-2) |
+| `backend/project/autosave.py` | pure `AutosaveTracker` (debounce + max wait). **Not wired**; the app saves on every change instead (see decisions) | done (M1-2), unused |
 | `backend/project/footage.py` | ffprobe wrapper, probe parsing, `footage/` scan producing Sources | done (M1-3) |
 | `backend/project/commands.py` | `Command` base, M1 commands, `CommandStack` undo/redo with groups | done (M1-4) |
-| `backend/project/template.py` | channel template load/apply | not created (M1-5) |
+| `backend/project/template.py` | channel template load, validate, apply to a new project | done (M1-5) |
+| `backend/project/session.py` | `Session`: the one open project, new/open, footage scan, relink, recent list, save on change | done (M1-6) |
+| `backend/project/summary.py` | pure `ProjectSummary`, `FootageItem`, `FootageReport`, `summarize`, `describe_source` | done (M1-6) |
+| `backend/project/recent.py` | recent projects list: pure add/remove/parse plus atomic load/save | done (M1-6) |
+| `backend/project/relink.py` | pure `to_footage_relpath`, `relink_mismatches` | done (M1-6) |
 | `backend/edl/` | clip list, time mapping, anchoring, ffmpeg graph builder | empty |
 | `backend/voice/` | GPU worker, takes, cache keys, queue | empty |
 | `backend/audio/` | FX chain, loudness, envelopes | empty |
 | `backend/avatar/` | art loader, solver, compositor | empty |
 | `backend/export/` | export pipeline, asset bundle | empty |
-| `frontend/` | Svelte app (`src/`) | empty |
+| `frontend/` | Svelte 5 + TypeScript (strict) + Vite 6 project screen: `package.json`, `package-lock.json` (committed), `vite.config.ts`, `svelte.config.js`, `tsconfig.json`, `index.html`; `src/main.ts`, `src/App.svelte`, `src/api.ts` (typed fetch wrappers), `src/pywebview.d.ts`, `src/vite-env.d.ts`. `node_modules/` and `dist/` are git-ignored | partial (project screen only) |
 | `bin/` | ffmpeg/ffprobe (git-ignored) | has ffmpeg n8.1.3 + ffprobe locally |
-| `templates/` | default channel template, emotion presets | empty |
+| `templates/default_channel.json` | default channel template (no bookends, "Default voice" without reference clips, FX/avatar/export defaults) | done (M1-5) |
 | `scripts/` | install/run helpers | spike only |
 | `tests/test_schema.py` | schema tests (29) | done |
 | `tests/test_persistence.py` | migrations, autosave tracker, store tests (28) | done |
-| `tests/test_footage.py` | ffprobe parsing (canned JSON), scan planning, folder scan with fake probe (about 25) | done |
-| `tests/test_commands.py` | commands, undo/redo, groups, rollback, on_change (about 33) | done |
+| `tests/test_footage.py` | ffprobe parsing (canned JSON), scan planning, folder scan with fake probe (25) | done |
+| `tests/test_commands.py` | commands, undo/redo, groups, rollback, on_change (33) | done |
+| `tests/test_template.py` | template load, validate, apply (34) | done |
+| `tests/test_session.py` | folder-name validation, summary, new/open (24) | done |
+| `tests/test_recent.py` | recent list logic, store, session recording, endpoints (13) | done |
+| `tests/test_footage_api.py` | rescan, save on change, missing files, save failure, footage endpoints (11) | done |
+| `tests/test_relink.py` | relink helpers, session relink, endpoint (17) | done |
+| `tests/test_app.py` | hello, static serving, project endpoints (8) | done |
 
 ## Project folder layout (user data, not in this repo)
 
@@ -91,18 +109,20 @@ MyRack/
 
 ## Schema and key interfaces
 
-**Schema:** `backend/project/schema.py`, `schema_version = 1`. All models forbid unknown fields and validate on assignment.
-- Conventions: times are **integer milliseconds** (source time for anchors); ids are 12-char lowercase hex (`new_id()`); paths in JSON are relative POSIX strings (no absolute, no `\`, no `..`).
-- Entities: `Source`, `Clip`, `Line`, `Take`, `Placement`, `Keyframe`, `Reaction`, `VoiceProfile`, `FxChain` (+ `CompressorSettings`), `Anchor`, `EffectSpec`, `AvatarSettings`, `ExportSettings`, `ChannelTemplate` (first draft, `BookendRef` may use absolute paths), root `Project`.
+**Schema:** `backend/project/schema.py`, `schema_version = 1` (not bumped in M1). All models forbid unknown fields and validate on assignment.
+- Conventions: times are **integer milliseconds** (source time for anchors); ids are 12-char lowercase hex (`new_id()`); paths in JSON are POSIX strings (no `\`, no `..`): relative for project footage, absolute only for `external` sources.
+- Entities: `Source`, `Clip`, `Line`, `Take`, `Placement`, `Keyframe`, `Reaction`, `VoiceProfile`, `FxChain` (+ `CompressorSettings`), `Anchor`, `EffectSpec`, `AvatarSettings`, `ExportSettings`, `BookendRef`, `ChannelTemplate`, root `Project`.
+- `Source`: `id`, `external` (default false), `path`, `duration_ms`, `fps_num`/`fps_den` (property `fps`), `width`, `height`, `audio_tracks`. When `external` is true the path must be absolute POSIX (template bookends live outside the project); otherwise it must be relative.
+- `ChannelTemplate`: `name`, `intro` / `outro` (`BookendRef(path)` or null), `voice_profile`, `fx_chain`, `avatar`, `export`, `game_audio_db`.
 - Root `Project` fields: `schema_version`, `name`, `seed`, `sources`, `clips`, `lines`, `takes`, `placements`, `keyframes`, `reactions`, `voice_profiles`, `fx_chain`, `game_audio_db` (default 0.0), `avatar`, `export`. Unique ids per collection are validated; cross-references are not.
-- `Source` stores fps as `fps_num`/`fps_den` (property `fps`). `Clip` uses `in_ms`/`out_ms`, `speed` 0.25 to 8, `track`, `overlay`, `effects`. `Placement`, `Keyframe`, `Reaction` carry `orphaned: bool` (set by M2 logic; M1 stores only).
+- `Clip` uses `in_ms`/`out_ms`, `speed` 0.25 to 8, `track`, `overlay`, `effects`. `Placement`, `Keyframe`, `Reaction` carry `orphaned: bool` (set by M2 logic; M1 stores only).
 
 **Store API** (`backend/project/store.py`): `create_project(folder, project)`, `load_project(folder, *, use_backup=False, migrations=None)`, `save_project(folder, project)`, `ensure_layout(folder)`, `project_file`/`backup_file`. Errors: `ProjectError`, `ProjectExistsError`, `ProjectLoadError`.
 - Save order: temp file (flush, fsync) in the project folder, copy current `project.json` to `.bak` (only if it is valid JSON), `os.replace` temp over `project.json`. Failure leaves the old file and cleans up temp files.
 
 **Migrations** (`backend/project/migrations.py`): `migrate(data, target=SCHEMA_VERSION, migrations=None)`; register `MIGRATIONS[n] = fn` upgrading version n to n+1. Raises `MigrationError` / `ProjectTooNewError` (wrapped in `ProjectLoadError` by `load_project`).
 
-**Autosave** (`backend/project/autosave.py`): `AutosaveTracker(AutosavePolicy(debounce_s=2.0, max_wait_s=15.0))`: `mark_dirty(now)`, `begin_save()` / `finish_save(token)`, `should_save(now)`, `seconds_until_due(now)`. The scheduler that drives it arrives with the backend API (M1-6); `CommandStack(on_change=...)` is the intended `mark_dirty` hook.
+**Autosave tracker** (`backend/project/autosave.py`): `AutosaveTracker(AutosavePolicy(debounce_s=2.0, max_wait_s=15.0))`: `mark_dirty(now)`, `begin_save()` / `finish_save(token)`, `should_save(now)`, `seconds_until_due(now)`. Currently unused; revisit in M2 if drag edits make save-per-change too chatty.
 
 **Footage API** (`backend/project/footage.py`):
 - Pure: `parse_rate(text) -> (num, den)`, `parse_probe(data, rel_path, source_id=None) -> Source` (ffprobe JSON from `-show_streams -show_format`), `plan_scan(found, known) -> ScanPlan(to_probe, present, missing)`.
@@ -116,7 +136,37 @@ MyRack/
 - Commands: `AddSource(source)` (rejects duplicate id or case-insensitive duplicate path; stores a deep copy), `RemoveSource(source_id)` (refused with `CommandError` while any clip uses the source; undo restores the original list position), `RenameProject(name)` (strips; empty name rejected at construction), `RelinkSource(source_id, new_path)` (path only, no re-probe; rejects invalid paths and paths used by another source).
 - `CommandStack(project, on_change=None)`: `execute(cmd)`, `group(label)` context manager, `undo()` / `redo()` (return the label or `None`), `clear()`, `can_undo`, `can_redo`, `undo_label`, `redo_label`, `in_group`, `project`. A new command clears redo. A group is one undo step; if its block raises, applied commands are reverted, nothing is recorded, and the previous redo stack is restored. Nested groups merge into the outermost. Undo, redo and clear raise `CommandError` while a group is open. `on_change` fires once per top-level change (execute outside a group, committed group, undo, redo) and never for failures, empty groups or rollbacks.
 
-Backend endpoints: not implemented yet (M1-6).
+**Template API** (`backend/project/template.py`): `default_template_path()` (= `<repo>/templates/default_channel.json`), `normalize_bookend_path(raw)` (backslashes to forward slashes), `parse_template(data)`, `load_template_file(path=None)`, `external_source(probed, path)` (turns a probed Source into an `external` one), `apply_template(template, name, *, intro_source=None, outro_source=None, seed=None) -> Project`. Error: `TemplateError`.
+- The caller probes bookend files (Session does this with ffprobe) and passes the Sources in. A bookend in the template without a matching source, or the reverse, is an error.
+- Applied bookends become ordinary clips with `overlay=False`, covering the whole source; intro first, outro last. The template's voice profile is copied with a fresh id. The template object is never mutated. Name is stripped; empty is rejected.
+
+**Session API** (`backend/project/session.py`): `Session(*, template_path=None, probe=None, recent_path=None)`. Holds the one open project and its `CommandStack`; thread-safe (re-entrant lock).
+- `current() -> ProjectSummary | None`, `new_project(parent, name)`, `open_project(folder)`, `footage() -> FootageReport`, `rescan_footage()`, `relink_source(source_id, new_path)`, `recent() -> list[RecentItem]`, `forget_recent(folder)`. Errors: `SessionError`; other module errors (`ProjectError`, `TemplateError`, `FootageError`) pass through.
+- `clean_folder_name(name)` (pure): Windows-safe project name (no `< > : " / \ | ? *`, no trailing dot, no reserved names such as CON or LPT1).
+- Opening or creating runs a footage scan automatically; new files are added with `AddSource` inside one `Add footage` group. Scan trouble on open (for example no ffprobe) never blocks opening; it appears in the footage report `errors`.
+- Every change through the stack saves `project.json` immediately (`on_change`). A failed save sets `ProjectSummary.save_error` and does not block the edit.
+- `recent_path=None` (the default, used by tests) records nothing; `backend/main.py` passes `default_recent_path()`.
+- Relink rules: source must exist and not be `external`; the picked file must exist and lie inside `<project>/footage/`; it is re-probed and refused unless resolution and frame rate match exactly, length is within 100 ms, and the audio track count matches; picking the source's current path is a no-op.
+
+**Recent list** (`backend/project/recent.py`): `RecentEntry(name, folder, last_opened)`, `RecentItem(+exists)`, pure `add_recent` (newest first, de-duplicated case-insensitively, max 10), `remove_recent`, `parse_recent` (tolerant), `folder_key`; I/O `default_recent_path()` (`%APPDATA%\PNGtuberStudio\recent.json`), `load_recent` (missing or corrupt gives `[]`), `save_recent` (atomic).
+
+**HTTP API** (`backend/app.py`; errors are HTTP 400 with `{"detail": "<message>"}`):
+
+| Method and path | Body | Returns |
+|---|---|---|
+| `GET /api/hello` | | `{app, status, schema_version}` |
+| `GET /api/project` | | `ProjectSummary` or `null` |
+| `POST /api/project/new` | `{name, parent}` | `ProjectSummary` |
+| `POST /api/project/open` | `{folder}` | `ProjectSummary` |
+| `GET /api/footage` | | `FootageReport {items, added, errors}` |
+| `POST /api/footage/rescan` | | `FootageReport` |
+| `POST /api/footage/relink` | `{source_id, path}` | `FootageReport` |
+| `GET /api/recent` | | `RecentItem[]` |
+| `POST /api/recent/remove` | `{folder}` | `RecentItem[]` |
+
+`ProjectSummary`: `name`, `folder`, `schema_version`, `source_count`, `clip_count`, `voice_status`, `avatar_status` ("not configured" or "path set" text only), `save_error`. Static frontend is mounted at `/` after the API routes; if `frontend/dist` has no `index.html`, `/` shows a "Frontend not built" page.
+
+**pywebview bridge** (`backend/main.py` `Api`): `window.pywebview.api.pick_folder()` and `pick_file()` (video file filter) return a path or `null`. Works on both the older and newer pywebview dialog constants.
 
 ## M0 findings (2026-10-10, user's machine)
 
@@ -142,6 +192,8 @@ Backend endpoints: not implemented yet (M1-6).
 ## M1 manual checks (user confirmed)
 
 - M1-3 scan of a real OBS clip (10 s `-c copy` cut) produced: path `footage/clip10.mkv`, 2560x1440, 60/1, 1 audio track, duration 12812 ms. Resolution, rate and audio match. The duration is above the requested 10 s, probably because a stream copy starts at a keyframe (not verified; not a detection bug as far as known).
+- M1-6 (user confirmed): app window opens with the project screen; New project (with a folder named with a space), Open (Browse and typed path), Recent list (reopen, missing marker, Remove leaves the folder on disk), footage table with Rescan, missing footage flagged, relink to a moved file all work.
+- M1 acceptance run (user confirmed): create from template, add footage, close and reopen from Recent with everything intact; move footage out and back; relink a file moved into a subfolder of `footage/`.
 
 ## Decisions log
 
@@ -169,23 +221,32 @@ Backend endpoints: not implemented yet (M1-6).
 | 2026-10-10 | M0: recordings are 2560x1440@60; export scales to 1080p (verified with NVENC, `scale=-2:1080`) |
 | 2026-10-11 | M1: **time = integer milliseconds** everywhere (user choice). Exact to compare and hash. At 59.94 fps a frame is 16.683 ms, so M2 frame lookups must round to the nearest frame, never floor |
 | 2026-10-11 | M1: items carry an explicit `orphaned: bool` (Placement, Keyframe, Reaction). M1 stores it only; M2 sets it |
-| 2026-10-11 | M1: ids are uuid4 hex truncated to 12 chars; JSON paths are relative POSIX strings (no absolute, no `..`) |
+| 2026-10-11 | M1: ids are uuid4 hex truncated to 12 chars; JSON paths are relative POSIX strings (no absolute, no `..`), except `external` sources (see 2026-10-12) |
 | 2026-10-11 | M1: fps stored as `fps_num`/`fps_den` so 59.94 (60000/1001) is exact |
 | 2026-10-11 | M1: `Take` stores a text snapshot, `model_version`, and `raw_key` so it stays valid if the line is edited; `Placement` and the other timed items get their own `id` |
 | 2026-10-11 | M1: default `game_audio_db` = 0.0 (tune in M4); default avatar position x 0.85, y 0.75 as fractions of the frame |
 | 2026-10-11 | M1: `.bak` is only rotated from a `project.json` that parses as JSON, so a corrupt file never replaces a good backup; `load_project(use_backup=True)` is the recovery path |
-| 2026-10-11 | M1: autosave policy defaults: 2 s debounce, 15 s max wait; timing logic is pure, scheduler comes with the API |
+| 2026-10-11 | M1: autosave policy defaults: 2 s debounce, 15 s max wait; timing logic is pure. **Superseded 2026-10-12:** the app saves on every change; the tracker is unused |
 | 2026-10-11 | M1: pytest finds `backend` through a repo-root `conftest.py`; no pyproject pytest config needed |
 | 2026-10-11 | M1: fps for a Source comes from ffprobe `avg_frame_rate` (fallback `r_frame_rate` when `0/0`); duration from container `format.duration` rounded to integer ms. Variable-frame-rate files are not specially handled |
 | 2026-10-11 | M1: footage scan is recursive under `footage/`, recognises `.mkv .mp4 .mov .avi .webm .m4v .flv .ts`, matches known sources to files case-insensitively (Windows), and only builds Source objects; adding them is a command |
 | 2026-10-11 | M1: command contract: validate then mutate, raise `CommandError` before any change; each command records its own undo data (no project snapshots); groups are atomic (rollback on exception, redo stack restored); undo/redo not allowed while a group is open |
 | 2026-10-11 | M1: `RemoveSource` is refused while any clip references the source (guards the missing cross-reference validation); `AddSource` rejects duplicate id or duplicate path |
-| 2026-10-11 | M1: `RelinkSource` changes the path only and does not re-probe metadata |
+| 2026-10-11 | M1: `RelinkSource` changes the path only and does not re-probe metadata (the re-probe check lives in `Session.relink_source`, see 2026-10-12) |
 | 2026-10-11 | M1: `CommandStack` takes an optional `on_change` callback (fires once per top-level change) as the autosave hook |
+| 2026-10-12 | M1: **bookend clips outside the project folder** are `Source` entries with `external = true` and an absolute POSIX path (decided in M1-5). Template paths may be written with backslashes and are normalised. Bookend clips cover the whole source, `overlay=False`, intro first and outro last |
+| 2026-10-12 | M1: applying a template gives the new project its own copy of the voice profile with a fresh id; the template itself is never mutated. The default template ships with no bookends |
+| 2026-10-12 | M1: the backend holds one open project in a `Session`; all edits go through its `CommandStack`; every change is **saved immediately** (no debounce) and a failed save is surfaced as `save_error`, never silently. Revisit debounce in M2 if needed |
+| 2026-10-12 | M1: recent projects are stored per user at `%APPDATA%\PNGtuberStudio\recent.json` (max 10, newest first, de-duplicated case-insensitively). Entries for folders that no longer exist are shown as missing and removed only by the user. "Remove" never touches the project folder |
+| 2026-10-12 | M1: project name = folder name (`<parent>\<name>`), validated Windows-safe; a folder that already holds a `project.json` is refused |
+| 2026-10-12 | M1: footage is scanned automatically on open/create and by Rescan. New files are added in one undoable group. Missing files are flagged from disk and never removed automatically. Scan trouble on open never blocks opening |
+| 2026-10-12 | M1: relink requires the picked file to be inside `<project>/footage/`, re-probes it, and refuses a mismatch (resolution and frame rate exact, length within 100 ms, same audio track count). Relinking `external` sources is not supported yet |
+| 2026-10-12 | M1: API errors are HTTP 400 with `{"detail": message}`; the frontend shows `detail` text as-is |
+| 2026-10-12 | M1: frontend is Svelte 5 + TypeScript strict + Vite 6, built with `npm run build` to `frontend/dist` and served by FastAPI. Node is needed only to build. `package-lock.json` is committed |
+| 2026-10-12 | M1: native pickers go through a pywebview `js_api` (`pick_folder`, `pick_file`); the api object holds no window reference. The page falls back to typed paths when not running in the app window |
 
 ## Known issues / open questions
 
-- **Bookend clips (decide in M1-5):** intro/outro files likely live outside the project folder, but `Source.path` rejects absolute paths and `..`. The schema may need an extension (for example an external-source flag). `ChannelTemplate`/`BookendRef` are first drafts.
 - Voice source not final: own voice or acted character (swappable via voice profile).
 - Emotion range: neutral reference gives flat output; exaggeration >= 1.0 adds some expression but garbles slightly. Test an expressive reference clip and a non-"enhanced" clip in M3. Emotion preset numbers are still starting guesses.
 - Seed reproducibility via `torch.manual_seed` is untested (matters for cache keys, rule 3).
@@ -194,19 +255,23 @@ Backend endpoints: not implemented yet (M1-6).
 - Effects slot contents not chosen (reverb, pitch shift, chorus, others).
 - Avatar art naming convention `expression_eyes_mouth.png` to be confirmed against real files.
 - OBS recordings have one mixed audio track (game and mic together); confirm this is the expected workflow.
-- Harmless warnings seen: `pkg_resources` deprecation (from perth), diffusers `LoRACompatibleLinear` deprecation, `sdpa` attention note, unauthenticated Hugging Face Hub notice.
+- Harmless warnings seen: `pkg_resources` deprecation (from perth), diffusers `LoRACompatibleLinear` deprecation, `sdpa` attention note, unauthenticated Hugging Face Hub notice; pytest shows one Starlette `TestClient` DeprecationWarning about an `anyio` alias (inside site-packages, goes away with a library update); `npm install` warns that esbuild has an install script not yet allowed (the build works).
 - Seek latency was measured on a 4.8 GB file by eye from the page log; no systematic benchmark.
-- The folder-layout tree from a real `create_project` run was not pasted back in chat A (covered by `test_create_makes_layout_and_valid_file`).
-- Schema validates unique ids but not cross-references (for example `Clip.source_id` pointing at a real source). Only `RemoveSource` guards the source-in-use case today; M2 clip commands need the same care.
-- `scan_footage` probes files one after another (sync, 60 s timeout each). Fine for a few recordings; the API layer (M1-6) should run it off the request thread or accept a short wait.
+- The schema validates unique ids but not cross-references (for example `Clip.source_id` pointing at a real source). Only `RemoveSource` guards the source-in-use case today; M2 clip commands need the same care.
+- **Rescan after a move creates a duplicate:** if a footage file is moved to another path inside `footage/` and the user clicks Rescan before relinking, the new location is added as a new source and the old one stays missing. Relink first. A "looks like the same file" hint is a possible later improvement.
+- Relinking `external` (template bookend) sources is not supported. Bookend probing is implemented but has never run against a real intro/outro clip (the default template has none), so treat it as untested until a template with bookends is tried.
+- `RelinkSource` itself is still path-only; the metadata check is in `Session.relink_source`. M2 code that relinks must go through the session or repeat the check.
+- Save per change (no debounce) is fine for M1; drag edits in M2 may need the `AutosaveTracker` after all.
+- `scan_footage` probes files one after another (sync, 60 s timeout each) inside the request. Fine for a few recordings; a big batch would make Rescan wait.
 - `default_ffprobe_path()` assumes `bin/ffprobe.exe` at the repo root. Revisit when `install.bat`/packaging lands (M7).
-- `RelinkSource` does not re-probe, so relinking to a different file with another duration or fps leaves stale Source metadata. Re-probe on relink is a candidate for M1-6 or M2.
+- The built frontend (`frontend/dist`) is git-ignored; `install.bat` (M7) must build it or ship it.
 - If a command's `revert` fails partway through an undo (should only happen on a bug), the undo entry is dropped and state may be partly reverted. Not handled; revisit if it ever appears.
 - ffprobe reports a 12.8 s duration for a nominal 10 s `-c copy` clip (probably keyframe alignment; not verified).
+- No file watcher for `footage/` (by design for M1): rescan on open plus the Rescan button.
+- The project screen shows voice profile and avatar art as simple "not configured" / "path set" text only; real validation comes with M3-1 and M5-1.
 
 ## Next up
 
-1. Commit this file on `m1-foundation` (commands below in chat), tick M1-3 and M1-4 in `IMPLEMENTATION_PLAN.md`.
-2. Chat C: M1-5 channel template, M1-6 backend API and project screen, M1-7 tests and wrap-up. Paste `CLAUDE.md`, this file, `docs/tasks/M1-foundation.md`, and spec section 2 "Intro/outro" row, section 3 step 1, section 4.1, section 5 "ChannelTemplate" row, section 11 "Frontend" paragraph. Also paste `backend/project/schema.py` again (template and API need it).
-3. Decisions waiting in chat C: how bookend clips outside the project folder are represented (see Known issues), where recent projects are stored (assumption: per-user config under `%APPDATA%`), and who runs the autosave scheduler (wire `CommandStack.on_change` to `AutosaveTracker.mark_dirty`).
-4. After chat C: merge `m1-foundation` to `main`, tag `m1-done`.
+1. Merge `m1-foundation` to `main` and tag `m1-done` (commands given in chat). Tick M1-1 to M1-7 in `IMPLEMENTATION_PLAN.md`.
+2. M2 (timeline, clip operations, time mapping, orphan handling). Read the M2 items in `IMPLEMENTATION_PLAN.md`; a `docs/tasks/M2-*.md` file will list the spec sections to paste. Expect to need `backend/project/schema.py` and `backend/project/commands.py`, plus `session.py` if clip commands are wired into the API. Time mapping must round to the nearest frame at 59.94 fps.
+3. Before M2 clip commands: decide whether `Project` should validate cross-references (clips to sources, items to clips).
