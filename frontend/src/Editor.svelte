@@ -11,6 +11,7 @@
   } from "./api";
   import { clock } from "./format";
   import Player from "./Player.svelte";
+  import { clipIndexAt } from "./timeline";
 
   let { onclose }: { onclose: () => void } = $props();
 
@@ -19,12 +20,11 @@
   let error = $state<string | null>(null);
   let notice = $state<string | null>(null);
   let busy = $state(false);
-  let selectedId = $state<string | null>(null);
+  /** Playhead on the timeline, in ms. The player moves it while playing. */
+  let playheadMs = $state(0);
 
-  /** The selected clip, or the first one when nothing (or a vanished clip) is selected. */
-  const selected = $derived(
-    timeline?.clips.find((c) => c.id === selectedId) ?? timeline?.clips[0] ?? null,
-  );
+  /** Index of the clip under the playhead (highlighted in the table). */
+  const activeIndex = $derived(timeline === null ? -1 : clipIndexAt(timeline.clips, playheadMs));
 
   function message(err: unknown): string {
     return err instanceof Error ? err.message : String(err);
@@ -121,9 +121,9 @@
   {#if timeline === null}
     <p>Loading...</p>
   {:else}
-    {#if selected !== null}
+    {#if timeline.clips.length > 0}
       <section>
-        <Player clip={selected} />
+        <Player clips={timeline.clips} durationMs={timeline.duration_ms} bind:playheadMs />
       </section>
     {/if}
 
@@ -176,14 +176,14 @@
             </tr>
           </thead>
           <tbody>
-            {#each timeline.clips as clip (clip.id)}
+            {#each timeline.clips as clip, i (clip.id)}
               <tr
                 class:missing={clip.source?.file_missing ?? true}
-                class:selected={selected !== null && clip.id === selected.id}
+                class:selected={i === activeIndex}
               >
                 <td>{clip.position + 1}</td>
                 <td class="file">
-                  <button type="button" class="pick" onclick={() => (selectedId = clip.id)}>
+                  <button type="button" class="pick" onclick={() => (playheadMs = clip.start_ms)}>
                     {sourceName(clip.source_id)}
                   </button>
                 </td>
