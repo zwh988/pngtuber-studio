@@ -14,12 +14,14 @@
     type ProjectSummary,
     type RecentItem,
   } from "./api";
+  import Editor from "./Editor.svelte";
 
   let current = $state<ProjectSummary | null>(null);
   let footage = $state<FootageReport | null>(null);
   let recent = $state<RecentItem[]>([]);
   let error = $state<string | null>(null);
   let busy = $state(false);
+  let view = $state<"project" | "editor">("project");
 
   let newName = $state("");
   let newParent = $state("");
@@ -39,6 +41,7 @@
     error = null;
     try {
       current = await action();
+      view = "project";
       footage = await getFootage();
       recent = await getRecent();
     } catch (err) {
@@ -118,6 +121,14 @@
   void restore();
 </script>
 
+{#if view === "editor" && current !== null}
+  <Editor
+    onclose={() => {
+      view = "project";
+      void refreshProject();
+    }}
+  />
+{:else}
 <main>
   <h1>PNGtuber Studio</h1>
 
@@ -145,6 +156,9 @@
         <dt>Avatar art</dt>
         <dd>{current.avatar_status}</dd>
       </dl>
+      <button type="button" onclick={() => (view = "editor")} disabled={busy}>
+        Open editor
+      </button>
     </section>
 
     <section>
@@ -268,6 +282,7 @@
     </button>
   </section>
 </main>
+{/if}
 
 <style>
   main {
