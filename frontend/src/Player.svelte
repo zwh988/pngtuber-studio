@@ -174,10 +174,10 @@
       const changed = sig !== lastSig;
       lastSig = sig;
       if (playing) {
-        if (!changed) {
-          return;
+        if (!changed && ms === selfPlayhead) {
+          return; // playback itself moved the playhead
         }
-        stop();
+        stop(); // an edit or an outside seek pauses playback
       }
       if (clips.length === 0) {
         return;

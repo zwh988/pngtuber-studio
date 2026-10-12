@@ -11,6 +11,7 @@
   } from "./api";
   import { clock } from "./format";
   import Player from "./Player.svelte";
+  import Timeline from "./Timeline.svelte";
   import { clipIndexAt } from "./timeline";
 
   let { onclose }: { onclose: () => void } = $props();
@@ -124,6 +125,14 @@
     {#if timeline.clips.length > 0}
       <section>
         <Player clips={timeline.clips} durationMs={timeline.duration_ms} bind:playheadMs />
+      </section>
+      <section>
+        <Timeline
+          clips={timeline.clips}
+          durationMs={timeline.duration_ms}
+          bind:playheadMs
+          label={(clip) => sourceName(clip.source_id)}
+        />
       </section>
     {/if}
 
