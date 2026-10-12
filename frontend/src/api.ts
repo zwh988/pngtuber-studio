@@ -163,6 +163,56 @@ export function redoEdit(): Promise<EditResult> {
   return post<EditResult>("/api/timeline/redo");
 }
 
+/** One edit. `source_ms` in a trim is SOURCE time, not timeline time. */
+export type EditOp =
+  | { op: "add_clip"; source_id: string; position?: number | null }
+  | { op: "remove_clip"; clip_id: string }
+  | { op: "set_speed"; clip_id: string; speed: number }
+  | { op: "reorder_clip"; clip_id: string; new_position: number }
+  | { op: "split_clip"; timeline_ms: number; right_clip_id?: string | null }
+  | { op: "trim_clip"; clip_id: string; edge: "in" | "out"; source_ms: number }
+  | { op: "ripple_delete"; start_ms: number; end_ms: number; right_clip_id?: string | null };
+
+export function splitClip(timelineMs: number): Promise<TimelineState> {
+  return post<TimelineState>("/api/timeline/split", { timeline_ms: timelineMs });
+}
+
+export function rippleDelete(startMs: number, endMs: number): Promise<TimelineState> {
+  return post<TimelineState>("/api/timeline/ripple-delete", { start_ms: startMs, end_ms: endMs });
+}
+
+export function trimClip(
+  clipId: string,
+  edge: "in" | "out",
+  sourceMs: number,
+): Promise<TimelineState> {
+  return post<TimelineState>("/api/timeline/trim", {
+    clip_id: clipId,
+    edge,
+    source_ms: sourceMs,
+  });
+}
+
+export function reorderClip(clipId: string, newPosition: number): Promise<TimelineState> {
+  return post<TimelineState>("/api/timeline/reorder", {
+    clip_id: clipId,
+    new_position: newPosition,
+  });
+}
+
+export function setClipSpeed(clipId: string, speed: number): Promise<TimelineState> {
+  return post<TimelineState>("/api/timeline/speed", { clip_id: clipId, speed });
+}
+
+export function removeClip(clipId: string): Promise<TimelineState> {
+  return post<TimelineState>("/api/timeline/remove", { clip_id: clipId });
+}
+
+/** Several edits as ONE undo step; all apply or none do. */
+export function editBatch(label: string, ops: EditOp[]): Promise<TimelineState> {
+  return post<TimelineState>("/api/timeline/batch", { label, ops });
+}
+
 /** Native file dialog; null when cancelled or not running in the app window. */
 export async function pickFile(): Promise<string | null> {
   const result = await window.pywebview?.api?.pick_file?.();

@@ -8,7 +8,7 @@ Pass ``recent_path`` to record opened projects; ``None`` records nothing.
 
 import re
 import threading
-from collections.abc import Callable
+from collections.abc import Callable, Sequence
 from datetime import UTC, datetime
 from pathlib import Path
 from typing import Any
@@ -21,6 +21,7 @@ from backend.project.commands import (
     CommandStack,
     RelinkSource,
 )
+from backend.project.edit_ops import EditOp, build_command
 from backend.project.footage import (
     FootageError,
     parse_probe,
@@ -228,6 +229,25 @@ class Session:
             except CommandError as exc:
                 raise SessionError(str(exc)) from exc
             return EditResult(label=label, timeline=self._timeline_state())
+
+    def edit(self, ops: Sequence[EditOp], label: str | None = None) -> TimelineState:
+        """Apply edit ops. One op without a label is a plain undo step; several
+        ops (or a label) run as one group, so they undo together and either
+        all apply or none do."""
+        if not ops:
+            raise SessionError("no edits given")
+        with self._lock:
+            _, stack = self._require_open()
+            try:
+                if len(ops) == 1 and label is None:
+                    stack.execute(build_command(ops[0]))
+                else:
+                    with stack.group(label or "Edit"):
+                        for op in ops:
+                            stack.execute(build_command(op))
+            except (CommandError, ValueError) as exc:
+                raise SessionError(str(exc)) from exc
+            return self._timeline_state()
 
     # ---- recent projects ---------------------------------------------------
 

@@ -1,5 +1,6 @@
 """FastAPI application: JSON API under ``/api`` plus the built frontend (M1-6)."""
 
+from collections.abc import Sequence
 from pathlib import Path
 
 from fastapi import FastAPI, HTTPException
@@ -7,6 +8,16 @@ from fastapi.responses import HTMLResponse
 from fastapi.staticfiles import StaticFiles
 from pydantic import BaseModel
 
+from backend.project.edit_ops import (
+    EditBatch,
+    EditOp,
+    RemoveClipOp,
+    ReorderClipOp,
+    RippleDeleteOp,
+    SetSpeedOp,
+    SplitClipOp,
+    TrimClipOp,
+)
 from backend.project.footage import FootageError
 from backend.project.recent import RecentItem
 from backend.project.schema import SCHEMA_VERSION
@@ -149,6 +160,40 @@ def create_app(
         except OSError as exc:
             raise HTTPException(status_code=500, detail=str(exc)) from exc
         return active.recent()
+
+    def run_edit(ops: Sequence[EditOp], label: str | None = None) -> TimelineState:
+        try:
+            return active.edit(ops, label)
+        except _API_ERRORS as exc:
+            raise HTTPException(status_code=400, detail=str(exc)) from exc
+
+    @app.post("/api/timeline/split")
+    def split_clip(op: SplitClipOp) -> TimelineState:
+        return run_edit([op])
+
+    @app.post("/api/timeline/ripple-delete")
+    def ripple_delete(op: RippleDeleteOp) -> TimelineState:
+        return run_edit([op])
+
+    @app.post("/api/timeline/trim")
+    def trim_clip(op: TrimClipOp) -> TimelineState:
+        return run_edit([op])
+
+    @app.post("/api/timeline/reorder")
+    def reorder_clip(op: ReorderClipOp) -> TimelineState:
+        return run_edit([op])
+
+    @app.post("/api/timeline/speed")
+    def set_speed(op: SetSpeedOp) -> TimelineState:
+        return run_edit([op])
+
+    @app.post("/api/timeline/remove")
+    def remove_clip(op: RemoveClipOp) -> TimelineState:
+        return run_edit([op])
+
+    @app.post("/api/timeline/batch")
+    def edit_batch(batch: EditBatch) -> TimelineState:
+        return run_edit(batch.ops, batch.label)
 
     folder = static_dir if static_dir is not None else default_static_dir()
     if (folder / "index.html").is_file():
