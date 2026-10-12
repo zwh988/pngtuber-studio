@@ -5,6 +5,7 @@
     getTimeline,
     redoEdit,
     removeClip,
+    reorderClip,
     setClipSpeed,
     splitClip,
     trimClip,
@@ -97,6 +98,18 @@
 
   function speedChoices(current: number): number[] {
     return SPEEDS.includes(current) ? SPEEDS : [...SPEEDS, current].sort((a, b) => a - b);
+  }
+
+  /** A trim drag ended: one edit, one undo step. */
+  async function trimByDrag(clipId: string, edge: "in" | "out", sourceMs: number): Promise<void> {
+    player?.pause();
+    await edit(() => trimClip(clipId, edge, sourceMs));
+  }
+
+  /** A reorder drag ended: one edit, one undo step. */
+  async function reorderByDrag(clipId: string, newPosition: number): Promise<void> {
+    player?.pause();
+    await edit(() => reorderClip(clipId, newPosition));
   }
 
   function undo(): void {
@@ -290,7 +303,10 @@
           durationMs={timeline.duration_ms}
           bind:playheadMs
           bind:selectedId
+          locked={busy}
           label={(clip) => sourceName(clip.source_id)}
+          ontrim={trimByDrag}
+          onreorder={reorderByDrag}
         />
       </section>
       <section class="clipbar">
@@ -320,6 +336,7 @@
         <p class="keys">
           Space play/pause, , and . step a frame, S split at playhead, Delete remove selected clip,
           [ and ] cut the selected clip's in/out at the playhead, Ctrl+Z / Ctrl+Y undo / redo.
+          Drag a clip's edge to trim it, drag a clip sideways to reorder; each drag is one undo step.
         </p>
       </section>
     {/if}

@@ -2,22 +2,33 @@
   import { untrack } from "svelte";
   import type { TimelineClip } from "./api";
   import { clock } from "./format";
-  import { clipIndexAt } from "./timeline";
+  import { dropSlot, trimTarget, withTrim } from "./timeline";
 
   let {
     clips,
     durationMs,
     playheadMs = $bindable(0),
     selectedId = $bindable(null),
+    locked = false,
     label,
+    ontrim,
+    onreorder,
   }: {
     clips: TimelineClip[];
     durationMs: number;
     playheadMs?: number;
     selectedId?: string | null;
+    /** True while an edit is in flight: drags that would edit are ignored. */
+    locked?: boolean;
     label: (clip: TimelineClip) => string;
+    /** One call per drag, on release. `sourceMs` is SOURCE time. Resolves when the edit is done. */
+    ontrim: (clipId: string, edge: "in" | "out", sourceMs: number) => Promise<void>;
+    /** One call per drag, on release. `newPosition` is the clip's position after the move. */
+    onreorder: (clipId: string, newPosition: number) => Promise<void>;
   } = $props();
 
+  /** Width of the grab zone at each clip edge, in pixels. */
+  const EDGE_PX = 6;
   const RULER_H = 26;
   const LANE_Y = 32;
   const LANE_H = 60;
@@ -37,11 +48,32 @@
   let pxPerMs = $state(0.1);
   /** Timeline time at the left edge of the view (ms). */
   let scrollMs = $state(0);
-  let dragging = false;
   let fitted = false;
+
+  type Hit = { clip: TimelineClip; part: "in" | "out" | "body" };
+  type TrimDrag = { mode: "trim"; clip: TimelineClip; edge: "in" | "out"; sourceMs: number };
+  type MoveDrag = { mode: "move"; clip: TimelineClip; grabDx: number; slot: number };
+  type Drag =
+    | { mode: "scrub" }
+    | { mode: "press"; clip: TimelineClip; startX: number }
+    | TrimDrag
+    | MoveDrag;
+  type DragUi =
+    | { kind: "trim"; x: number }
+    | { kind: "move"; clipId: string; ghostX: number; slotMs: number };
+
+  /** Pointer interaction in progress (not reactive: only the handlers use it). */
+  let drag: Drag | null = null;
+  /** Clip list with the dragged edge applied, drawn instead of `clips` during a trim drag. */
+  let preview = $state<TimelineClip[] | null>(null);
+  let dragUi = $state<DragUi | null>(null);
 
   const viewMs = $derived(viewWidth / pxPerMs);
   const maxScrollMs = $derived(Math.max(0, durationMs - (viewWidth - GUTTER) / pxPerMs));
+
+  function xPos(ms: number): number {
+    return (ms - scrollMs) * pxPerMs;
+  }
 
   function clampPx(px: number): number {
     return Math.min(Math.max(px, MIN_PX), MAX_PX);
@@ -117,19 +149,21 @@
     }
 
     // Video strip lane
+    const shown = preview ?? clips;
     const hues = new Map<string, number>();
     for (const clip of clips) {
       if (!hues.has(clip.source_id)) {
         hues.set(clip.source_id, (hues.size * 70 + 210) % 360);
       }
     }
-    for (const clip of clips) {
+    for (const clip of shown) {
       const x0 = xOf(clip.start_ms);
       const w = Math.max(1, clip.duration_ms * pxPerMs);
       if (x0 + w < 0 || x0 > viewWidth) {
         continue;
       }
       const missing = clip.source?.file_missing ?? true;
+      ctx.globalAlpha = dragUi?.kind === "move" && dragUi.clipId === clip.id ? 0.35 : 1;
       const selected = clip.id === selectedId;
       ctx.fillStyle = `hsl(${hues.get(clip.source_id) ?? 210} 45% ${selected ? 50 : 38}%)`;
       ctx.fillRect(x0, LANE_Y, Math.max(1, w - 1), LANE_H);
@@ -166,11 +200,13 @@
       }
     }
 
+    ctx.globalAlpha = 1;
+
     // Cut markers between clips
     ctx.strokeStyle = "#ffffffcc";
     ctx.lineWidth = 1.5;
-    for (let i = 1; i < clips.length; i += 1) {
-      const clip = clips[i];
+    for (let i = 1; i < shown.length; i += 1) {
+      const clip = shown[i];
       if (clip === undefined) {
         continue;
       }
@@ -181,6 +217,35 @@
       ctx.beginPath();
       ctx.moveTo(x, LANE_Y - 4);
       ctx.lineTo(x, LANE_Y + LANE_H + 4);
+      ctx.stroke();
+    }
+
+    // Drag feedback: a dashed line at the pointer while trimming; a ghost and a drop marker
+    // while reordering.
+    const ui = dragUi;
+    if (ui !== null && ui.kind === "trim") {
+      ctx.strokeStyle = "#ffffff";
+      ctx.lineWidth = 1;
+      ctx.setLineDash([4, 3]);
+      ctx.beginPath();
+      ctx.moveTo(Math.round(ui.x) + 0.5, RULER_H);
+      ctx.lineTo(Math.round(ui.x) + 0.5, HEIGHT);
+      ctx.stroke();
+      ctx.setLineDash([]);
+    } else if (ui !== null && ui.kind === "move") {
+      const dragged = clips.find((c) => c.id === ui.clipId);
+      if (dragged !== undefined) {
+        ctx.globalAlpha = 0.7;
+        ctx.fillStyle = "#4da3ff";
+        ctx.fillRect(ui.ghostX, LANE_Y + 6, Math.max(4, dragged.duration_ms * pxPerMs - 1), LANE_H - 12);
+        ctx.globalAlpha = 1;
+      }
+      const slotX = Math.round(xOf(ui.slotMs));
+      ctx.strokeStyle = "#4da3ff";
+      ctx.lineWidth = 3;
+      ctx.beginPath();
+      ctx.moveTo(slotX, LANE_Y - 6);
+      ctx.lineTo(slotX, LANE_Y + LANE_H + 6);
       ctx.stroke();
     }
 
@@ -256,29 +321,140 @@
       const ms = Math.round(scrollMs + x / pxPerMs);
       playheadMs = Math.min(Math.max(ms, 0), durationMs);
     }
+    function pointerXY(e: PointerEvent): { x: number; y: number } {
+      const rect = canvas?.getBoundingClientRect();
+      return { x: e.clientX - (rect?.left ?? 0), y: e.clientY - (rect?.top ?? 0) };
+    }
+    function hit(x: number, y: number): Hit | null {
+      if (y < LANE_Y || y > LANE_Y + LANE_H) {
+        return null;
+      }
+      for (const clip of clips) {
+        const x0 = xPos(clip.start_ms);
+        const x1 = xPos(clip.end_ms);
+        if (x < x0 || x > x1) {
+          continue;
+        }
+        const grip = Math.min(EDGE_PX, (x1 - x0) / 3);
+        if (x <= x0 + grip) {
+          return { clip, part: "in" };
+        }
+        if (x >= x1 - grip) {
+          return { clip, part: "out" };
+        }
+        return { clip, part: "body" };
+      }
+      return null;
+    }
+    function updateMove(d: MoveDrag, x: number): void {
+      d.slot = dropSlot(clips, d.clip.id, scrollMs + x / pxPerMs);
+      const others = clips.filter((c) => c.id !== d.clip.id);
+      dragUi = {
+        kind: "move",
+        clipId: d.clip.id,
+        ghostX: x - d.grabDx,
+        slotMs: others[d.slot]?.start_ms ?? durationMs,
+      };
+    }
+    /** Keep the drag picture until the backend answered, so the timeline does not flicker back. */
+    async function finish(job: Promise<void>): Promise<void> {
+      try {
+        await job;
+      } finally {
+        preview = null;
+        dragUi = null;
+      }
+    }
     function down(e: PointerEvent): void {
       if (e.button !== 0 || canvas === null) {
         return;
       }
       canvas.setPointerCapture(e.pointerId);
-      dragging = true;
+      const { x, y } = pointerXY(e);
+      const target = hit(x, y);
+      if (target !== null && !locked && target.part !== "body") {
+        // Grab a clip edge: trim.
+        selectedId = target.clip.id;
+        const edge = target.part;
+        drag = {
+          mode: "trim",
+          clip: target.clip,
+          edge,
+          sourceMs: edge === "in" ? target.clip.in_ms : target.clip.out_ms,
+        };
+        dragUi = { kind: "trim", x };
+        return;
+      }
       seek(e);
-      // A click in the video lane also selects the clip under it (empty space clears).
-      const rect = canvas.getBoundingClientRect();
-      const y = e.clientY - rect.top;
-      if (y >= LANE_Y && y <= LANE_Y + LANE_H) {
-        const ms = scrollMs + (e.clientX - rect.left) / pxPerMs;
-        const clip = ms <= durationMs ? clips[clipIndexAt(clips, ms)] : undefined;
-        selectedId = clip === undefined ? null : clip.id;
+      if (target !== null) {
+        selectedId = target.clip.id;
+        drag = locked ? { mode: "scrub" } : { mode: "press", clip: target.clip, startX: x };
+      } else {
+        if (y >= LANE_Y && y <= LANE_Y + LANE_H) {
+          selectedId = null; // empty space in the video lane
+        }
+        drag = { mode: "scrub" };
       }
     }
     function move(e: PointerEvent): void {
-      if (dragging) {
+      if (canvas === null) {
+        return;
+      }
+      const { x, y } = pointerXY(e);
+      const d = drag;
+      if (d === null) {
+        const over = hit(x, y);
+        canvas.style.cursor =
+          over === null || locked ? "pointer" : over.part === "body" ? "grab" : "ew-resize";
+        return;
+      }
+      if (d.mode === "scrub") {
         seek(e);
+      } else if (d.mode === "trim") {
+        d.sourceMs = trimTarget(d.clip, d.edge, scrollMs + x / pxPerMs);
+        preview = withTrim(clips, d.clip.id, d.edge, d.sourceMs);
+        dragUi = { kind: "trim", x };
+      } else if (d.mode === "press") {
+        if (Math.abs(x - d.startX) > 4) {
+          const next: MoveDrag = {
+            mode: "move",
+            clip: d.clip,
+            grabDx: d.startX - xPos(d.clip.start_ms),
+            slot: d.clip.position,
+          };
+          drag = next;
+          updateMove(next, x);
+        }
+      } else {
+        updateMove(d, x);
       }
     }
     function up(): void {
-      dragging = false;
+      const d = drag;
+      drag = null;
+      if (d === null) {
+        return;
+      }
+      if (d.mode === "trim") {
+        const current = d.edge === "in" ? d.clip.in_ms : d.clip.out_ms;
+        if (d.sourceMs !== current) {
+          void finish(ontrim(d.clip.id, d.edge, d.sourceMs));
+        } else {
+          preview = null;
+          dragUi = null;
+        }
+      } else if (d.mode === "move") {
+        if (d.slot !== d.clip.position) {
+          void finish(onreorder(d.clip.id, d.slot));
+        } else {
+          dragUi = null;
+        }
+      }
+    }
+    function cancel(): void {
+      drag = null;
+      preview = null;
+      dragUi = null;
     }
     function wheel(e: WheelEvent): void {
       if (canvas === null) {
@@ -295,13 +471,13 @@
     canvas.addEventListener("pointerdown", down);
     canvas.addEventListener("pointermove", move);
     canvas.addEventListener("pointerup", up);
-    canvas.addEventListener("pointercancel", up);
+    canvas.addEventListener("pointercancel", cancel);
     canvas.addEventListener("wheel", wheel, { passive: false });
     return () => {
       canvas.removeEventListener("pointerdown", down);
       canvas.removeEventListener("pointermove", move);
       canvas.removeEventListener("pointerup", up);
-      canvas.removeEventListener("pointercancel", up);
+      canvas.removeEventListener("pointercancel", cancel);
       canvas.removeEventListener("wheel", wheel);
     };
   });
@@ -312,7 +488,7 @@
     <button type="button" onclick={() => zoomAt(1 / 1.5, viewWidth / 2)}>Zoom out</button>
     <button type="button" onclick={() => zoomAt(1.5, viewWidth / 2)}>Zoom in</button>
     <button type="button" onclick={fit}>Fit</button>
-    <span class="hint">Click or drag to seek, click a clip to select it. Wheel scrolls, Ctrl+wheel zooms.</span>
+    <span class="hint">Click the ruler to seek, click a clip to select it, drag its edge to trim, drag it sideways to reorder. Wheel scrolls, Ctrl+wheel zooms.</span>
   </div>
   <div class="view" bind:clientWidth={viewWidth}>
     <canvas bind:this={canvasEl} style:width="{viewWidth}px" style:height="{HEIGHT}px"></canvas>
