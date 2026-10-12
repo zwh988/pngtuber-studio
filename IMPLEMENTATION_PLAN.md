@@ -55,11 +55,11 @@ Done when: create a project, add footage, restart the app, and everything is int
 
 ## M2. Cut and splice editor (L)
 
-- [ ] M2-1 Time-mapping module (source to timeline and back, including speed) with unit tests
-- [ ] M2-2 Timeline canvas component: ruler, zoom/scroll, playhead, lanes framework
+- [x] M2-1 Time-mapping module (source to timeline and back, including speed) with unit tests
+- [x] M2-2 Timeline canvas component: ruler, zoom/scroll, playhead, lanes framework
 - [ ] M2-3 Clip operations with undo: split, ripple-delete, trim, reorder, set speed
 - [ ] M2-4 Segment-hopping playback in the player
-- [ ] M2-5 Anchoring helpers: re-map anchored items on edit, orphan detection
+- [x] M2-5 Anchoring helpers: re-map anchored items on edit, orphan detection
 - [ ] M2-6 Hotkeys: S, Delete, [ and ], frame step, Space
 
 Done when: a rack can be cut to a rough edit and played back with correct timing, and orphan flags appear when anchored moments are cut.
