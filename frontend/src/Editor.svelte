@@ -9,6 +9,8 @@
     type FootageItem,
     type TimelineState,
   } from "./api";
+  import { clock } from "./format";
+  import Player from "./Player.svelte";
 
   let { onclose }: { onclose: () => void } = $props();
 
@@ -17,18 +19,15 @@
   let error = $state<string | null>(null);
   let notice = $state<string | null>(null);
   let busy = $state(false);
+  let selectedId = $state<string | null>(null);
+
+  /** The selected clip, or the first one when nothing (or a vanished clip) is selected. */
+  const selected = $derived(
+    timeline?.clips.find((c) => c.id === selectedId) ?? timeline?.clips[0] ?? null,
+  );
 
   function message(err: unknown): string {
     return err instanceof Error ? err.message : String(err);
-  }
-
-  /** m:ss.mmm, for clip and total times. */
-  function clock(ms: number): string {
-    const total = Math.max(0, Math.round(ms));
-    const minutes = Math.floor(total / 60000);
-    const seconds = Math.floor((total % 60000) / 1000);
-    const millis = total % 1000;
-    return `${minutes}:${String(seconds).padStart(2, "0")}.${String(millis).padStart(3, "0")}`;
   }
 
   function fileName(path: string): string {
@@ -122,6 +121,12 @@
   {#if timeline === null}
     <p>Loading...</p>
   {:else}
+    {#if selected !== null}
+      <section>
+        <Player clip={selected} />
+      </section>
+    {/if}
+
     <section>
       <h3>Footage</h3>
       {#if sources.length === 0}
@@ -172,9 +177,16 @@
           </thead>
           <tbody>
             {#each timeline.clips as clip (clip.id)}
-              <tr class:missing={clip.source?.file_missing ?? true}>
+              <tr
+                class:missing={clip.source?.file_missing ?? true}
+                class:selected={selected !== null && clip.id === selected.id}
+              >
                 <td>{clip.position + 1}</td>
-                <td class="file">{sourceName(clip.source_id)}</td>
+                <td class="file">
+                  <button type="button" class="pick" onclick={() => (selectedId = clip.id)}>
+                    {sourceName(clip.source_id)}
+                  </button>
+                </td>
                 <td>{clock(clip.start_ms)} to {clock(clip.end_ms)}</td>
                 <td>{clock(clip.duration_ms)}</td>
                 <td>{clock(clip.in_ms)} to {clock(clip.out_ms)}</td>
@@ -240,6 +252,20 @@
   }
   td.file {
     overflow-wrap: anywhere;
+  }
+  tr.selected td {
+    background: #4a90e233;
+  }
+  .pick {
+    background: none;
+    border: none;
+    padding: 0;
+    margin: 0;
+    color: inherit;
+    font: inherit;
+    text-align: left;
+    text-decoration: underline;
+    cursor: pointer;
   }
   tr.missing td,
   li.missing {
