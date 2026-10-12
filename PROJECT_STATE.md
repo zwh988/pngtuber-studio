@@ -2,9 +2,9 @@
 
 Living document: how the project works right now and where everything lives. **Update it at the end of every task** (see the checklist in `CLAUDE.md`). Keep it factual and short; link to files instead of copying code.
 
-- **Last updated:** 2026-10-12 (M2 chat A: S1 decisions and S2 time mapping done)
-- **Current milestone:** M2 in progress, branch `m2-timeline` (M1 merged and tagged `m1-done`). Chat A finished S1 (decisions 1 to 10, logged below) and S2 (`backend/edl/timemap.py`, committed on the branch). Next: chat B (S3 to S5: clip commands, orphan logic, reference check). Chats C (API, media server) and D (editor screen, wrap-up) follow; merge and tag `m2-done` only after chat D.
-- **Overall status:** M0 verdict GO (see "M0 findings"). The app runs: a pywebview window shows a Svelte project screen backed by FastAPI (create from template, open, Recent, footage scan, rescan, relink). New in M2 so far: pure time mapping and frame snapping (`backend/edl/timemap.py`). There are still no clip commands, no editor screen, no media endpoint, and no voice, audio, avatar or export. No `install.bat` / `run.bat` yet.
+- **Last updated:** 2026-10-12 (M2 chat B: S3 to S5 done, committed)
+- **Current milestone:** M2 in progress, branch `m2-timeline` (M1 merged and tagged `m1-done`). Chat A finished S1 (decisions, logged below) and S2 (`timemap.py`). Chat B finished S3 to S5: all seven clip commands, orphan flagging and parking, `find_orphans`, `check_references` (all user-confirmed passing and committed). Next: chat C (S6 backend API, S7 media server). Chat D (editor screen, wrap-up) follows; merge and tag `m2-done` only after chat D.
+- **Overall status:** M0 verdict GO (see "M0 findings"). The app runs: a pywebview window shows a Svelte project screen backed by FastAPI (create from template, open, Recent, footage scan, rescan, relink). New in M2 so far, all pure backend logic with tests and **no API or UI yet**: time mapping and frame snapping (`backend/edl/timemap.py`), the clip commands (`backend/project/clip_commands.py`, `cut_commands.py`), orphan logic and the reference check (`backend/edl/anchoring.py`, `backend/project/parking.py`). There is no editor screen, no media endpoint, and no voice, audio, avatar or export. No `install.bat` / `run.bat` yet.
 
 ## How to run / test
 
@@ -15,7 +15,7 @@ Living document: how the project works right now and where everything lives. **U
 uv sync                      # Python 3.11, torch 2.6.0+cu126, chatterbox-tts, fastapi, uvicorn, pywebview, pydantic, pytest, ruff, httpx (dev)
 
 # tests and lint (from repo root)
-uv run pytest                # 260 tests expected (222 + 38 in tests/test_timemap.py); user confirmed all pass after the M2-S2 commit
+uv run pytest                # all pass (user confirmed after M2-S5). 260 tests before chat B; the four new test files below added more, so record the new total from the next summary line here
 uv run ruff check .
 
 # frontend (needs Node.js LTS: node v24.21.0 / npm 11.19.0 on the dev machine; build-time only)
@@ -71,6 +71,9 @@ Status values: `empty` (placeholder only), `partial`, `done`.
 | `backend/project/autosave.py` | pure `AutosaveTracker` (debounce + max wait). **Not wired**; the app saves on every change instead (see decisions) | done (M1-2), unused |
 | `backend/project/footage.py` | ffprobe wrapper, probe parsing, `footage/` scan producing Sources | done (M1-3) |
 | `backend/project/commands.py` | `Command` base, M1 commands, `CommandStack` undo/redo with groups | done (M1-4) |
+| `backend/project/clip_commands.py` | track-0 clip commands: `AddClip`, `RemoveClip` (parks orphans), `SetSpeed`, `ReorderClip` | done (M2-S3, S5) |
+| `backend/project/cut_commands.py` | `SplitClip`, `TrimClip`, `RippleDelete` (frame snapping, minimum clip length, orphan parking, split re-pointing) | done (M2-S4, S5) |
+| `backend/project/parking.py` | applies and undoes orphan parking: `collect_cut_away`, `park_cut_away`, `restore_parked`, `ParkedItem` | done (M2-S5) |
 | `backend/project/template.py` | channel template load, validate, apply to a new project | done (M1-5) |
 | `backend/project/session.py` | `Session`: the one open project, new/open, footage scan, relink, recent list, save on change | done (M1-6) |
 | `backend/project/summary.py` | pure `ProjectSummary`, `FootageItem`, `FootageReport`, `summarize`, `describe_source` | done (M1-6) |
@@ -78,7 +81,8 @@ Status values: `empty` (placeholder only), `partial`, `done`.
 | `backend/project/relink.py` | pure `to_footage_relpath`, `relink_mismatches` | done (M1-6) |
 | `backend/edl/__init__.py` | package marker | done (M2-S2) |
 | `backend/edl/timemap.py` | pure time mapping: `clip_spans`, `timeline_duration`, `to_timeline`, `to_source`, frame helpers (`snap_to_frame`, `ms_to_frame`, `frame_to_ms`), `round_half_up` | done (M2-S2) |
-| `backend/edl/` (rest) | anchoring/orphan logic (M2-S5), ffmpeg graph builder (M6) | empty |
+| `backend/edl/anchoring.py` | pure orphan and reference logic: `anchored_items`, `items_in_source_range`, `find_orphans`, `edge_anchors`, `park_anchor`, `check_references`, `ReferenceProblem` | done (M2-S5) |
+| `backend/edl/` (rest) | ffmpeg graph builder (M6) | empty |
 | `backend/voice/` | GPU worker, takes, cache keys, queue | empty |
 | `backend/audio/` | FX chain, loudness, envelopes | empty |
 | `backend/avatar/` | art loader, solver, compositor | empty |
@@ -98,6 +102,10 @@ Status values: `empty` (placeholder only), `partial`, `done`.
 | `tests/test_relink.py` | relink helpers, session relink, endpoint (17) | done |
 | `tests/test_app.py` | hello, static serving, project endpoints (8) | done |
 | `tests/test_timemap.py` | rounding, frame snapping, spans, speeds, trims, reorder, boundaries, round trips at 60 and 59.94 fps (38) | done (M2-S2) |
+| `tests/test_clip_commands.py` | `AddClip`, `RemoveClip`, `SetSpeed`, `ReorderClip`: positions, other tracks, undo/redo, groups | done (M2-S3) |
+| `tests/test_cut_commands.py` | `SplitClip`, `TrimClip`, `RippleDelete`: snapping, speed, minimum length, item re-pointing, undo/redo, groups | done (M2-S4) |
+| `tests/test_anchoring.py` | pure anchoring: item lookup, edge anchors, parking choice and ties, `find_orphans`, `check_references` | done (M2-S5) |
+| `tests/test_orphans.py` | orphan flagging and parking inside the commands, exact undo/redo, re-parking, rollback in a group, edits that must not orphan | done (M2-S5) |
 
 ## Project folder layout (user data, not in this repo)
 
@@ -118,7 +126,7 @@ MyRack/
 - `Source`: `id`, `external` (default false), `path`, `duration_ms`, `fps_num`/`fps_den` (property `fps`), `width`, `height`, `audio_tracks`. When `external` is true the path must be absolute POSIX (template bookends live outside the project); otherwise it must be relative.
 - `ChannelTemplate`: `name`, `intro` / `outro` (`BookendRef(path)` or null), `voice_profile`, `fx_chain`, `avatar`, `export`, `game_audio_db`.
 - Root `Project` fields: `schema_version`, `name`, `seed`, `sources`, `clips`, `lines`, `takes`, `placements`, `keyframes`, `reactions`, `voice_profiles`, `fx_chain`, `game_audio_db` (default 0.0), `avatar`, `export`. Unique ids per collection are validated; cross-references are not.
-- `Clip` uses `in_ms`/`out_ms`, `speed` 0.25 to 8, `track`, `overlay`, `effects`. `Placement`, `Keyframe`, `Reaction` carry `orphaned: bool` (set by M2 logic; M1 stores only).
+- `Clip` uses `in_ms`/`out_ms`, `speed` 0.25 to 8, `track`, `overlay`, `effects`. `Placement`, `Keyframe`, `Reaction` carry `orphaned: bool`, set by the M2 commands (see "Anchoring and parking API"). **No schema change in M2 so far; no migration needed.**
 
 **Store API** (`backend/project/store.py`): `create_project(folder, project)`, `load_project(folder, *, use_backup=False, migrations=None)`, `save_project(folder, project)`, `ensure_layout(folder)`, `project_file`/`backup_file`. Errors: `ProjectError`, `ProjectExistsError`, `ProjectLoadError`.
 - Save order: temp file (flush, fsync) in the project folder, copy current `project.json` to `.bak` (only if it is valid JSON), `os.replace` temp over `project.json`. Failure leaves the old file and cleans up temp files.
@@ -135,6 +143,12 @@ MyRack/
 - Rounding: `round_half_up` (exact Fraction math; speed is read from its decimal `repr`, so 1.1 is exact). `ms_to_frame`, `frame_to_ms` (frame k at `round(k * 1000 * fps_den / fps_num)`), `snap_to_frame(ms, fps_num, fps_den)`. The module takes fps as arguments; commands look up the source fps and snap before calling.
 - Round-trip bounds (asserted in tests): timeline to source to timeline is exact at speed >= 1 and within `1/speed` ms below 1; source to timeline to source is within `speed/2 + 0.5` ms.
 
+**Anchoring and parking API** (`backend/edl/anchoring.py` is pure; `backend/project/parking.py` changes in-memory objects only; M2-S5, user confirmed tests pass):
+- `AnchoredItem = Placement | Keyframe | Reaction`. `anchored_items(project, clip_id=None)` (placements, then keyframes, then reactions), `items_in_source_range(project, clip_id, lo, hi)` (`lo` inclusive, `hi` exclusive, `hi=None` unbounded), `item_kind(item)`, `find_orphans(project)` (items flagged `orphaned`; for the export pre-flight).
+- `edge_anchors(clips, cut_ms, *, spans=None) -> (before, after)`: `before` = `Anchor(last clip ending at or before cut_ms, out_ms - 1)`, `after` = `Anchor(first clip starting at or after cut_ms, in_ms)`; either is `None` when there is no footage on that side. `park_anchor(clips, cut_ms, offset_ms, region_ms, *, spans=None) -> Anchor | None` picks the nearer edge by old-timeline distance (offset clamped to the region), a tie goes to `before`, and it returns `None` when no clip survives.
+- `check_references(project) -> list[ReferenceProblem]`; `ReferenceProblem(kind, owner_id, missing_id, message)` with kind `clip_missing_source` or `item_missing_clip`. It only reports; it never changes the project and never blocks loading.
+- `parking.py`: a command calls `collect_cut_away(project, cuts, region_start_ms)` **before** changing clips (`cuts` = `(clip_id, lo, hi_or_None)` source ranges; offsets are measured in the old timeline), then `park_cut_away(project, cut_away, *, cut_ms, region_ms)` **after**, keeps the returned `list[ParkedItem(item, old_anchor, old_orphaned)]`, and calls `restore_parked(parked)` in `revert`. An item with no surviving clip is flagged and keeps its anchor.
+
 **Footage API** (`backend/project/footage.py`):
 - Pure: `parse_rate(text) -> (num, den)`, `parse_probe(data, rel_path, source_id=None) -> Source` (ffprobe JSON from `-show_streams -show_format`), `plan_scan(found, known) -> ScanPlan(to_probe, present, missing)`.
 - I/O: `default_ffprobe_path()` (= `<repo>/bin/ffprobe.exe`), `run_ffprobe(path, ffprobe=None, timeout_s=60)`, `list_footage_files(project_folder)` (relative POSIX paths under `footage/`, recursive), `scan_footage(project_folder, known=(), *, probe=None) -> ScanResult(new_sources, present, missing, errors)`.
@@ -146,6 +160,14 @@ MyRack/
 - `Command` (abstract): `label`, `apply(project)`, `revert(project)`. `apply` validates first and raises `CommandError` before changing anything; it records what it needs to undo itself, and may be re-applied after `revert` (redo).
 - Commands: `AddSource(source)` (rejects duplicate id or case-insensitive duplicate path; stores a deep copy), `RemoveSource(source_id)` (refused with `CommandError` while any clip uses the source; undo restores the original list position), `RenameProject(name)` (strips; empty name rejected at construction), `RelinkSource(source_id, new_path)` (path only, no re-probe; rejects invalid paths and paths used by another source).
 - `CommandStack(project, on_change=None)`: `execute(cmd)`, `group(label)` context manager, `undo()` / `redo()` (return the label or `None`), `clear()`, `can_undo`, `can_redo`, `undo_label`, `redo_label`, `in_group`, `project`. A new command clears redo. A group is one undo step; if its block raises, applied commands are reverted, nothing is recorded, and the previous redo stack is restored. Nested groups merge into the outermost. Undo, redo and clear raise `CommandError` while a group is open. `on_change` fires once per top-level change (execute outside a group, committed group, undo, redo) and never for failures, empty groups or rollbacks.
+
+**Clip command API** (`backend/project/clip_commands.py`, `backend/project/cut_commands.py`; M2-S3 to S5, user confirmed tests pass). All follow the command contract above, edit **track-0 clips only** (a clip on another track or an unknown id is refused), and leave other-track clips untouched. Positions count among track-0 clips, not raw list indices. All times are integer ms.
+- `AddClip(source_id, *, position=None, clip_id=None)`: a clip covering the whole source (in 0, out `duration_ms`, speed 1, overlay on). Default position is before a trailing bookend (last clip, `external` source, `overlay=False`), else the end. Refused for an unknown source, a duplicate clip id, a bad position, or a source shorter than one frame. The clip id is generated when the command is created, so redo reuses it.
+- `RemoveClip(clip_id)`: ripple; items anchored to the clip are flagged and parked. `SetSpeed(clip_id, speed)`: 0.25 to 8; setting the current speed is refused (no empty undo step); later clips ripple, anchors keep their source time. `ReorderClip(clip_id, new_position)`: `new_position` is the position after the move; the same position is refused; anchors are untouched.
+- `SplitClip(timeline_ms, *, right_clip_id=None)`: splits the clip under the time. The cut snaps to the source frame grid. The left half keeps the clip id, the right half gets `right_clip_id` and is inserted right after it; items at or after the cut move to the right half. Refused at an existing cut, outside the timeline, or when a half would be under one frame.
+- `TrimClip(clip_id, edge, source_ms)`: `edge` is `"in"` or `"out"`; the value is a **source** time, snapped to the frame grid (not at 0 or the source's end, and clamped to the source). It can also extend a clip. Refused when under one frame would remain, or when the clip already has that edge. Items in the trimmed-away footage are flagged and parked.
+- `RippleDelete(start_ms, end_ms, *, right_clip_id=None)`: removes the timeline range `[start, end)` and closes the gap: covered clips are removed, partly covered clips trimmed, and a clip that strictly contains the range is split (left keeps the id, right gets `right_clip_id`). Items in the removed footage are flagged and parked; items after a split move to the right half. Refused for an empty or out-of-range range, when it would leave under one frame of a clip (the message says to extend or shorten the range), or when it is shorter than one source frame.
+- Constants `SPEED_MIN = 0.25`, `SPEED_MAX = 8.0`. Commands that create a clip (`SplitClip`, `RippleDelete`) expose `right_clip_id` so the API and UI can read the new id.
 
 **Template API** (`backend/project/template.py`): `default_template_path()` (= `<repo>/templates/default_channel.json`), `normalize_bookend_path(raw)` (backslashes to forward slashes), `parse_template(data)`, `load_template_file(path=None)`, `external_source(probed, path)` (turns a probed Source into an `external` one), `apply_template(template, name, *, intro_source=None, outro_source=None, seed=None) -> Project`. Error: `TemplateError`.
 - The caller probes bookend files (Session does this with ffprobe) and passes the Sources in. A bookend in the template without a matching source, or the reverse, is an error.
@@ -259,14 +281,19 @@ MyRack/
 | 2026-10-12 | M2: rounding is half up with exact math (never banker's, never floor). Clip timeline length = `round((out - in) / speed)`; source to timeline = `start + round((source_ms - in) / speed)`; timeline to source clamps to `out - 1`. A valid anchor has `in <= source_ms < out`; `to_timeline` also accepts `source_ms == out` (clip end). Implemented and tested in M2-S2 |
 | 2026-10-12 | M2: cut points and trim edges snap to the nearest frame of that source; the playhead and anchors never snap; a source's own ends (0 and `duration_ms`) are not snapped. `timemap.py` takes fps as arguments; commands do the snapping |
 | 2026-10-12 | M2: round-trip error is not always 1 ms. Timeline to source to timeline is exact at speed >= 1, within `1/speed` ms below 1; source to timeline to source within `speed/2 + 0.5` ms. At speed > 1 an anchor in the last half-speed ms of a clip maps to the clip end, which is the next clip's start (quantization edge, tested) |
-| 2026-10-12 | M2 (decided, not yet built): orphan parking rewrites the anchor to the nearest surviving clip edge and sets `orphaned=True`; the command stores the old anchor and flag so undo restores them exactly. "Nearest" is by timeline distance, ties to the earlier edge. Parking on an out edge uses `out_ms - 1`. If no clips survive the anchor is left as is and flagged (reported by `check_references`). Nothing un-orphans except undo; resolving is a later re-anchor command |
-| 2026-10-12 | M2 (decided, not yet built): "add to timeline" adds a clip covering the whole source (in 0, out `duration_ms`, speed 1, overlay on). It inserts before a trailing bookend (last clip, `external` source, `overlay=False`), otherwise at the end, or at an explicit index |
-| 2026-10-12 | M2 (decided, not yet built): reference validation is a separate pure `check_references(project)` returning a list of problems, called by commands before applying and by the session after load. It never makes an old file unloadable; `Project` gets no cross-reference validator |
-| 2026-10-12 | M2 (decided, not yet built): a clip must be at least one source frame long. Splitting at an existing cut or outside a clip is refused with a clear message. Ripple-delete trims partially covered clips and removes fully covered ones |
-| 2026-10-12 | M2 (decided, not yet built): speed changes ripple later clips (their start moves, their anchors do not). Anchors inside a changed clip keep their source time, so their timeline time scales with the clip |
-| 2026-10-12 | M2 (decided, not yet built): on split the left half keeps the original clip id and the right half gets a new id. Anchored items with `source_ms >= split point` are re-pointed to the right half (not orphaned); an anchor exactly at the split point goes to the right half |
-| 2026-10-12 | M2 (decided, not yet built): ripple-delete of a range strictly inside one clip leaves two clips (left keeps the id, right is new). Anchors inside the deleted range are orphaned and parked; anchors after it move to the right half's id |
+| 2026-10-12 | M2: orphan parking (built in M2-S5): the anchor is rewritten to the nearest surviving clip edge and `orphaned=True` is set; the command stores the old anchor and flag so undo restores them exactly. "Nearest" is measured in the **old** timeline, from the item's old position to the two ends of the removed footage (after a ripple both edges sit at the same new time); ties go to the earlier edge. The earlier edge is the last frame of the clip before the cut (`out_ms - 1`), the later edge is `in_ms` of the clip after it. If no clip survives the anchor is left as is and flagged (reported by `check_references`). Nothing un-orphans except undo; resolving is a later re-anchor command |
+| 2026-10-12 | M2: "add to timeline" (built in M2-S3) adds a clip covering the whole source (in 0, out `duration_ms`, speed 1, overlay on). It inserts before a trailing bookend (last clip, `external` source, `overlay=False`), otherwise at the end, or at an explicit position |
+| 2026-10-12 | M2: reference validation is a separate pure `check_references(project)` returning `ReferenceProblem`s (clip missing source, item missing clip). It never makes an old file unloadable; `Project` gets no cross-reference validator. **Changed from the earlier plan:** the commands do not call it (each already validates its own target ids, and refusing every edit on a file with one old broken reference seemed worse). The session is to call it after load (S6) |
+| 2026-10-12 | M2: a clip must be at least one source frame long (`max(1, frame_to_ms(1, fps))` ms of source time). Splitting at an existing cut or outside the timeline is refused with a clear message. Ripple-delete trims partially covered clips and removes fully covered ones, and refuses a range that would leave under one frame of a clip or that is shorter than one source frame. Built in M2-S3 and S4 |
+| 2026-10-12 | M2: speed changes ripple later clips (their start moves, their anchors do not). Anchors inside a changed clip keep their source time, so their timeline time scales with the clip. Built as `SetSpeed` (M2-S3) |
+| 2026-10-12 | M2: on split the left half keeps the original clip id and the right half gets a new id. Anchored items with `source_ms >= split point` are re-pointed to the right half (not orphaned); an anchor exactly at the split point goes to the right half. Built as `SplitClip` (M2-S4) |
+| 2026-10-12 | M2: ripple-delete of a range strictly inside one clip leaves two clips (left keeps the id, right is new). Anchors inside the deleted range are orphaned and parked; anchors after it move to the right half's id. Built as `RippleDelete` (M2-S4, S5) |
 | 2026-10-12 | M2: still-frame images as footage and freeze-frame of part of a clip are not in v1 (CLAUDE.md out-of-scope: freeze effects; the footage scan only knows video files). The model leaves room through `Clip.effects` and the effect registry. Possible backlog item; no M2 change |
+| 2026-10-12 | M2 (chat B): the clip commands live in new files `backend/project/clip_commands.py` and `backend/project/cut_commands.py`, not in `commands.py`, which stays the M1 base layer (`Command`, `CommandStack`, source commands). The new files import `Command`, `CommandError` and `_find_source` from it |
+| 2026-10-12 | M2 (chat B): clip commands edit track-0 clips only; positions (`AddClip.position`, `ReorderClip.new_position`) count among track-0 clips, not raw list indices. Commands that create a clip take an optional id (`clip_id`, `right_clip_id`) generated at construction so redo reuses the same id |
+| 2026-10-12 | M2 (chat B): `TrimClip` takes a source time (the `[` and `]` hotkeys convert the playhead to source time first) and can extend a clip as well as shorten it. No-op edits (same speed, same position, same edge) are refused so they never create an empty undo step |
+| 2026-10-12 | M2 (chat B): orphan parking is applied by `RemoveClip`, `TrimClip` and `RippleDelete` through `backend/project/parking.py` (collect before the edit, park after, restore on revert). `ReorderClip`, `SetSpeed` and `SplitClip` orphan nothing. An already orphaned item that is cut again is re-parked and stays flagged; undo restores its previous anchor and flag. This replaced the temporary "refused while anchored" guards used in S3 and S4 |
+| 2026-10-12 | M2 (chat B): the speed > 1 quantization edge is **ignored by parking**. A parked `out_ms - 1` anchor stays tied to its own clip; only UI hit-testing could notice the edge |
 
 ## Known issues / open questions
 
@@ -280,7 +307,7 @@ MyRack/
 - OBS recordings have one mixed audio track (game and mic together); confirm this is the expected workflow.
 - Harmless warnings seen: `pkg_resources` deprecation (from perth), diffusers `LoRACompatibleLinear` deprecation, `sdpa` attention note, unauthenticated Hugging Face Hub notice; pytest shows one Starlette `TestClient` DeprecationWarning about an `anyio` alias (inside site-packages, goes away with a library update); `npm install` warns that esbuild has an install script not yet allowed (the build works).
 - Seek latency was measured on a 4.8 GB file by eye from the page log; no systematic benchmark.
-- The schema validates unique ids but not cross-references (for example `Clip.source_id` pointing at a real source). Only `RemoveSource` guards the source-in-use case today; M2 clip commands need the same care.
+- The schema validates unique ids but not cross-references. `check_references` (M2-S5) reports broken ones but nothing calls it yet; the session should call it after load (S6). `RemoveSource` still refuses while a clip uses the source.
 - **Rescan after a move creates a duplicate:** if a footage file is moved to another path inside `footage/` and the user clicks Rescan before relinking, the new location is added as a new source and the old one stays missing. Relink first. A "looks like the same file" hint is a possible later improvement.
 - Relinking `external` (template bookend) sources is not supported. Bookend probing is implemented but has never run against a real intro/outro clip (the default template has none), so treat it as untested until a template with bookends is tried.
 - `RelinkSource` itself is still path-only; the metadata check is in `Session.relink_source`. M2 code that relinks must go through the session or repeat the check.
@@ -292,12 +319,19 @@ MyRack/
 - ffprobe reports a 12.8 s duration for a nominal 10 s `-c copy` clip (probably keyframe alignment; not verified).
 - No file watcher for `footage/` (by design for M1): rescan on open plus the Rescan button.
 - The project screen shows voice profile and avatar art as simple "not configured" / "path set" text only; real validation comes with M3-1 and M5-1.
-- M2: at speed > 1, an anchor in the last half-speed milliseconds of a clip maps to that clip's end, which is the next clip's start, so a later `to_source` returns the next clip. Known quantization edge; decide in chat B whether parking or the UI should care.
+- M2: at speed > 1, an anchor in the last half-speed milliseconds of a clip maps to that clip's end, which is the next clip's start, so a later `to_source` returns the next clip. Known quantization edge. Decided in chat B: parking ignores it (see decisions log). The editor UI (chat D) may want to treat it in hit-testing.
 - M2: still images and freeze-frames are not supported in v1 (see decisions log). Revisit only if the user adds a backlog item.
 - M2-S2 tests were first run in a sandbox with a stand-in `Clip`/`Anchor`, then confirmed by the user on the real repo (all passing, ruff clean after one PIE808 fix).
+- M2 chat B: the S3 to S5 code and tests were written without being run by the assistant (no pydantic or pytest in its sandbox); the user ran them on the real repo and confirmed pytest and ruff pass. The test files use multiples of 50 ms because those land exactly on the 60 fps frame grid.
+- M2: there is **no Session method, endpoint or UI** for the clip commands yet (chat C builds the API, chat D the editor). Nothing in M2 creates placements, keyframes or reactions, so orphan behaviour is covered by unit tests with items built directly.
+- M2: orphans cannot be resolved yet (no re-anchor command, no UI). A parked item sits exactly at a clip edge and keeps `orphaned=True` until a later milestone adds the resolve action.
+- M2: the new command modules import private helpers across modules (`_find_source` from `commands.py`, `_find_timeline_clip` and `_min_clip_ms` from `clip_commands.py`). Fine for now; tidy if more modules need them.
+- M2: `RippleDelete` refuses a range that would leave a sliver under one frame of a clip, so a drag selection near a cut may need to be extended or shortened. Chat D should surface the command's message.
+- M2: `TrimClip` and `RippleDelete` drag operations should be wrapped in `CommandStack.group` by the API/UI so one drag is one undo step (the stack supports it; nothing uses it yet). Save per change may need the `AutosaveTracker` for drags.
 
 ## Next up
 
-1. Tick the M2 plan items for S1 and S2 once the real ids are known (the plan section has not been pasted yet; paste the M2 section of `IMPLEMENTATION_PLAN.md` at the start of chat B and fill the ids into the top of `docs/tasks/M2-timeline.md`).
-2. Chat B (S3 to S5): clip commands (`AddClip`, `RemoveClip`, `SetSpeed`, `ReorderClip`, then `SplitClip`, `TrimClip`, `RippleDelete`), orphan functions, `check_references`. Paste: `CLAUDE.md`, this file, `docs/tasks/M2-timeline.md`, spec section 5 anchoring rule, spec section 9 "Operations" and "Undo/redo" bullets, `backend/project/schema.py`, `backend/project/commands.py`, `backend/edl/timemap.py`. The assistant states whether the new commands go in `commands.py` or a new `clip_commands.py`.
-3. Commit this file on `m2-timeline` before starting chat B. Stay on the same branch through chat D.
+1. Tick in `IMPLEMENTATION_PLAN.md`: **M2-1** (time mapping), **M2-3** (clip operations with undo) and **M2-5** (anchoring helpers, orphan detection). Fill the plan ids into the top of `docs/tasks/M2-timeline.md` (A: M2-1; B: M2-3, M2-5; C: backend API for the editor; D: M2-2, M2-4, M2-6 and wrap-up).
+2. Chat C (S6 backend API, then S7 media server): extend `Session` and `app.py` with timeline state (clip spans, duration, per-clip source info), one endpoint per clip operation (or one generic edit endpoint) using the commands above, `undo` / `redo` returning the label and new state, and a source video endpoint with Range support keyed by source id. Call `check_references` after load and report problems in the summary. Paste: `CLAUDE.md`, this file, `docs/tasks/M2-timeline.md`, `backend/project/session.py`, `backend/app.py`, `backend/project/summary.py`, and the M0 Range code (`scripts/spike/player_spike.py`: `parse_range`, `iter_file`). The assistant asks for other files by path.
+3. Chat D (editor screen, then wrap-up): Svelte editor with the segment-hopping player, canvas timeline, hotkeys, one undo step per drag. Merge and tag `m2-done` only after chat D.
+4. Stay on branch `m2-timeline` through chat D. Commit this file there before starting chat C.
