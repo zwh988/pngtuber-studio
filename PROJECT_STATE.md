@@ -2,9 +2,9 @@
 
 Living document: how the project works right now and where everything lives. **Update it at the end of every task** (see the checklist in `CLAUDE.md`). Keep it factual and short; link to files instead of copying code.
 
-- **Last updated:** 2026-10-12 (M2 chat C: S6 backend API and S7 media server done, committed)
-- **Current milestone:** M2 in progress, branch `m2-timeline` (M1 merged and tagged `m1-done`). Chat A: S1 (decisions) and S2 (`timemap.py`). Chat B: S3 to S5 (clip commands, orphan parking, `check_references`). Chat C: S6 (timeline state, edit endpoints, undo/redo, batch edits) and S7 (media endpoint with Range support), all user-confirmed passing and committed. Next: chat D (S8 editor screen, S9 wrap-up). Merge and tag `m2-done` only after chat D.
-- **Overall status:** M0 verdict GO (see "M0 findings"). The app runs: a pywebview window shows a Svelte project screen backed by FastAPI (create from template, open, Recent, footage scan, rescan, relink). New in M2 so far: time mapping, clip commands, orphan logic and the reference check (pure backend, chats A and B), and now the whole backend for the editor (chat C): `GET /api/timeline`, one endpoint per edit operation, undo/redo, grouped batch edits, and `GET /media/source/{id}` serving footage with Range requests. **There is still no editor screen**; the typed frontend API for it is in `frontend/src/api.ts`. No voice, audio, avatar or export. No `install.bat` / `run.bat` yet.
+- **Last updated:** 2026-10-12 (M2 chat D: editor screen S8a to S8f and wrap-up. M2 is finished on branch `m2-timeline`; merge and tag `m2-done` are the user's next commands)
+- **Current milestone:** M2 complete (pending merge to `main` and tag `m2-done`). Chat A: S1, S2 (`timemap.py`). Chat B: S3 to S5 (clip commands, orphan parking, `check_references`). Chat C: S6 (timeline state, edit endpoints, undo/redo, batch edits) and S7 (media endpoint). Chat D: S8a to S8f (editor screen) and S9 (wrap-up). Next: M3 (voice: line bank, takes, GPU worker, placing lines). A draft task file is in `docs/tasks/M3-voice.md`; reconcile it with `IMPLEMENTATION_PLAN.md` before starting.
+- **Overall status:** M0 verdict GO (see "M0 findings"). The app runs: a pywebview window shows a Svelte project screen (create from template, open, Recent, footage scan, rescan, relink) and, new in M2, a **video editor screen** reached from "Open editor": add footage to the timeline, a player that plays across the cuts (segment hopping, clip speed with pitch preserved), a custom canvas timeline (ruler, clips, cut markers, speed badges, playhead, zoom and scroll), clip selection, drag to trim and reorder, the hotkeys from spec 4.2, and unlimited undo/redo. The backend behind it (time mapping, clip commands, orphan logic, reference check, timeline API, media server) is pure and tested (490 tests passing). No voice, audio, avatar or export yet. No `install.bat` / `run.bat` yet.
 
 ## How to run / test
 
@@ -15,7 +15,7 @@ Living document: how the project works right now and where everything lives. **U
 uv sync                      # Python 3.11, torch 2.6.0+cu126, chatterbox-tts, fastapi, uvicorn, pywebview, pydantic, pytest, ruff, httpx (dev)
 
 # tests and lint (from repo root)
-uv run pytest                # all pass (user confirmed after M2-S7). Test count not recorded: 406 tests at M2-S6a; `test_timeline_edit.py`, `test_edit_ops.py` and `test_media.py` were added after, so record the number from the next summary line
+uv run pytest                # 490 passed, 1 warning (user confirmed at the end of M2, 2026-10-12)
 uv run ruff check .
 
 # frontend (needs Node.js LTS: node v24.21.0 / npm 11.19.0 on the dev machine; build-time only)
@@ -40,7 +40,6 @@ uv run python scripts\spike\check_cuda.py
 uv run python scripts\spike\tts_test.py --ref "<path to reference.wav>"          # writes scripts\spike\out\
 uv run python scripts\spike\tts_grid.py --ref "<ref1.wav>" "<ref2.wav>"           # settings grid, writes scripts\spike\out\grid\
 uv run python scripts\spike\player_spike.py --video "<path to video.mkv>"          # pywebview window, prints Range requests
-uv run python scripts\dev\media_check.py --project "<project folder>"   # window playing a project source through /media/source/{id}; prints each request (throwaway dev check)
 .\bin\ffmpeg.exe -hide_banner -y -ss 20 -t 10 -i "<video.mkv>" -map 0:v:0 -map "0:a:0?" -vf "scale=-2:1080" -c:v h264_nvenc -preset p5 -rc vbr -cq 23 -b:v 0 -pix_fmt yuv420p -c:a aac -b:a 192k scripts\spike\out\nvenc_test.mp4
 ```
 
@@ -58,12 +57,11 @@ Status values: `empty` (placeholder only), `partial`, `done`.
 | `PROJECT_STATE.md` | this file | done |
 | `IMPLEMENTATION_PLAN.md` | milestones and task checklist | done |
 | `docs/DESIGN_SPEC.md` | full design spec (source of truth for behavior) | done |
-| `docs/tasks/` | per-task breakdown files (`_TEMPLATE.md`, `M0-spike.md`, `M1-foundation.md`, `M2-timeline.md`) | partial |
+| `docs/tasks/` | per-task breakdown files (`_TEMPLATE.md`, `M0-spike.md`, `M1-foundation.md`, `M2-timeline.md` done, `M3-voice.md` draft) | partial |
 | `pyproject.toml`, `uv.lock`, `.python-version` | uv project: Python 3.11 only, torch pinned to 2.6.0 from the cu126 index; pydantic, fastapi, uvicorn, pywebview; dev: pytest, ruff, httpx | partial |
 | `conftest.py` | repo-root marker so pytest can import `backend` | done |
 | `scripts/spike/*` | M0 spike scripts (check_cuda, tts_test, tts_grid, player_spike with reusable `parse_range`/`iter_file`) | done (spike) |
 | `scripts/spike/out/` | spike output, git-ignored | n/a |
-| `scripts/dev/media_check.py` | throwaway manual check: pywebview window with a `<video>` on the real media endpoint | done (M2-S7), dev only |
 | `backend/__init__.py` | package marker | done |
 | `backend/app.py` | FastAPI app factory `create_app(static_dir=None, session=None)`, `/api/*` routes (project, footage, recent, timeline and edits), `/media/source/{source_id}`, serves `frontend/dist` | done (M1-6, M2-S6, S7) |
 | `backend/main.py` | app shell: uvicorn in a thread on a free 127.0.0.1 port plus pywebview window; `Api` class with `pick_folder` / `pick_file` | done (M1-6) |
@@ -93,7 +91,12 @@ Status values: `empty` (placeholder only), `partial`, `done`.
 | `backend/audio/` | FX chain, loudness, envelopes | empty |
 | `backend/avatar/` | art loader, solver, compositor | empty |
 | `backend/export/` | export pipeline, asset bundle | empty |
-| `frontend/` | Svelte 5 + TypeScript (strict) + Vite 6 project screen: `package.json`, `package-lock.json` (committed), `vite.config.ts`, `svelte.config.js`, `tsconfig.json`, `index.html`; `src/main.ts`, `src/App.svelte`, `src/api.ts` (typed fetch wrappers, timeline and edit functions, `sourceMediaUrl`), `src/pywebview.d.ts`, `src/vite-env.d.ts`. `node_modules/` and `dist/` are git-ignored | partial (project screen only) |
+| `frontend/` | Svelte 5 + TypeScript (strict) + Vite 6: `package.json`, `package-lock.json` (committed), `vite.config.ts`, `svelte.config.js`, `tsconfig.json`, `index.html`; `src/main.ts`, `src/App.svelte` (project screen; switches to the editor with a `view` flag), `src/api.ts` (typed fetch wrappers, timeline and edit functions, `sourceMediaUrl`), `src/pywebview.d.ts`, `src/vite-env.d.ts`, and the editor files below. `node_modules/` and `dist/` are git-ignored | partial (project screen and video editor) |
+| `frontend/src/Editor.svelte` | editor screen: footage list with "Add to timeline", player, canvas timeline, selected-clip bar (speed, remove), clip table, undo/redo buttons, the hotkeys | done (M2-S8) |
+| `frontend/src/Player.svelte` | one `<video>` playing the whole sequence from the playhead: segment hopping, playback rate, scrub bar; exports `toggle()` and `pause()` | done (M2-S8) |
+| `frontend/src/Timeline.svelte` | custom canvas timeline: ruler, video strip lane, cut markers, speed badges, playhead, selection, zoom and scroll, drag trim and reorder | done (M2-S8) |
+| `frontend/src/timeline.ts` | pure display and playback helpers: `clipIndexAt`, `toSource`, `stepFrame`, `trimTarget`, `withTrim`, `dropSlot` | done (M2-S8) |
+| `frontend/src/format.ts` | `clock(ms)` as m:ss.mmm | done (M2-S8) |
 | `bin/` | ffmpeg/ffprobe (git-ignored) | has ffmpeg n8.1.3 + ffprobe locally |
 | `templates/default_channel.json` | default channel template (no bookends, "Default voice" without reference clips, FX/avatar/export defaults) | done (M1-5) |
 | `scripts/` | install/run helpers | spike only |
@@ -229,6 +232,17 @@ MyRack/
 
 **pywebview bridge** (`backend/main.py` `Api`): `window.pywebview.api.pick_folder()` and `pick_file()` (video file filter) return a path or `null`. Works on both the older and newer pywebview dialog constants.
 
+## Editor screen (frontend, M2-S8; user confirmed each sub-round in the app window)
+
+- Reached from "Open editor" on the project screen (`App.svelte` `view` flag, no router). "Back to project" returns and refreshes the summary; opening or creating a project resets to the project screen. The editor renders outside `<main>` so it can use the full width.
+- `Editor.svelte` holds the last `TimelineState` (every edit replaces it, so the screen always redraws from one object), `playheadMs`, `selectedId` and `busy`. `edit(action)` runs an edit and shows a 400 `detail` as the red message; `history()` runs undo and redo and shows "Undid: <label>". Playhead, selection and zoom are UI state only and are not saved.
+- `Player.svelte` (props `clips`, `durationMs`, bindable `playheadMs`): plays from the playhead with one `<video>`. Next clip on the same source that starts exactly where this one ends: no seek. Same source, not contiguous: seek. Different source: the `src` is swapped (a hitch). Rate is `clip.speed` with `preservesPitch`. It writes the playhead each animation frame and remembers its own writes; any other change to the playhead (click, hotkey, scrub) or any edit pauses playback and re-cues the frame.
+- `Timeline.svelte` (props `clips`, `durationMs`, bindable `playheadMs` and `selectedId`, `locked`, `label`, `ontrim`, `onreorder`): canvas drawn on every change. Ruler click or drag seeks. A click on a clip selects it and seeks. The outer 6 px of a clip is a trim handle; pressing a clip body and moving more than 4 px starts a reorder. A trim or reorder sends exactly one call on release (`ontrim` / `onreorder` resolve when the edit is done), so a drag is one undo step. During a trim drag the clips resize live; during a reorder a ghost and a drop marker show. Wheel scrolls, Ctrl+wheel zooms around the cursor, buttons and a slider also zoom and scroll; Fit shows everything; the view follows the playhead.
+- Hotkeys (`Editor.svelte`, ignored while typing in a text, number or select field): Space play/pause, `,` and `.` step one **source** frame (crossing a cut lands on the neighbouring clip), S split at the playhead, Delete remove the selected clip, `[` and `]` cut the selected clip's in or out edge at the playhead (source time computed from the clip's `in_ms` and speed; after `[` the playhead moves to the clip start), Ctrl+Z, Ctrl+Y and Ctrl+Shift+Z undo and redo.
+- The selected-clip bar has a speed dropdown (0.25 to 8 presets, plus the clip's current value) and Remove clip.
+- Pure helpers in `timeline.ts` mirror a few backend rules for display only (see decisions). There are no automated frontend tests; checks are `npm run check` and the manual run.
+
+
 ## M0 findings (2026-10-10, user's machine)
 
 **Machine:** Windows, RTX 4060 Laptop GPU (8 GB), NVIDIA driver 581.42.
@@ -258,7 +272,9 @@ MyRack/
 
 ## M2 manual checks (user confirmed)
 
-- M2-S7: `scripts\dev\media_check.py` on the real 1440p60 recording: the video plays with sound through `GET /media/source/{id}` in the pywebview window and seeking works. The seek timings and request log were not recorded.
+- M2-S7: `scripts\dev\media_check.py` (deleted after M2-S8, which plays the same endpoint) on the real 1440p60 recording: the video plays with sound through `GET /media/source/{id}` in the pywebview window and seeking works. The seek timings and request log were not recorded.
+- M2-S8a to S8f (user confirmed "all pass" after each sub-round, with `npm run check` and `npm run build` clean and no console errors): add to timeline, undo/redo buttons; playing a clip with correct start and end; playing across several clips with hopping and speed; canvas timeline (ruler, clips, cut markers, playhead, click and drag to seek, zoom, scroll); selection and all hotkeys; drag trim and reorder with one undo step per drag.
+- M2 end (2026-10-12): `uv run pytest` gives 490 passed, 1 warning; `uv run ruff check .` all checks passed. At wrap-up the user did not itemise the nine-step manual acceptance run from `docs/tasks/M2-timeline.md` or paste a final `npm run check`; each editor sub-round had been confirmed on its own (above). Tick the manual acceptance boxes in the task file after running it once more on the real recording.
 
 ## Decisions log
 
@@ -334,6 +350,16 @@ MyRack/
 | 2026-10-12 | M2 (chat C): the media endpoint is `GET /media/source/{source_id}`. The file path comes only from the open project's source list; an unknown id, a missing file or no open project is a 404. Single ranges only. MIME type is the M0 behaviour (`mimetypes` guess, else `application/octet-stream`), which is what was proven to play the OBS MKVs. No HEAD route and no cache headers (the M0 spike had neither) |
 | 2026-10-12 | M2 (chat C): malformed request bodies keep FastAPI's 422 with a list `detail`. Overriding it globally could change existing endpoints; user mistakes go through the commands and come back as readable 400s |
 | 2026-10-12 | Work method: code is delivered as a zip that mirrors the repo layout (complete files, extracted in the repo root). `CLAUDE.md` "Delivering changes" was amended to make this standing |
+| 2026-10-12 | M2 (chat D): the editor is one screen reached from the project screen by a `view` flag in `App.svelte` (no router). The playhead, selection and zoom are UI state, not saved in `project.json` |
+| 2026-10-12 | M2 (chat D): playback = one `<video>` hopping between clips. Contiguous clips on one source (next `in_ms` equals this `out_ms`) continue without a seek; other hops on the same source seek; a different source swaps `src` (accepted hitch per spec 9). Rate comes from `clip.speed` with pitch preserved |
+| 2026-10-12 | M2 (chat D): `Editor.svelte` owns `playheadMs` and binds it to the player and the timeline. The player recognises its own writes, so an outside change pauses and re-cues, and any edit (a change in the clip layout) pauses playback |
+| 2026-10-12 | M2 (chat D): `frontend/src/timeline.ts` mirrors a few time-mapping rules for display, playback, frame stepping and drag previews (`toSource` clamps to `out - 1`, spans from `start_ms`, trim targets snapped to the source frame grid). The backend `timemap.py` and the commands stay the source of truth and snap trims themselves; a mismatch could only show as a playhead off by about a millisecond or a drag preview that differs slightly from the result |
+| 2026-10-12 | M2 (chat D): selection is one clip, chosen by clicking it. **Delete removes the selected clip** (`remove_clip`, the same ripple as ripple-deleting its span); there is no time-range selection yet, so the UI never sends `ripple_delete` (the endpoint stays tested). `[` and `]` cut the selected clip's edge at the playhead in source time. Spec 4.2 text updated (see wrap-up replacement) |
+| 2026-10-12 | M2 (chat D): frame stepping moves one **source** frame (at 2x one step is about 8.3 ms of timeline); stepping past a cut lands on the neighbouring clip, backwards on its last millisecond |
+| 2026-10-12 | M2 (chat D): drags: the outer 6 px of a clip is a trim handle, a press on the body that moves more than 4 px is a reorder, anything on the ruler or empty space scrubs. One call per drag on release, with the drag picture kept until the backend answers. Drags that would edit are ignored while an edit is in flight |
+| 2026-10-12 | M2 (chat D): hotkeys are hard-coded to the spec 4.2 defaults and ignored while typing in a field; Space is also swallowed on key release so a focused button is not clicked. A remappable hotkey setting is not built |
+| 2026-10-12 | M2 (chat D): the speed control is a dropdown of presets (0.25, 0.5, 0.75, 1, 1.25, 1.5, 2, 3, 4, 8) plus the clip's current value; other values only through the API |
+| 2026-10-12 | M2 (chat D): no backend or schema change in chat D, and none in M2 overall: `schema_version` stays 1 and no migration was needed |
 
 ## Known issues / open questions
 
@@ -359,27 +385,34 @@ MyRack/
 - ffprobe reports a 12.8 s duration for a nominal 10 s `-c copy` clip (probably keyframe alignment; not verified).
 - No file watcher for `footage/` (by design for M1): rescan on open plus the Rescan button.
 - The project screen shows voice profile and avatar art as simple "not configured" / "path set" text only; real validation comes with M3-1 and M5-1.
-- M2: at speed > 1, an anchor in the last half-speed milliseconds of a clip maps to that clip's end, which is the next clip's start, so a later `to_source` returns the next clip. Known quantization edge. Decided in chat B: parking ignores it (see decisions log). The editor UI (chat D) may want to treat it in hit-testing.
+- M2: at speed > 1, an anchor in the last half-speed milliseconds of a clip maps to that clip's end, which is the next clip's start, so a later `to_source` returns the next clip. Known quantization edge. Decided in chat B: parking ignores it (see decisions log). The editor does not treat it (nothing in the UI creates anchored items yet).
 - M2: still images and freeze-frames are not supported in v1 (see decisions log). Revisit only if the user adds a backlog item.
 - M2-S2 tests were first run in a sandbox with a stand-in `Clip`/`Anchor`, then confirmed by the user on the real repo (all passing, ruff clean after one PIE808 fix).
 - M2 chat B: the S3 to S5 code and tests were written without being run by the assistant (no pydantic or pytest in its sandbox); the user ran them on the real repo and confirmed pytest and ruff pass. The test files use multiples of 50 ms because those land exactly on the 60 fps frame grid.
-- M2: the clip commands are reachable through the Session and HTTP API (chat C) but there is **no editor UI yet** (chat D). Nothing in M2 creates placements, keyframes or reactions, so orphan behaviour is covered by unit tests with items built directly.
+- M2: nothing in M2 creates placements, keyframes or reactions, so orphan behaviour is covered by unit tests with items built directly. The editor shows `orphan_count` and the reference problems as plain text only; there is no UI to resolve an orphan.
 - M2: orphans cannot be resolved yet (no re-anchor command, no UI). A parked item sits exactly at a clip edge and keeps `orphaned=True` until a later milestone adds the resolve action.
 - M2: the new command modules import private helpers across modules (`_find_source` from `commands.py`, `_find_timeline_clip` and `_min_clip_ms` from `clip_commands.py`). Fine for now; tidy if more modules need them.
-- M2: `RippleDelete` refuses a range that would leave a sliver under one frame of a clip, so a drag selection near a cut may need to be extended or shortened. Chat D should surface the command's message.
-- M2: a drag should send one call on mouse-up (one command is one undo step and one save); compound edits use `POST /api/timeline/batch`. If saving per change still feels slow in the editor, wire the `AutosaveTracker` then.
+- M2: `RippleDelete` refuses a range that would leave a sliver under one frame of a clip. The editor has no range selection, so its UI never sends ripple-delete (Delete uses `remove_clip`); if range selection is added, show the command's message (errors from edits already appear as the red message).
+- M2: drags send one call on release (user confirmed one undo step per drag). Save per change was fine in the editor, so the `AutosaveTracker` is still unused.
 
 - M2 chat C: the S6 and S7 code and tests were written without being run by the assistant (no pydantic or pytest in its sandbox; only `parse_range` and `iter_file` were run there). The user ran everything and confirmed pytest, ruff and `npm run check` pass.
-- M2: the media endpoint has no cache headers. After a relink the browser could show the old file for the same URL; the editor should add a cache-busting query (for example `?v=<n>`), which the server ignores. No HEAD route: add one if a client needs it.
+- M2: the media endpoint has no cache headers, and the editor does not add a cache-busting query. After a relink (done on the project screen, which unmounts the editor) the browser could show the old file for the same URL; add `?v=<n>` to `sourceMediaUrl` if it ever happens. No HEAD route: add one if a client needs it.
 - M2: the MIME type of `.mkv` depends on the Windows registry through `mimetypes`; if it ever fails to play on another machine, set it explicitly (`video/x-matroska`) after testing.
 - M2: the test files `test_timeline.py`, `test_timeline_edit.py` and `test_edit_ops.py` each define their own small `hid()` helper (readable name to 12-char hex id). Tidy into a shared helper if more tests need it.
 - M2: the test `test_external_source_is_served_from_its_absolute_path` uses a Windows drive path as the external source path; it passed on the dev machine.
-- M2: `scripts\dev\media_check.py` is a throwaway check and can be deleted once the editor plays footage.
-- M2: the plan file had M2-2 ticked and M2-3 not after chat B (the state file said tick M1, M3, M5). Fixed in the plan during the chat C wrap-up (see Next up).
+
+- M2 editor: **audio at extreme speeds.** Chromium mutes `<video>` audio when the playback rate is above 4x or below 0.25x, so an 8x clip is expected to preview silently (export is unaffected). Not confirmed on the user's machine.
+- M2 editor: the hop to a clip on a different source swaps the video `src` and shows a hitch; its length was not measured. Hops within one source use a seek or none.
+- M2 editor: no time-range selection (Delete removes the whole selected clip), no auto-scroll when dragging the playhead past the canvas edge, and any edit stops playback.
+- M2 editor: the playhead, selection and zoom are not saved; reopening the editor starts at 0. Source names come from the footage list loaded when the editor opens (Rescan and Relink are on the project screen).
+- M2 editor: very short or zoomed-out clips have a smaller trim handle (a third of the clip width, up to 6 px); zoom in to grab them.
+- M2 editor: the frontend has no automated tests. `timeline.ts` is checked by `npm run check` and by hand; the assistant ran its helpers once in a scratch node script (not committed). Add a small test runner if frontend logic grows.
+- M2 editor: `timeline.ts` duplicates a few time-mapping rules from `backend/edl/timemap.py` (display only). If the backend rounding rules ever change, update both.
+- M2: the wrap-up did not include an itemised manual acceptance run or a final `npm run check` paste (see "M2 manual checks").
 
 ## Next up
 
-1. **Plan ticks:** M2-1, M2-3 and M2-5 are done. M2-2 was ticked by mistake and must be unticked (the timeline canvas does not exist yet). Chat D ticks M2-2, M2-4 and M2-6.
-2. **Chat D (S8 editor screen, S9 wrap-up):** a Svelte editor reached from the project screen. Paste: `CLAUDE.md`, this file, `docs/tasks/M2-timeline.md`, `docs/DESIGN_SPEC.md` section 4.2 (player, video strip lane, hotkeys) and section 9 "Playback of cuts" and "Speed clips", `frontend/src/App.svelte`, `frontend/src/api.ts` (it already has the timeline types, `getTimeline`, the edit functions, `editBatch`, `undoEdit`, `redoEdit`, `sourceMediaUrl`). The assistant asks for other files by path.
-3. **Facts for chat D:** every edit call returns the full `TimelineState`; redraw from it. The player plays each `TimelineClip` by seeking its source to `in_ms` and setting `playbackRate = speed` (pitch preserved), hopping at `end_ms`; video URL is `sourceMediaUrl(clip.source_id)`. Trims take **source** time (`[` and `]` convert the playhead with the clip's `in_ms` and `speed`, and `to_source` rules apply). A drag sends one op on mouse-up. Show the 400 `detail` text as-is (for example the ripple-delete sliver message). At speed > 1 an anchor in the last half-speed ms of a clip maps to the next clip (known edge). Add a cache-busting query to the media URL after a relink. Verify with the real 1440p60 recording.
-4. Stay on branch `m2-timeline` through chat D. Commit this file there before starting chat D. Merge and tag `m2-done` only after chat D.
+1. **Merge M2** (the user runs these; see the chat): commit the wrap-up docs on `m2-timeline`, `git switch main`, `git merge m2-timeline`, `git tag m2-done`, push with tags.
+2. **Plan ticks:** M2-1 to M2-6 are all done (chat D ticks M2-2, M2-4 and M2-6). Add the M2 acceptance line once the manual run is ticked in the task file.
+3. **M3 (voice):** branch `m3-voice` (or the plan's name) from `main` after the merge and tag. `docs/tasks/M3-voice.md` is a **draft** written from the spec and this file, without `IMPLEMENTATION_PLAN.md` in view: the first M3 chat must reconcile its items and ids with the plan before any code. Start with the prerequisites in that file (reference clip, GPU free, seed reproducibility check).
+4. **Open questions M3 inherits:** seed reproducibility via `torch.manual_seed` is untested; VRAM peak with the pywebview window open is unmeasured; the first generation after model load takes about 27 s (warm up the worker at start); emotion presets are guesses; whether an expressive reference clip widens the emotional range; the voice source (own voice or acted character).

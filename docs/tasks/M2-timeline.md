@@ -2,7 +2,7 @@
 
 - **Milestone items:** M2 in `IMPLEMENTATION_PLAN.md`. Chat A: M2-1 (S1, S2). Chat B: M2-3 and M2-5 (S3 to S5). Chat C: backend API and media server (S6, S7; no plan id of its own, it supports M2-2 and M2-4). Chat D: M2-2, M2-4, M2-6 and the wrap-up (S8, S9).
 - **Spec sections:** 4.2 (editor: player, video strip lane, hotkeys), 5 (Clip row, anchoring rule, conventions), 9 (editing, undo/redo bullet, playback of cuts, speed clips), 11 (media server bullet)
-- **Status:** in progress. Chats A to C done (S1 to S7, all user-confirmed and committed). Chat D (S8 editor screen, S9 wrap-up) is next.
+- **Status:** done (chats A to D, 2026-10-12). `pytest` 490 passed, `ruff` clean. Pending: the user ticks the manual acceptance boxes below after one more run on the real recording, then merges `m2-timeline` into `main` and tags `m2-done`.
 
 ## Goal
 
