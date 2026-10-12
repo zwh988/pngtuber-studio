@@ -1,8 +1,8 @@
 # M2: Timeline and cut editing
 
-- **Milestone items:** M2 in `IMPLEMENTATION_PLAN.md`. Copy the exact item ids into this line when starting chat A (this file was drafted from spec sections 4.2, 5 and 9, without the plan open). Steps below are labelled S1 to S9; map them to the plan ids and fix any scope difference before coding.
+- **Milestone items:** M2 in `IMPLEMENTATION_PLAN.md`. Chat A: M2-1 (S1, S2). Chat B: M2-3 and M2-5 (S3 to S5). Chat C: backend API and media server (S6, S7; no plan id of its own, it supports M2-2 and M2-4). Chat D: M2-2, M2-4, M2-6 and the wrap-up (S8, S9).
 - **Spec sections:** 4.2 (editor: player, video strip lane, hotkeys), 5 (Clip row, anchoring rule, conventions), 9 (editing, undo/redo bullet, playback of cuts, speed clips), 11 (media server bullet)
-- **Status:** not started
+- **Status:** in progress. Chats A to C done (S1 to S7, all user-confirmed and committed). Chat D (S8 editor screen, S9 wrap-up) is next.
 
 ## Goal
 

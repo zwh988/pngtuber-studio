@@ -2,9 +2,9 @@
 
 Living document: how the project works right now and where everything lives. **Update it at the end of every task** (see the checklist in `CLAUDE.md`). Keep it factual and short; link to files instead of copying code.
 
-- **Last updated:** 2026-10-12 (M2 chat B: S3 to S5 done, committed)
-- **Current milestone:** M2 in progress, branch `m2-timeline` (M1 merged and tagged `m1-done`). Chat A finished S1 (decisions, logged below) and S2 (`timemap.py`). Chat B finished S3 to S5: all seven clip commands, orphan flagging and parking, `find_orphans`, `check_references` (all user-confirmed passing and committed). Next: chat C (S6 backend API, S7 media server). Chat D (editor screen, wrap-up) follows; merge and tag `m2-done` only after chat D.
-- **Overall status:** M0 verdict GO (see "M0 findings"). The app runs: a pywebview window shows a Svelte project screen backed by FastAPI (create from template, open, Recent, footage scan, rescan, relink). New in M2 so far, all pure backend logic with tests and **no API or UI yet**: time mapping and frame snapping (`backend/edl/timemap.py`), the clip commands (`backend/project/clip_commands.py`, `cut_commands.py`), orphan logic and the reference check (`backend/edl/anchoring.py`, `backend/project/parking.py`). There is no editor screen, no media endpoint, and no voice, audio, avatar or export. No `install.bat` / `run.bat` yet.
+- **Last updated:** 2026-10-12 (M2 chat C: S6 backend API and S7 media server done, committed)
+- **Current milestone:** M2 in progress, branch `m2-timeline` (M1 merged and tagged `m1-done`). Chat A: S1 (decisions) and S2 (`timemap.py`). Chat B: S3 to S5 (clip commands, orphan parking, `check_references`). Chat C: S6 (timeline state, edit endpoints, undo/redo, batch edits) and S7 (media endpoint with Range support), all user-confirmed passing and committed. Next: chat D (S8 editor screen, S9 wrap-up). Merge and tag `m2-done` only after chat D.
+- **Overall status:** M0 verdict GO (see "M0 findings"). The app runs: a pywebview window shows a Svelte project screen backed by FastAPI (create from template, open, Recent, footage scan, rescan, relink). New in M2 so far: time mapping, clip commands, orphan logic and the reference check (pure backend, chats A and B), and now the whole backend for the editor (chat C): `GET /api/timeline`, one endpoint per edit operation, undo/redo, grouped batch edits, and `GET /media/source/{id}` serving footage with Range requests. **There is still no editor screen**; the typed frontend API for it is in `frontend/src/api.ts`. No voice, audio, avatar or export. No `install.bat` / `run.bat` yet.
 
 ## How to run / test
 
@@ -15,7 +15,7 @@ Living document: how the project works right now and where everything lives. **U
 uv sync                      # Python 3.11, torch 2.6.0+cu126, chatterbox-tts, fastapi, uvicorn, pywebview, pydantic, pytest, ruff, httpx (dev)
 
 # tests and lint (from repo root)
-uv run pytest                # all pass (user confirmed after M2-S5). 260 tests before chat B; the four new test files below added more, so record the new total from the next summary line here
+uv run pytest                # all pass (user confirmed after M2-S7). Test count not recorded: 406 tests at M2-S6a; `test_timeline_edit.py`, `test_edit_ops.py` and `test_media.py` were added after, so record the number from the next summary line
 uv run ruff check .
 
 # frontend (needs Node.js LTS: node v24.21.0 / npm 11.19.0 on the dev machine; build-time only)
@@ -40,6 +40,7 @@ uv run python scripts\spike\check_cuda.py
 uv run python scripts\spike\tts_test.py --ref "<path to reference.wav>"          # writes scripts\spike\out\
 uv run python scripts\spike\tts_grid.py --ref "<ref1.wav>" "<ref2.wav>"           # settings grid, writes scripts\spike\out\grid\
 uv run python scripts\spike\player_spike.py --video "<path to video.mkv>"          # pywebview window, prints Range requests
+uv run python scripts\dev\media_check.py --project "<project folder>"   # window playing a project source through /media/source/{id}; prints each request (throwaway dev check)
 .\bin\ffmpeg.exe -hide_banner -y -ss 20 -t 10 -i "<video.mkv>" -map 0:v:0 -map "0:a:0?" -vf "scale=-2:1080" -c:v h264_nvenc -preset p5 -rc vbr -cq 23 -b:v 0 -pix_fmt yuv420p -c:a aac -b:a 192k scripts\spike\out\nvenc_test.mp4
 ```
 
@@ -62,8 +63,9 @@ Status values: `empty` (placeholder only), `partial`, `done`.
 | `conftest.py` | repo-root marker so pytest can import `backend` | done |
 | `scripts/spike/*` | M0 spike scripts (check_cuda, tts_test, tts_grid, player_spike with reusable `parse_range`/`iter_file`) | done (spike) |
 | `scripts/spike/out/` | spike output, git-ignored | n/a |
+| `scripts/dev/media_check.py` | throwaway manual check: pywebview window with a `<video>` on the real media endpoint | done (M2-S7), dev only |
 | `backend/__init__.py` | package marker | done |
-| `backend/app.py` | FastAPI app factory `create_app(static_dir=None, session=None)`, `/api/*` routes, serves `frontend/dist` | done (M1-6) |
+| `backend/app.py` | FastAPI app factory `create_app(static_dir=None, session=None)`, `/api/*` routes (project, footage, recent, timeline and edits), `/media/source/{source_id}`, serves `frontend/dist` | done (M1-6, M2-S6, S7) |
 | `backend/main.py` | app shell: uvicorn in a thread on a free 127.0.0.1 port plus pywebview window; `Api` class with `pick_folder` / `pick_file` | done (M1-6) |
 | `backend/project/schema.py` | pydantic v2 schema, `SCHEMA_VERSION = 1`, `new_id()` | done (M1-1, extended M1-5) |
 | `backend/project/store.py` | folder layout, create/load/save, atomic write, `.bak` rotation | done (M1-2) |
@@ -74,20 +76,24 @@ Status values: `empty` (placeholder only), `partial`, `done`.
 | `backend/project/clip_commands.py` | track-0 clip commands: `AddClip`, `RemoveClip` (parks orphans), `SetSpeed`, `ReorderClip` | done (M2-S3, S5) |
 | `backend/project/cut_commands.py` | `SplitClip`, `TrimClip`, `RippleDelete` (frame snapping, minimum clip length, orphan parking, split re-pointing) | done (M2-S4, S5) |
 | `backend/project/parking.py` | applies and undoes orphan parking: `collect_cut_away`, `park_cut_away`, `restore_parked`, `ParkedItem` | done (M2-S5) |
+| `backend/project/timeline.py` | pure `build_timeline` and the models `TimelineState`, `TimelineClip`, `TimelineSource`, `TimelineProblem`, `EditResult` | done (M2-S6) |
+| `backend/project/edit_ops.py` | pure edit op models (`AddClipOp` ... `RippleDeleteOp`), `EditOp` union, `EditBatch`, `build_command(op)` | done (M2-S6c) |
 | `backend/project/template.py` | channel template load, validate, apply to a new project | done (M1-5) |
-| `backend/project/session.py` | `Session`: the one open project, new/open, footage scan, relink, recent list, save on change | done (M1-6) |
-| `backend/project/summary.py` | pure `ProjectSummary`, `FootageItem`, `FootageReport`, `summarize`, `describe_source` | done (M1-6) |
+| `backend/project/session.py` | `Session`: the one open project, new/open, footage scan, relink, recent list, timeline state, edits, undo/redo, `source_path`, save on change | done (M1-6, M2-S6, S7) |
+| `backend/project/summary.py` | pure `ProjectSummary` (with `problem_count`), `FootageItem`, `FootageReport`, `summarize`, `describe_source` | done (M1-6, M2-S6) |
 | `backend/project/recent.py` | recent projects list: pure add/remove/parse plus atomic load/save | done (M1-6) |
 | `backend/project/relink.py` | pure `to_footage_relpath`, `relink_mismatches` | done (M1-6) |
 | `backend/edl/__init__.py` | package marker | done (M2-S2) |
 | `backend/edl/timemap.py` | pure time mapping: `clip_spans`, `timeline_duration`, `to_timeline`, `to_source`, frame helpers (`snap_to_frame`, `ms_to_frame`, `frame_to_ms`), `round_half_up` | done (M2-S2) |
 | `backend/edl/anchoring.py` | pure orphan and reference logic: `anchored_items`, `items_in_source_range`, `find_orphans`, `edge_anchors`, `park_anchor`, `check_references`, `ReferenceProblem` | done (M2-S5) |
 | `backend/edl/` (rest) | ffmpeg graph builder (M6) | empty |
+| `backend/media/ranges.py` | pure `parse_range`; `iter_file` (chunked read of a byte range) | done (M2-S7) |
+| `backend/media/serve.py` | `range_response(path, range_header)`: 200 / 206 / 416 streaming response | done (M2-S7) |
 | `backend/voice/` | GPU worker, takes, cache keys, queue | empty |
 | `backend/audio/` | FX chain, loudness, envelopes | empty |
 | `backend/avatar/` | art loader, solver, compositor | empty |
 | `backend/export/` | export pipeline, asset bundle | empty |
-| `frontend/` | Svelte 5 + TypeScript (strict) + Vite 6 project screen: `package.json`, `package-lock.json` (committed), `vite.config.ts`, `svelte.config.js`, `tsconfig.json`, `index.html`; `src/main.ts`, `src/App.svelte`, `src/api.ts` (typed fetch wrappers), `src/pywebview.d.ts`, `src/vite-env.d.ts`. `node_modules/` and `dist/` are git-ignored | partial (project screen only) |
+| `frontend/` | Svelte 5 + TypeScript (strict) + Vite 6 project screen: `package.json`, `package-lock.json` (committed), `vite.config.ts`, `svelte.config.js`, `tsconfig.json`, `index.html`; `src/main.ts`, `src/App.svelte`, `src/api.ts` (typed fetch wrappers, timeline and edit functions, `sourceMediaUrl`), `src/pywebview.d.ts`, `src/vite-env.d.ts`. `node_modules/` and `dist/` are git-ignored | partial (project screen only) |
 | `bin/` | ffmpeg/ffprobe (git-ignored) | has ffmpeg n8.1.3 + ffprobe locally |
 | `templates/default_channel.json` | default channel template (no bookends, "Default voice" without reference clips, FX/avatar/export defaults) | done (M1-5) |
 | `scripts/` | install/run helpers | spike only |
@@ -106,6 +112,10 @@ Status values: `empty` (placeholder only), `partial`, `done`.
 | `tests/test_cut_commands.py` | `SplitClip`, `TrimClip`, `RippleDelete`: snapping, speed, minimum length, item re-pointing, undo/redo, groups | done (M2-S4) |
 | `tests/test_anchoring.py` | pure anchoring: item lookup, edge anchors, parking choice and ties, `find_orphans`, `check_references` | done (M2-S5) |
 | `tests/test_orphans.py` | orphan flagging and parking inside the commands, exact undo/redo, re-parking, rollback in a group, edits that must not orphan | done (M2-S5) |
+| `tests/test_timeline.py` | `build_timeline` (spans, positions, speeds, 59.94 fps, other tracks, missing file, broken references), `GET /api/timeline` (10) | done (M2-S6a) |
+| `tests/test_timeline_edit.py` | `add_clip`, undo/redo, save and reopen, `problem_count`, add/undo/redo endpoints (14) | done (M2-S6b) |
+| `tests/test_edit_ops.py` | op models, `build_command`, each operation through the session, batches as one undo step, all-or-nothing, every edit endpoint | done (M2-S6c) |
+| `tests/test_media.py` | `parse_range`, `iter_file`, media endpoint (200/206/416/404, spaces in paths, external sources, no path from the URL) | done (M2-S7) |
 
 ## Project folder layout (user data, not in this repo)
 
@@ -149,6 +159,12 @@ MyRack/
 - `check_references(project) -> list[ReferenceProblem]`; `ReferenceProblem(kind, owner_id, missing_id, message)` with kind `clip_missing_source` or `item_missing_clip`. It only reports; it never changes the project and never blocks loading.
 - `parking.py`: a command calls `collect_cut_away(project, cuts, region_start_ms)` **before** changing clips (`cuts` = `(clip_id, lo, hi_or_None)` source ranges; offsets are measured in the old timeline), then `park_cut_away(project, cut_away, *, cut_ms, region_ms)` **after**, keeps the returned `list[ParkedItem(item, old_anchor, old_orphaned)]`, and calls `restore_parked(parked)` in `revert`. An item with no surviving clip is flagged and keeps its anchor.
 
+**Timeline state and edit API** (`timeline.py` and `edit_ops.py` are pure; M2-S6, user confirmed tests pass):
+- `build_timeline(project, *, can_undo, can_redo, undo_label, redo_label, missing_source_ids) -> TimelineState`. `TimelineState`: `clips`, `duration_ms`, `other_track_clips` (clips on tracks other than 0, counted but not listed), `orphan_count`, `problems`, `can_undo`, `can_redo`, `undo_label`, `redo_label`, `save_error`. `TimelineClip`: `id`, `position` (among track-0 clips), `source_id`, `start_ms`, `end_ms`, `duration_ms`, `in_ms`, `out_ms`, `speed`, `overlay`, `source` (a `TimelineSource` or null). `TimelineSource`: `id`, `external`, `fps_num`, `fps_den`, `fps`, `width`, `height`, `duration_ms`, `file_missing`. `TimelineProblem`: `kind`, `owner_id`, `missing_id`, `message`. `EditResult(label | null, timeline)` is what undo and redo return.
+- Edit ops (`edit_ops.py`): `AddClipOp`, `RemoveClipOp`, `SetSpeedOp`, `ReorderClipOp`, `SplitClipOp`, `TrimClipOp`, `RippleDeleteOp`. Each has an `op` literal tag (`add_clip`, `remove_clip`, `set_speed`, `reorder_clip`, `split_clip`, `trim_clip`, `ripple_delete`) and rejects unknown fields. `EditBatch(label, ops)` needs a non-empty label and at least one op. `build_command(op)` returns the matching clip command. `right_clip_id` is optional on split and ripple-delete; pass your own 12-char hex id when a later op in the same batch has to refer to the new clip.
+- Session additions: `timeline()`, `add_clip(source_id, position=None)`, `undo()` and `redo()` (return `EditResult`; nothing to undo or redo gives `label=None`, not an error), `edit(ops, label=None)` (one op without a label is a plain undo step; several ops or a label run as one group, all or nothing), `source_path(source_id) -> Path | None` (from the open project's source list only). `CommandError` and `ValueError` from commands become `SessionError`.
+- Media (`backend/media/`): `parse_range(header, size)` returns inclusive `(start, end)` or None (malformed, multi-range, unsatisfiable); `iter_file(path, start, end, chunk)`; `range_response(path, range_header)` gives 200 with the whole file, 206 for a satisfiable single range, 416 with `Content-Range: bytes */size` otherwise, and a 404 JSON if the file cannot be read.
+
 **Footage API** (`backend/project/footage.py`):
 - Pure: `parse_rate(text) -> (num, den)`, `parse_probe(data, rel_path, source_id=None) -> Source` (ffprobe JSON from `-show_streams -show_format`), `plan_scan(found, known) -> ScanPlan(to_probe, present, missing)`.
 - I/O: `default_ffprobe_path()` (= `<repo>/bin/ffprobe.exe`), `run_ffprobe(path, ffprobe=None, timeout_s=60)`, `list_footage_files(project_folder)` (relative POSIX paths under `footage/`, recursive), `scan_footage(project_folder, known=(), *, probe=None) -> ScanResult(new_sources, present, missing, errors)`.
@@ -174,10 +190,11 @@ MyRack/
 - Applied bookends become ordinary clips with `overlay=False`, covering the whole source; intro first, outro last. The template's voice profile is copied with a fresh id. The template object is never mutated. Name is stripped; empty is rejected.
 
 **Session API** (`backend/project/session.py`): `Session(*, template_path=None, probe=None, recent_path=None)`. Holds the one open project and its `CommandStack`; thread-safe (re-entrant lock).
-- `current() -> ProjectSummary | None`, `new_project(parent, name)`, `open_project(folder)`, `footage() -> FootageReport`, `rescan_footage()`, `relink_source(source_id, new_path)`, `recent() -> list[RecentItem]`, `forget_recent(folder)`. Errors: `SessionError`; other module errors (`ProjectError`, `TemplateError`, `FootageError`) pass through.
+- `current() -> ProjectSummary | None`, `new_project(parent, name)`, `open_project(folder)`, `footage() -> FootageReport`, `rescan_footage()`, `relink_source(source_id, new_path)`, `recent() -> list[RecentItem]`, `forget_recent(folder)`, plus the timeline, edit, undo/redo and `source_path` methods above. Errors: `SessionError`; other module errors (`ProjectError`, `TemplateError`, `FootageError`) pass through.
 - `clean_folder_name(name)` (pure): Windows-safe project name (no `< > : " / \ | ? *`, no trailing dot, no reserved names such as CON or LPT1).
 - Opening or creating runs a footage scan automatically; new files are added with `AddSource` inside one `Add footage` group. Scan trouble on open (for example no ffprobe) never blocks opening; it appears in the footage report `errors`.
 - Every change through the stack saves `project.json` immediately (`on_change`). A failed save sets `ProjectSummary.save_error` and does not block the edit.
+- After the opening footage scan the undo history is cleared (M2-S6b), so the first Ctrl+Z cannot remove sources found on open. A later Rescan is undoable.
 - `recent_path=None` (the default, used by tests) records nothing; `backend/main.py` passes `default_recent_path()`.
 - Relink rules: source must exist and not be `external`; the picked file must exist and lie inside `<project>/footage/`; it is re-probed and refused unless resolution and frame rate match exactly, length is within 100 ms, and the audio track count matches; picking the source's current path is a no-op.
 
@@ -196,8 +213,19 @@ MyRack/
 | `POST /api/footage/relink` | `{source_id, path}` | `FootageReport` |
 | `GET /api/recent` | | `RecentItem[]` |
 | `POST /api/recent/remove` | `{folder}` | `RecentItem[]` |
+| `GET /api/timeline` | | `TimelineState` |
+| `POST /api/timeline/clips` | `{source_id, position?}` | `TimelineState` |
+| `POST /api/timeline/undo`, `POST /api/timeline/redo` | | `EditResult {label, timeline}` |
+| `POST /api/timeline/split` | `{timeline_ms, right_clip_id?}` | `TimelineState` |
+| `POST /api/timeline/ripple-delete` | `{start_ms, end_ms, right_clip_id?}` | `TimelineState` |
+| `POST /api/timeline/trim` | `{clip_id, edge: "in"\|"out", source_ms}` (**source** time) | `TimelineState` |
+| `POST /api/timeline/reorder` | `{clip_id, new_position}` | `TimelineState` |
+| `POST /api/timeline/speed` | `{clip_id, speed}` | `TimelineState` |
+| `POST /api/timeline/remove` | `{clip_id}` | `TimelineState` |
+| `POST /api/timeline/batch` | `{label, ops: EditOp[]}` (each op carries its `op` tag) | `TimelineState`, one undo step |
+| `GET /media/source/{source_id}` | optional `Range` header | video bytes: 200, 206, or 416; 404 for an unknown source, a missing file, or no open project |
 
-`ProjectSummary`: `name`, `folder`, `schema_version`, `source_count`, `clip_count`, `voice_status`, `avatar_status` ("not configured" or "path set" text only), `save_error`. Static frontend is mounted at `/` after the API routes; if `frontend/dist` has no `index.html`, `/` shows a "Frontend not built" page.
+`ProjectSummary`: `name`, `folder`, `schema_version`, `source_count`, `clip_count`, `voice_status`, `avatar_status` ("not configured" or "path set" text only), `save_error`, `problem_count` (broken references from `check_references`; 0 when sound). Static frontend is mounted at `/` after the API routes; if `frontend/dist` has no `index.html`, `/` shows a "Frontend not built" page. Errors from commands are HTTP 400 `{"detail": message}`; a malformed request body is FastAPI's standard 422.
 
 **pywebview bridge** (`backend/main.py` `Api`): `window.pywebview.api.pick_folder()` and `pick_file()` (video file filter) return a path or `null`. Works on both the older and newer pywebview dialog constants.
 
@@ -227,6 +255,10 @@ MyRack/
 - M1-3 scan of a real OBS clip (10 s `-c copy` cut) produced: path `footage/clip10.mkv`, 2560x1440, 60/1, 1 audio track, duration 12812 ms. Resolution, rate and audio match. The duration is above the requested 10 s, probably because a stream copy starts at a keyframe (not verified; not a detection bug as far as known).
 - M1-6 (user confirmed): app window opens with the project screen; New project (with a folder named with a space), Open (Browse and typed path), Recent list (reopen, missing marker, Remove leaves the folder on disk), footage table with Rescan, missing footage flagged, relink to a moved file all work.
 - M1 acceptance run (user confirmed): create from template, add footage, close and reopen from Recent with everything intact; move footage out and back; relink a file moved into a subfolder of `footage/`.
+
+## M2 manual checks (user confirmed)
+
+- M2-S7: `scripts\dev\media_check.py` on the real 1440p60 recording: the video plays with sound through `GET /media/source/{id}` in the pywebview window and seeking works. The seek timings and request log were not recorded.
 
 ## Decisions log
 
@@ -294,6 +326,14 @@ MyRack/
 | 2026-10-12 | M2 (chat B): `TrimClip` takes a source time (the `[` and `]` hotkeys convert the playhead to source time first) and can extend a clip as well as shorten it. No-op edits (same speed, same position, same edge) are refused so they never create an empty undo step |
 | 2026-10-12 | M2 (chat B): orphan parking is applied by `RemoveClip`, `TrimClip` and `RippleDelete` through `backend/project/parking.py` (collect before the edit, park after, restore on revert). `ReorderClip`, `SetSpeed` and `SplitClip` orphan nothing. An already orphaned item that is cut again is re-parked and stays flagged; undo restores its previous anchor and flag. This replaced the temporary "refused while anchored" guards used in S3 and S4 |
 | 2026-10-12 | M2 (chat B): the speed > 1 quantization edge is **ignored by parking**. A parked `out_ms - 1` anchor stays tied to its own clip; only UI hit-testing could notice the edge |
+| 2026-10-12 | M2 (chat C): API shape = one endpoint per edit operation, each returning the full `TimelineState`, so the editor always redraws from one object. Undo and redo return `EditResult {label, timeline}`. The edit op models are the request bodies, so there is one definition per operation |
+| 2026-10-12 | M2 (chat C): compound edits go through `POST /api/timeline/batch`, which runs the ops in a `CommandStack.group` (one undo step, one save, all or nothing). A drag sends a single op on mouse-up, which is already one undo step. The client may supply `right_clip_id` so later ops in a batch can name a clip the batch creates |
+| 2026-10-12 | M2 (chat C): the timeline state only lists track-0 clips; clips on other tracks are counted in `other_track_clips` and left untouched. Missing footage files are flagged per source (`file_missing`) by the session, not by the pure builder |
+| 2026-10-12 | M2 (chat C): the undo history is cleared after the footage scan on open and create, so Ctrl+Z can never undo "Add footage" and remove sources. Rescan during editing stays undoable |
+| 2026-10-12 | M2 (chat C): `check_references` is run by the session, not by the commands. Its count is in `ProjectSummary.problem_count` and its details in `TimelineState.problems`. Old files with broken references still load |
+| 2026-10-12 | M2 (chat C): the media endpoint is `GET /media/source/{source_id}`. The file path comes only from the open project's source list; an unknown id, a missing file or no open project is a 404. Single ranges only. MIME type is the M0 behaviour (`mimetypes` guess, else `application/octet-stream`), which is what was proven to play the OBS MKVs. No HEAD route and no cache headers (the M0 spike had neither) |
+| 2026-10-12 | M2 (chat C): malformed request bodies keep FastAPI's 422 with a list `detail`. Overriding it globally could change existing endpoints; user mistakes go through the commands and come back as readable 400s |
+| 2026-10-12 | Work method: code is delivered as a zip that mirrors the repo layout (complete files, extracted in the repo root). `CLAUDE.md` "Delivering changes" was amended to make this standing |
 
 ## Known issues / open questions
 
@@ -307,7 +347,7 @@ MyRack/
 - OBS recordings have one mixed audio track (game and mic together); confirm this is the expected workflow.
 - Harmless warnings seen: `pkg_resources` deprecation (from perth), diffusers `LoRACompatibleLinear` deprecation, `sdpa` attention note, unauthenticated Hugging Face Hub notice; pytest shows one Starlette `TestClient` DeprecationWarning about an `anyio` alias (inside site-packages, goes away with a library update); `npm install` warns that esbuild has an install script not yet allowed (the build works).
 - Seek latency was measured on a 4.8 GB file by eye from the page log; no systematic benchmark.
-- The schema validates unique ids but not cross-references. `check_references` (M2-S5) reports broken ones but nothing calls it yet; the session should call it after load (S6). `RemoveSource` still refuses while a clip uses the source.
+- The schema validates unique ids but not cross-references. `check_references` reports broken ones; the session runs it for `ProjectSummary.problem_count` and `TimelineState.problems` (M2-S6). `RemoveSource` still refuses while a clip uses the source.
 - **Rescan after a move creates a duplicate:** if a footage file is moved to another path inside `footage/` and the user clicks Rescan before relinking, the new location is added as a new source and the old one stays missing. Relink first. A "looks like the same file" hint is a possible later improvement.
 - Relinking `external` (template bookend) sources is not supported. Bookend probing is implemented but has never run against a real intro/outro clip (the default template has none), so treat it as untested until a template with bookends is tried.
 - `RelinkSource` itself is still path-only; the metadata check is in `Session.relink_source`. M2 code that relinks must go through the session or repeat the check.
@@ -323,15 +363,23 @@ MyRack/
 - M2: still images and freeze-frames are not supported in v1 (see decisions log). Revisit only if the user adds a backlog item.
 - M2-S2 tests were first run in a sandbox with a stand-in `Clip`/`Anchor`, then confirmed by the user on the real repo (all passing, ruff clean after one PIE808 fix).
 - M2 chat B: the S3 to S5 code and tests were written without being run by the assistant (no pydantic or pytest in its sandbox); the user ran them on the real repo and confirmed pytest and ruff pass. The test files use multiples of 50 ms because those land exactly on the 60 fps frame grid.
-- M2: there is **no Session method, endpoint or UI** for the clip commands yet (chat C builds the API, chat D the editor). Nothing in M2 creates placements, keyframes or reactions, so orphan behaviour is covered by unit tests with items built directly.
+- M2: the clip commands are reachable through the Session and HTTP API (chat C) but there is **no editor UI yet** (chat D). Nothing in M2 creates placements, keyframes or reactions, so orphan behaviour is covered by unit tests with items built directly.
 - M2: orphans cannot be resolved yet (no re-anchor command, no UI). A parked item sits exactly at a clip edge and keeps `orphaned=True` until a later milestone adds the resolve action.
 - M2: the new command modules import private helpers across modules (`_find_source` from `commands.py`, `_find_timeline_clip` and `_min_clip_ms` from `clip_commands.py`). Fine for now; tidy if more modules need them.
 - M2: `RippleDelete` refuses a range that would leave a sliver under one frame of a clip, so a drag selection near a cut may need to be extended or shortened. Chat D should surface the command's message.
-- M2: `TrimClip` and `RippleDelete` drag operations should be wrapped in `CommandStack.group` by the API/UI so one drag is one undo step (the stack supports it; nothing uses it yet). Save per change may need the `AutosaveTracker` for drags.
+- M2: a drag should send one call on mouse-up (one command is one undo step and one save); compound edits use `POST /api/timeline/batch`. If saving per change still feels slow in the editor, wire the `AutosaveTracker` then.
+
+- M2 chat C: the S6 and S7 code and tests were written without being run by the assistant (no pydantic or pytest in its sandbox; only `parse_range` and `iter_file` were run there). The user ran everything and confirmed pytest, ruff and `npm run check` pass.
+- M2: the media endpoint has no cache headers. After a relink the browser could show the old file for the same URL; the editor should add a cache-busting query (for example `?v=<n>`), which the server ignores. No HEAD route: add one if a client needs it.
+- M2: the MIME type of `.mkv` depends on the Windows registry through `mimetypes`; if it ever fails to play on another machine, set it explicitly (`video/x-matroska`) after testing.
+- M2: the test files `test_timeline.py`, `test_timeline_edit.py` and `test_edit_ops.py` each define their own small `hid()` helper (readable name to 12-char hex id). Tidy into a shared helper if more tests need it.
+- M2: the test `test_external_source_is_served_from_its_absolute_path` uses a Windows drive path as the external source path; it passed on the dev machine.
+- M2: `scripts\dev\media_check.py` is a throwaway check and can be deleted once the editor plays footage.
+- M2: the plan file had M2-2 ticked and M2-3 not after chat B (the state file said tick M1, M3, M5). Fixed in the plan during the chat C wrap-up (see Next up).
 
 ## Next up
 
-1. Tick in `IMPLEMENTATION_PLAN.md`: **M2-1** (time mapping), **M2-3** (clip operations with undo) and **M2-5** (anchoring helpers, orphan detection). Fill the plan ids into the top of `docs/tasks/M2-timeline.md` (A: M2-1; B: M2-3, M2-5; C: backend API for the editor; D: M2-2, M2-4, M2-6 and wrap-up).
-2. Chat C (S6 backend API, then S7 media server): extend `Session` and `app.py` with timeline state (clip spans, duration, per-clip source info), one endpoint per clip operation (or one generic edit endpoint) using the commands above, `undo` / `redo` returning the label and new state, and a source video endpoint with Range support keyed by source id. Call `check_references` after load and report problems in the summary. Paste: `CLAUDE.md`, this file, `docs/tasks/M2-timeline.md`, `backend/project/session.py`, `backend/app.py`, `backend/project/summary.py`, and the M0 Range code (`scripts/spike/player_spike.py`: `parse_range`, `iter_file`). The assistant asks for other files by path.
-3. Chat D (editor screen, then wrap-up): Svelte editor with the segment-hopping player, canvas timeline, hotkeys, one undo step per drag. Merge and tag `m2-done` only after chat D.
-4. Stay on branch `m2-timeline` through chat D. Commit this file there before starting chat C.
+1. **Plan ticks:** M2-1, M2-3 and M2-5 are done. M2-2 was ticked by mistake and must be unticked (the timeline canvas does not exist yet). Chat D ticks M2-2, M2-4 and M2-6.
+2. **Chat D (S8 editor screen, S9 wrap-up):** a Svelte editor reached from the project screen. Paste: `CLAUDE.md`, this file, `docs/tasks/M2-timeline.md`, `docs/DESIGN_SPEC.md` section 4.2 (player, video strip lane, hotkeys) and section 9 "Playback of cuts" and "Speed clips", `frontend/src/App.svelte`, `frontend/src/api.ts` (it already has the timeline types, `getTimeline`, the edit functions, `editBatch`, `undoEdit`, `redoEdit`, `sourceMediaUrl`). The assistant asks for other files by path.
+3. **Facts for chat D:** every edit call returns the full `TimelineState`; redraw from it. The player plays each `TimelineClip` by seeking its source to `in_ms` and setting `playbackRate = speed` (pitch preserved), hopping at `end_ms`; video URL is `sourceMediaUrl(clip.source_id)`. Trims take **source** time (`[` and `]` convert the playhead with the clip's `in_ms` and `speed`, and `to_source` rules apply). A drag sends one op on mouse-up. Show the 400 `detail` text as-is (for example the ripple-delete sliver message). At speed > 1 an anchor in the last half-speed ms of a clip maps to the next clip (known edge). Add a cache-busting query to the media URL after a relink. Verify with the real 1440p60 recording.
+4. Stay on branch `m2-timeline` through chat D. Commit this file there before starting chat D. Merge and tag `m2-done` only after chat D.
