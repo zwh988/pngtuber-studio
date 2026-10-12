@@ -2,16 +2,19 @@
   import { untrack } from "svelte";
   import type { TimelineClip } from "./api";
   import { clock } from "./format";
+  import { clipIndexAt } from "./timeline";
 
   let {
     clips,
     durationMs,
     playheadMs = $bindable(0),
+    selectedId = $bindable(null),
     label,
   }: {
     clips: TimelineClip[];
     durationMs: number;
     playheadMs?: number;
+    selectedId?: string | null;
     label: (clip: TimelineClip) => string;
   } = $props();
 
@@ -127,8 +130,14 @@
         continue;
       }
       const missing = clip.source?.file_missing ?? true;
-      ctx.fillStyle = `hsl(${hues.get(clip.source_id) ?? 210} 45% 38%)`;
+      const selected = clip.id === selectedId;
+      ctx.fillStyle = `hsl(${hues.get(clip.source_id) ?? 210} 45% ${selected ? 50 : 38}%)`;
       ctx.fillRect(x0, LANE_Y, Math.max(1, w - 1), LANE_H);
+      if (selected) {
+        ctx.strokeStyle = "#ffffff";
+        ctx.lineWidth = 2;
+        ctx.strokeRect(x0 + 1, LANE_Y + 1, Math.max(1, w - 3), LANE_H - 2);
+      }
       if (missing) {
         ctx.strokeStyle = "#ff5a5a";
         ctx.lineWidth = 2;
@@ -254,6 +263,14 @@
       canvas.setPointerCapture(e.pointerId);
       dragging = true;
       seek(e);
+      // A click in the video lane also selects the clip under it (empty space clears).
+      const rect = canvas.getBoundingClientRect();
+      const y = e.clientY - rect.top;
+      if (y >= LANE_Y && y <= LANE_Y + LANE_H) {
+        const ms = scrollMs + (e.clientX - rect.left) / pxPerMs;
+        const clip = ms <= durationMs ? clips[clipIndexAt(clips, ms)] : undefined;
+        selectedId = clip === undefined ? null : clip.id;
+      }
     }
     function move(e: PointerEvent): void {
       if (dragging) {
@@ -295,7 +312,7 @@
     <button type="button" onclick={() => zoomAt(1 / 1.5, viewWidth / 2)}>Zoom out</button>
     <button type="button" onclick={() => zoomAt(1.5, viewWidth / 2)}>Zoom in</button>
     <button type="button" onclick={fit}>Fit</button>
-    <span class="hint">Click or drag to seek. Wheel scrolls, Ctrl+wheel zooms.</span>
+    <span class="hint">Click or drag to seek, click a clip to select it. Wheel scrolls, Ctrl+wheel zooms.</span>
   </div>
   <div class="view" bind:clientWidth={viewWidth}>
     <canvas bind:this={canvasEl} style:width="{viewWidth}px" style:height="{HEIGHT}px"></canvas>

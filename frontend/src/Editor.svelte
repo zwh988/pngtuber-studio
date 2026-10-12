@@ -4,6 +4,10 @@
     getFootage,
     getTimeline,
     redoEdit,
+    removeClip,
+    setClipSpeed,
+    splitClip,
+    trimClip,
     undoEdit,
     type EditResult,
     type FootageItem,
@@ -12,7 +16,7 @@
   import { clock } from "./format";
   import Player from "./Player.svelte";
   import Timeline from "./Timeline.svelte";
-  import { clipIndexAt } from "./timeline";
+  import { clipIndexAt, stepFrame } from "./timeline";
 
   let { onclose }: { onclose: () => void } = $props();
 
@@ -23,6 +27,14 @@
   let busy = $state(false);
   /** Playhead on the timeline, in ms. The player moves it while playing. */
   let playheadMs = $state(0);
+  /** Selected clip id (click a clip on the timeline). */
+  let selectedId = $state<string | null>(null);
+  let player = $state<ReturnType<typeof Player> | null>(null);
+
+  const SPEEDS = [0.25, 0.5, 0.75, 1, 1.25, 1.5, 2, 3, 4, 8];
+
+  /** The selected clip; null when nothing is selected or the clip is gone (after an edit or undo). */
+  const selectedClip = $derived(timeline?.clips.find((c) => c.id === selectedId) ?? null);
 
   /** Index of the clip under the playhead (highlighted in the table). */
   const activeIndex = $derived(timeline === null ? -1 : clipIndexAt(timeline.clips, playheadMs));
@@ -83,8 +95,149 @@
     }
   }
 
+  function speedChoices(current: number): number[] {
+    return SPEEDS.includes(current) ? SPEEDS : [...SPEEDS, current].sort((a, b) => a - b);
+  }
+
+  function undo(): void {
+    void history(undoEdit, "Undid", "Nothing to undo");
+  }
+
+  function redo(): void {
+    void history(redoEdit, "Redid", "Nothing to redo");
+  }
+
+  function stepBy(direction: 1 | -1): void {
+    if (timeline === null) {
+      return;
+    }
+    player?.pause();
+    playheadMs = stepFrame(timeline.clips, playheadMs, direction);
+  }
+
+  function splitAtPlayhead(): void {
+    const at = playheadMs;
+    player?.pause();
+    void edit(() => splitClip(at));
+  }
+
+  function removeSelected(): void {
+    const clip = selectedClip;
+    if (clip === null) {
+      error = "Select a clip first (click it on the timeline).";
+      return;
+    }
+    player?.pause();
+    void edit(() => removeClip(clip.id));
+  }
+
+  /** `[` and `]`: cut the selected clip's in or out edge at the playhead (in SOURCE time). */
+  function setEdge(edge: "in" | "out"): void {
+    const clip = selectedClip;
+    if (clip === null) {
+      error = "Select a clip first (click it on the timeline).";
+      return;
+    }
+    if (playheadMs < clip.start_ms || playheadMs > clip.end_ms) {
+      error = "Move the playhead inside the selected clip first.";
+      return;
+    }
+    const sourceMs = Math.round(clip.in_ms + (playheadMs - clip.start_ms) * clip.speed);
+    player?.pause();
+    void edit(() => trimClip(clip.id, edge, sourceMs)).then(() => {
+      // Cutting the in edge at the playhead makes that frame the clip's first frame.
+      if (edge === "in" && error === null) {
+        playheadMs = clip.start_ms;
+      }
+    });
+  }
+
+  function isTyping(target: EventTarget | null): boolean {
+    return (
+      target instanceof Element &&
+      target.closest("input:not([type=range]), textarea, select, [contenteditable]") !== null
+    );
+  }
+
+  function onKeyDown(e: KeyboardEvent): void {
+    if (timeline === null || isTyping(e.target)) {
+      return;
+    }
+    if (e.ctrlKey || e.metaKey) {
+      const key = e.key.toLowerCase();
+      if (key === "z" && !e.shiftKey) {
+        e.preventDefault();
+        if (!busy) {
+          undo();
+        }
+      } else if (key === "y" || (key === "z" && e.shiftKey)) {
+        e.preventDefault();
+        if (!busy) {
+          redo();
+        }
+      }
+      return;
+    }
+    if (e.altKey) {
+      return;
+    }
+    const canEdit = !busy && !e.repeat;
+    switch (e.key) {
+      case " ":
+        e.preventDefault();
+        if (!e.repeat) {
+          player?.toggle();
+        }
+        break;
+      case ",":
+        e.preventDefault();
+        stepBy(-1);
+        break;
+      case ".":
+        e.preventDefault();
+        stepBy(1);
+        break;
+      case "s":
+      case "S":
+        e.preventDefault();
+        if (canEdit) {
+          splitAtPlayhead();
+        }
+        break;
+      case "Delete":
+        e.preventDefault();
+        if (canEdit) {
+          removeSelected();
+        }
+        break;
+      case "[":
+        e.preventDefault();
+        if (canEdit) {
+          setEdge("in");
+        }
+        break;
+      case "]":
+        e.preventDefault();
+        if (canEdit) {
+          setEdge("out");
+        }
+        break;
+      default:
+        break;
+    }
+  }
+
+  /** Space on a focused button would click it on key release; the hotkey already handled it. */
+  function onKeyUp(e: KeyboardEvent): void {
+    if (e.key === " " && !isTyping(e.target)) {
+      e.preventDefault();
+    }
+  }
+
   void load();
 </script>
+
+<svelte:window onkeydown={onKeyDown} onkeyup={onKeyUp} />
 
 <div class="editor">
   <header>
@@ -94,7 +247,7 @@
     <button
       type="button"
       disabled={busy || timeline === null || !timeline.can_undo}
-      onclick={() => history(undoEdit, "Undid", "Nothing to undo")}
+      onclick={undo}
       title={timeline?.undo_label ?? ""}
     >
       Undo
@@ -102,7 +255,7 @@
     <button
       type="button"
       disabled={busy || timeline === null || !timeline.can_redo}
-      onclick={() => history(redoEdit, "Redid", "Nothing to redo")}
+      onclick={redo}
       title={timeline?.redo_label ?? ""}
     >
       Redo
@@ -124,15 +277,50 @@
   {:else}
     {#if timeline.clips.length > 0}
       <section>
-        <Player clips={timeline.clips} durationMs={timeline.duration_ms} bind:playheadMs />
+        <Player
+          bind:this={player}
+          clips={timeline.clips}
+          durationMs={timeline.duration_ms}
+          bind:playheadMs
+        />
       </section>
       <section>
         <Timeline
           clips={timeline.clips}
           durationMs={timeline.duration_ms}
           bind:playheadMs
+          bind:selectedId
           label={(clip) => sourceName(clip.source_id)}
         />
+      </section>
+      <section class="clipbar">
+        {#if selectedClip !== null}
+          {@const clip = selectedClip}
+          <strong>Clip {clip.position + 1}: {sourceName(clip.source_id)}</strong>
+          <label>
+            Speed
+            <select
+              value={String(clip.speed)}
+              disabled={busy}
+              onchange={(e) => {
+                const speed = Number(e.currentTarget.value);
+                e.currentTarget.blur();
+                void edit(() => setClipSpeed(clip.id, speed));
+              }}
+            >
+              {#each speedChoices(clip.speed) as speed}
+                <option value={String(speed)}>{speed}x</option>
+              {/each}
+            </select>
+          </label>
+          <button type="button" disabled={busy} onclick={removeSelected}>Remove clip</button>
+        {:else}
+          <span class="hint">No clip selected. Click a clip on the timeline.</span>
+        {/if}
+        <p class="keys">
+          Space play/pause, , and . step a frame, S split at playhead, Delete remove selected clip,
+          [ and ] cut the selected clip's in/out at the playhead, Ctrl+Z / Ctrl+Y undo / redo.
+        </p>
       </section>
     {/if}
 
@@ -188,11 +376,15 @@
             {#each timeline.clips as clip, i (clip.id)}
               <tr
                 class:missing={clip.source?.file_missing ?? true}
-                class:selected={i === activeIndex}
+                class:selected={clip.id === selectedId}
+                class:active={i === activeIndex}
               >
                 <td>{clip.position + 1}</td>
                 <td class="file">
-                  <button type="button" class="pick" onclick={() => (playheadMs = clip.start_ms)}>
+                  <button type="button" class="pick" onclick={() => {
+                      selectedId = clip.id;
+                      playheadMs = clip.start_ms;
+                    }}>
                     {sourceName(clip.source_id)}
                   </button>
                 </td>
@@ -262,8 +454,23 @@
   td.file {
     overflow-wrap: anywhere;
   }
+  tr.active td {
+    background: #4a90e222;
+  }
   tr.selected td {
-    background: #4a90e233;
+    background: #4a90e255;
+  }
+  .clipbar {
+    display: flex;
+    align-items: center;
+    flex-wrap: wrap;
+    gap: 0.75rem;
+  }
+  .keys {
+    flex-basis: 100%;
+    margin: 0;
+    font-size: 0.85rem;
+    opacity: 0.7;
   }
   .pick {
     background: none;

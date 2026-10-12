@@ -148,11 +148,17 @@
     }
   }
 
-  function toggle(): void {
+  export function toggle(): void {
     if (playing) {
       stop();
     } else {
       play();
+    }
+  }
+
+  export function pause(): void {
+    if (playing) {
+      stop();
     }
   }
 
