@@ -65,6 +65,14 @@ class TimelineState(BaseModel):
     save_error: str | None = None
 
 
+class EditResult(BaseModel):
+    """Result of undo or redo: what was undone or redone, and the new state."""
+
+    # None when there was nothing to undo or redo.
+    label: str | None
+    timeline: TimelineState
+
+
 def build_timeline(
     project: Project,
     *,

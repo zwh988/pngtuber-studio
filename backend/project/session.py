@@ -13,6 +13,8 @@ from datetime import UTC, datetime
 from pathlib import Path
 from typing import Any
 
+from backend.edl.anchoring import check_references
+from backend.project.clip_commands import AddClip
 from backend.project.commands import (
     AddSource,
     CommandError,
@@ -52,7 +54,7 @@ from backend.project.template import (
     external_source,
     load_template_file,
 )
-from backend.project.timeline import TimelineState, build_timeline
+from backend.project.timeline import EditResult, TimelineState, build_timeline
 
 Probe = Callable[[Path], dict[str, Any]]
 
@@ -199,6 +201,34 @@ class Session:
         with self._lock:
             return self._timeline_state()
 
+    def add_clip(self, source_id: str, position: int | None = None) -> TimelineState:
+        """Put a whole source on the timeline (before a trailing bookend)."""
+        with self._lock:
+            _, stack = self._require_open()
+            try:
+                stack.execute(AddClip(source_id, position=position))
+            except CommandError as exc:
+                raise SessionError(str(exc)) from exc
+            return self._timeline_state()
+
+    def undo(self) -> EditResult:
+        with self._lock:
+            _, stack = self._require_open()
+            try:
+                label = stack.undo()
+            except CommandError as exc:
+                raise SessionError(str(exc)) from exc
+            return EditResult(label=label, timeline=self._timeline_state())
+
+    def redo(self) -> EditResult:
+        with self._lock:
+            _, stack = self._require_open()
+            try:
+                label = stack.redo()
+            except CommandError as exc:
+                raise SessionError(str(exc)) from exc
+            return EditResult(label=label, timeline=self._timeline_state())
+
     # ---- recent projects ---------------------------------------------------
 
     def recent(self) -> list[RecentItem]:
@@ -246,7 +276,12 @@ class Session:
     def _summary(self) -> ProjectSummary:
         folder, stack = self._require_open()
         summary = summarize(str(folder), stack.project)
-        return summary.model_copy(update={"save_error": self._save_error})
+        return summary.model_copy(
+            update={
+                "save_error": self._save_error,
+                "problem_count": len(check_references(stack.project)),
+            }
+        )
 
     def _set_open(self, folder: Path, project: Project) -> ProjectSummary:
         self._folder = folder
@@ -260,6 +295,8 @@ class Session:
             self._scan(folder, self._stack)
         except (FootageError, SessionError) as exc:
             self._scan_errors = [str(exc)]
+        # Footage found on open is not an edit the user should be able to undo.
+        self._stack.clear()
         return self._summary()
 
     def _on_change(self, *_args: object) -> None:

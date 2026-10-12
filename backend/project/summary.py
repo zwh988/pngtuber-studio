@@ -18,6 +18,8 @@ class ProjectSummary(BaseModel):
     avatar_status: str
     # Set when the last automatic save failed; None when saving works.
     save_error: str | None = None
+    # Broken references found by check_references (0 when the project is sound).
+    problem_count: int = 0
 
 
 class FootageItem(BaseModel):

@@ -7,6 +7,7 @@ export type ProjectSummary = {
   voice_status: string;
   avatar_status: string;
   save_error: string | null;
+  problem_count: number;
 };
 
 export type RecentItem = {
@@ -137,8 +138,29 @@ export type TimelineState = {
   save_error: string | null;
 };
 
+export type EditResult = {
+  /** What was undone or redone; null when there was nothing to do. */
+  label: string | null;
+  timeline: TimelineState;
+};
+
 export function getTimeline(): Promise<TimelineState> {
   return request<TimelineState>("/api/timeline");
+}
+
+export function addClip(sourceId: string, position?: number): Promise<TimelineState> {
+  return post<TimelineState>("/api/timeline/clips", {
+    source_id: sourceId,
+    position: position ?? null,
+  });
+}
+
+export function undoEdit(): Promise<EditResult> {
+  return post<EditResult>("/api/timeline/undo");
+}
+
+export function redoEdit(): Promise<EditResult> {
+  return post<EditResult>("/api/timeline/redo");
 }
 
 /** Native file dialog; null when cancelled or not running in the app window. */

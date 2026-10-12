@@ -14,7 +14,7 @@ from backend.project.session import Session, SessionError
 from backend.project.store import ProjectError
 from backend.project.summary import FootageReport, ProjectSummary
 from backend.project.template import TemplateError
-from backend.project.timeline import TimelineState
+from backend.project.timeline import EditResult, TimelineState
 
 APP_NAME = "PNGtuber Studio"
 
@@ -45,6 +45,11 @@ class ForgetRecentRequest(BaseModel):
 class RelinkRequest(BaseModel):
     source_id: str
     path: str
+
+
+class AddClipRequest(BaseModel):
+    source_id: str
+    position: int | None = None
 
 
 def default_static_dir() -> Path:
@@ -109,6 +114,27 @@ def create_app(
     def get_timeline() -> TimelineState:
         try:
             return active.timeline()
+        except _API_ERRORS as exc:
+            raise HTTPException(status_code=400, detail=str(exc)) from exc
+
+    @app.post("/api/timeline/clips")
+    def add_clip(request: AddClipRequest) -> TimelineState:
+        try:
+            return active.add_clip(request.source_id, request.position)
+        except _API_ERRORS as exc:
+            raise HTTPException(status_code=400, detail=str(exc)) from exc
+
+    @app.post("/api/timeline/undo")
+    def undo_edit() -> EditResult:
+        try:
+            return active.undo()
+        except _API_ERRORS as exc:
+            raise HTTPException(status_code=400, detail=str(exc)) from exc
+
+    @app.post("/api/timeline/redo")
+    def redo_edit() -> EditResult:
+        try:
+            return active.redo()
         except _API_ERRORS as exc:
             raise HTTPException(status_code=400, detail=str(exc)) from exc
 
