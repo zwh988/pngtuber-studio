@@ -1,118 +1,132 @@
-# M3: Voice (line bank, takes, GPU worker, placing lines)
+# M3: Line bank and voice (line bank, takes, GPU worker, placing lines)
 
-> **DRAFT.** Written at the end of M2 chat D from `DESIGN_SPEC.md`, `PROJECT_STATE.md` and `CLAUDE.md`, **without `IMPLEMENTATION_PLAN.md` in view**. The first M3 chat must read the plan's M3 items, reconcile this file with them (ids, scope, order), and have the user approve the result before any code. Anything here that contradicts the plan loses to the plan.
+> **RECONCILED with `IMPLEMENTATION_PLAN.md` in M3 chat A (2026-10-13).** Where the earlier draft disagreed with the plan, the plan won: waveform blocks, Tighten, take delete with the storage manager, the voice profile settings screen and drag-to-place are all in M3. The decisions in the "Decisions" section were made in chat A and are final unless the user reopens them.
 
-- **Milestone items:** M3 in `IMPLEMENTATION_PLAN.md` (ids to fill in: `M3-?`).
+- **Milestone items:** M3-1 to M3-9 in `IMPLEMENTATION_PLAN.md` (listed below).
 - **Spec sections:** 4.2 (Line bank tab, Voice lane, hotkeys N, G, Shift+G, M), 5 (Line, Take, Placement, VoiceProfile, the anchoring rule), 6 (voice system, take lifecycle, overflow), 11 (processes: GPU worker, queue), 2 (decisions locked)
-- **Status:** not started.
+- **Status:** chat A (S1, S2) written; S2 awaiting the user's pytest and ruff results. S3 onward not started.
+
+## Plan items
+
+- M3-1 Voice profile: reference clip import, hashing, settings screen
+- M3-2 Emotion presets file and loader (`templates/`)
+- M3-3 GPU worker process: queue, cancel, warm model, optional unload
+- M3-4 Take store: cache keys, generate/reuse/reroll/star/delete, storage manager with sizes
+- M3-5 Long-text chunking at sentence boundaries with crossfade join
+- M3-6 Line bank UI and inspector: text, emotion, sliders, generate, take picker
+- M3-7 Placement: drag onto timeline and hotkey M; voice lane with waveform blocks
+- M3-8 In-context playback: voice audio synced with the preview
+- M3-9 Overflow detection and fixes: tighten (time-stretch up to about 8%), nudge earlier, regenerate with lower cfg_weight; allow-overlap toggle
+
+**Done when (from the plan):** write, generate, place, reroll, close the app, reopen, and play everything with zero regeneration.
 
 ## Goal
 
-Lines written in a per-project line bank can be generated in the cloned voice on the local GPU, kept as takes, and placed on the footage. A placed line plays in sync with the video in the editor and warns when it runs into the next one. Generation never repeats work (cache keys), never blocks the UI, and can be cancelled. Raw takes only: the voice FX chain, waveforms and loudness belong to M4.
+Lines written in a per-project line bank can be generated in the cloned voice on the local GPU, kept as takes, and placed on the footage. A placed line plays in sync with the video in the editor, shows as a waveform block on a voice lane, and warns when it runs into the next one. Generation never repeats work (cache keys), never blocks the UI, and can be cancelled. The voice FX chain and loudness normalisation belong to M4.
 
 ## How this task runs
 
-Same method as M0 to M2 (see `CLAUDE.md`). M3 is the first milestone that needs the GPU and a second process, so it is split across **five fresh chats**, each getting `CLAUDE.md`, a freshly updated `PROJECT_STATE.md`, this file, and only the spec parts and source files listed for it. The assistant cannot run Chatterbox; every GPU result must come from the user's paste.
+Same method as M0 to M2 (see `CLAUDE.md`). M3 is the first milestone that needs the GPU and a second process, so it is split across **six fresh chats**, each getting `CLAUDE.md`, a freshly updated `PROJECT_STATE.md`, this file, and only the spec parts and source files listed for it. The assistant cannot run Chatterbox; every GPU result must come from the user's paste.
 
-| Chat | Steps | Paste these spec parts | Paste these source files |
+| Chat | Steps (plan items) | Paste these spec parts | Paste these source files |
 |---|---|---|---|
-| A | S1, S2 (decisions, pure modules, seed check) | Sections 5 (Line, Take, VoiceProfile rows), 6 | `backend/project/schema.py`, `scripts/spike/tts_test.py` and `tts_grid.py` |
-| B | S3 (commands, take store, session, API; no GPU) | Section 5, section 6 "Take lifecycle" | `schema.py`, `commands.py`, `session.py`, `app.py`, `summary.py`, the pure modules from chat A |
-| C | S4 (GPU worker, queue, cancel, progress, generate endpoint) | Section 6 "Take lifecycle" and "Queue", section 11 "Processes" | `session.py`, `app.py`, `main.py`, the take store from chat B, `scripts/spike/tts_test.py` |
-| D | S5 (line bank UI, generate, takes list, preview a take) | Section 4.2 (Line bank tab, status bar, hotkeys N, G, Shift+G) | `frontend/src/App.svelte`, `Editor.svelte`, `api.ts` |
-| E | S6, S7 (voice lane, placement, audible playback in context, overflow, wrap-up) | Section 4.2 (Voice lane), section 6 "Too-long line detection", section 5 anchoring rule | `Editor.svelte`, `Player.svelte`, `Timeline.svelte`, `timeline.ts`, `backend/edl/timemap.py` |
+| A | S1, S2 (decisions, M3-2, M3-5, key and overflow logic) | Sections 5, 6, 11 | `schema.py`, `scripts/spike/tts_test.py`, `tts_grid.py` (done) |
+| B | S3 (M3-1 backend, M3-4 backend; no GPU) | Section 5, section 6 "Take lifecycle" | `schema.py`, `commands.py`, `session.py`, `app.py`, `summary.py`, `template.py`, `anchoring.py`, `backend/voice/*` from chat A |
+| C | S4 (M3-3 GPU worker, queue, cancel, progress, generate endpoint) | Section 6 "Take lifecycle" and "Queue", section 11 "Processes" | `session.py`, `app.py`, `main.py`, the take store from chat B, `scripts/spike/tts_test.py` |
+| D | S5 (M3-1 settings screen, M3-6 line bank UI, storage manager UI) | Section 4.2 (Line bank tab, status bar, hotkeys N, G, Shift+G), 4.1 | `frontend/src/App.svelte`, `Editor.svelte`, `api.ts` |
+| E | S6 (M3-7 placement, voice lane, waveform blocks, drag and hotkey M) | Section 4.2 (Voice lane), section 5 anchoring rule | `Editor.svelte`, `Timeline.svelte`, `timeline.ts`, `backend/edl/timemap.py`, `backend/project/timeline.py`, `edit_ops.py` |
+| F | S7, S8 (M3-8 playback, M3-9 overflow fixes, wrap-up) | Section 6 "Too-long line detection" | `Editor.svelte`, `Player.svelte`, `Timeline.svelte`, `timeline.ts`, `timemap.py` |
 
-Branch: `git switch -c m3-voice` (or the plan's name) once at the start of chat A, after M2 is merged and tagged `m2-done` and `git status` is clean. Keep the branch across chats, commit after each confirmed step, merge and tag `m3-done` after chat E.
+Branch: `m3-voice`, created at the start of chat A after M2 is merged and tagged `m2-done`. Keep the branch across chats, commit after each confirmed step, merge and tag `m3-done` after chat F.
 
 ## Prerequisites (user does these first)
 
 - [ ] M2 merged to `main`, tagged `m2-done`; `uv run pytest`, `uv run ruff check .` and `npm run check` pass on `main`
-- [ ] Chatterbox still works on this machine: the M0 script (`scripts\spike\tts_test.py`) runs and produces a take (record the time and any new warnings)
-- [ ] A reference clip chosen for the default voice profile (the open item in spec 12: own voice or acted character), as a local `.wav`, and its path noted
-- [ ] A test project with a real recording on the timeline (from M2), so placement can be tried on real footage
-- [ ] GPU mostly free while testing (close other GPU-heavy programs); note the VRAM headroom with the app window open (M0 did not measure it)
-- [ ] `IMPLEMENTATION_PLAN.md` open, so the M3 item ids can be filled in at the top of this file
+- [ ] Chatterbox still works on this machine (`scripts\spike\seed_check.py` ran: done in chat A)
+- [ ] A reference clip chosen for the default voice profile (spec 12: own voice or acted character), as a local `.wav`
+- [ ] A test project with a real recording on the timeline (from M2)
+- [ ] GPU mostly free while testing; note the VRAM headroom with the app window open (M0 did not measure it)
 
-## Context pack
+## Scope
 
-- `CLAUDE.md`, `PROJECT_STATE.md` (current), this file
-- The spec parts and source files for the current chat (table above)
-- Not the whole spec or whole files "just in case"; the assistant asks for a function or section by path
-
-## Scope (proposed; confirm against the plan)
-
-**In:**
-- **Pure modules:** emotion presets (spec 6 table), take cache key (rule 3: hash of text, voice profile id plus reference clip hash, exaggeration, cfg_weight, seed, model version), a sentence splitter for long lines and the crossfade join plan, overflow detection (a placed line runs past the next placement's start), all with pytest
-- **Voice profile** with real validation (the reference clip exists, is readable audio, is long enough; hash recorded). M1 stored only a path
-- **Line bank commands** on the `CommandStack`: add, edit text, set emotion and the two slider overrides, set allow-overlap, set the active take, star a take, delete a line (takes stay on disk; rule 1). Edits are undoable; take creation itself is not an undo step (takes are never auto-deleted, so undo must not remove audio)
-- **Take store:** raw takes as WAV files under `media/takes_raw/`, named from the raw key, written atomically; `Take` records in `project.json`; same key means reuse with no GPU run; reroll = new seed = new take; the storage manager's size query (delete UI can wait)
-- **GPU worker:** a separate process holding Chatterbox, a one-at-a-time job queue, cancel, progress, warm-up after load (the first generation took about 27 s in M0), an option to unload the model. The backend talks to it through a small protocol that can be faked in tests
-- **Generate endpoints** and a status feed for progress (how it reaches the UI is a decision below)
-- **Line bank tab** in the editor (new line N, generate G, reroll Shift+G, takes list with play, star, set active), **status bar** GPU queue
-- **Placement:** a `Placement` anchored to `(clip_id, source_ms)`, a **voice lane** on the canvas timeline (blocks, red edge on overflow), place at playhead M, drag to move, remove. Placements created through commands, so M2's orphan parking now has real users
-- **Playback in context:** placed takes are heard in sync with the video in the editor (see decision 6)
+**In (all nine plan items):**
+- **M3-2 / M3-5 / key logic (chat A):** emotion presets file and loader, take cache key and seed policy, sentence splitter and crossfade join, overflow detection and nudge slack. All pure, with pytest
+- **M3-1:** voice profile with real validation (clip exists, decodes, sensible length; hash on demand), import by copying into the project, and a settings screen
+- **M3-4:** line bank commands on the `CommandStack` (add, edit text, emotion, the two slider overrides, allow-overlap, set active take, star), take store (`media/takes_raw/`, atomic writes, reuse by key, reroll), take delete and the storage manager with sizes
+- **M3-3:** GPU worker process, one-at-a-time queue, cancel, progress, warm-up, optional unload; generate and reroll endpoints and a job-status endpoint
+- **M3-6:** line bank tab with inspector (text, emotion, sliders), generate and reroll, take picker (play, star, set active), status bar, hotkeys N, G, Shift+G
+- **M3-7:** `Placement` commands, voice lane on the canvas timeline with waveform blocks, place at playhead (M), drag a line from the bank onto the lane, drag to move, remove. Waveform peaks are computed on demand by the backend
+- **M3-8:** Web Audio playback of placed takes in sync with the video, including seek, pause and cuts
+- **M3-9:** overflow warning, allow-overlap toggle, Nudge earlier, Regenerate with lower cfg_weight, Tighten (time-stretch up to about 8 percent, rendered by the backend into `media/takes_fx/`)
 - pytest for every pure module and every command; `ruff` clean; `npm run check` clean
 
 **Out:**
-- Voice FX chain, loudness normalize, silence trimming, waveforms on blocks, the Voice FX tab (M4); game audio level; mouth envelopes (M5, M4 for waveforms, to be confirmed against the plan)
+- Voice FX chain, loudness normalise, silence trimming, Voice FX tab (M4); game audio level; mouth envelopes (M5 or M4, per plan)
 - Avatar, expression and parameter lanes, reactions (M5); export and the ffmpeg graph (M6)
-- Tighten (time-stretch) as an overflow fix, unless the plan puts it in M3 (it needs audio processing; proposal: M4). Nudge earlier and Regenerate are in scope
 - Per-emotion reference clips, A/B take compare, loop-line playback, global favourites library (CLAUDE.md out-of-scope list)
 - Network access after the first-run model download (rule 8); anything that touches footage (rule 2)
 
 ## Facts already established (do not re-ask)
 
-- Chatterbox: original `ChatterboxTTS` 0.1.7, torch 2.6.0+cu126, `generate(text, audio_prompt_path, exaggeration, cfg_weight, temperature, ...)`, sample rate 24000. **No seed argument:** the seed is applied with `torch.manual_seed` before each call, and whether that makes output reproducible is **untested**.
-- M0 timings on the RTX 4060 Laptop (8 GB): model load about 9 s, first generation about 27 s, later lines about real time (roughly 4.6 s for 5 to 6 s of audio), VRAM 3.6 GiB peak during generation. Peak with the app window open was not measured.
-- Voice quality with the neutral reference: realistic but flat; exaggeration 1.0 to 1.2 adds movement but garbles. Emotion presets are guesses to tune by ear. `cfg_weight` is pacing guidance (lower = slower), not speed.
-- `Take` already stores a text snapshot, `model_version` and `raw_key`; `Line` holds text, emotion, overrides, active take id, allow-overlap; `Placement` carries an `orphaned` flag; `VoiceProfile` exists with reference clip path(s). Ids are 12-char hex; times are integer ms; the default template has a "Default voice" profile without reference clips.
-- M2 gives M3: the command contract and `CommandStack`; `Session` with save on every change; `timemap.to_timeline` / `to_source` (an anchor is mapped through the clip list, so a placed line follows the cuts); orphan parking and `check_references`; the typed `api.ts`, `Editor.svelte` with `playheadMs` shared by `Player` and `Timeline`, the hotkey handler, and the HTTP error convention (400 with `detail`).
-- Rules in `CLAUDE.md` that bite here: 1 (takes never auto-deleted), 3 (cache keys decide regeneration), 7 (one GPU job at a time, cancellable, UI never blocks), 8 (offline at runtime), 10 (overflow warns but is allowed), 11 (edits undoable), 14 (subprocess hygiene), 15 (voice cloning only with permission).
+- Chatterbox: original `ChatterboxTTS` 0.1.7, torch 2.6.0+cu126, `generate(text, audio_prompt_path, exaggeration, cfg_weight, temperature, ...)`, sample rate 24000. No seed argument: the seed is applied with `torch.manual_seed` before each call.
+- **Seed check (chat A, user ran `seed_check.py`):** by ear, the runs with seed 1234 sound the same and seed 99 sounds different. A bit-exact comparison was not reported, so treat reproducibility as "same to the ear". The cache-key rule does not depend on it: same key means reuse the saved take.
+- M0 timings on the RTX 4060 Laptop (8 GB): model load about 9 s, first generation about 27 s, later lines about real time, VRAM 3.6 GiB peak during generation. Peak with the app window open not measured.
+- Voice quality with the neutral reference: realistic but flat; exaggeration 1.0 to 1.2 adds movement but garbles. Presets are guesses to tune by ear. `cfg_weight` is pacing guidance (lower = slower), not speed.
+- `Take` stores a text snapshot, params, `model_version` and `raw_key`; `Line` holds text, emotion, overrides, active take id, allow-overlap; `Placement` has `orphaned`; `VoiceProfile` has reference clip path(s). Ids are 12-char hex; times are integer ms.
+- M2 gives M3: the command contract and `CommandStack`; `Session` with save on every change; `timemap.to_timeline` / `to_source`; orphan parking and `check_references`; typed `api.ts`; `Editor.svelte` with `playheadMs` shared by `Player` and `Timeline`; the hotkey handler; HTTP 400 with `detail` for errors.
+- Rules in `CLAUDE.md` that bite here: 1, 3, 7, 8, 10, 11, 14, 15.
 
-## Decisions to make in S1 (assistant proposes in 5 lines or fewer each, user decides, log in `PROJECT_STATE.md`)
+## Decisions (made in chat A; log in `PROJECT_STATE.md`)
 
-1. **Worker protocol:** how the backend talks to the GPU worker (a `multiprocessing` queue, JSON lines over stdin and stdout, or local HTTP), and how the worker is started, health-checked and restarted. It must be fakeable in tests so no test needs a GPU.
-2. **Cancel:** a Chatterbox `generate` call cannot be interrupted midway. Options: cancel between sentence chunks, or kill and restart the worker (a 9 s reload plus warm-up). Pick one and say what the user sees.
-3. **Seed policy:** per-line base seed, how a reroll picks the next seed, and the take key. First verify with a scratch script that `torch.manual_seed` before `generate` repeats the same audio; if it does not, the key still stands but "same key" means "reuse the saved take", not "regenerate identically".
-4. **Progress and events:** the spec names a WebSocket for job events; M2 used plain HTTP only. Proposal: polling a job-status endpoint first (simple, testable), WebSocket later if polling feels slow.
-5. **Reference clip handling:** where the clip lives (copied into the project, or referenced by absolute path like external sources), what validation runs (exists, decodes, length, sample rate), and when its hash is computed (once on set, recomputed when the file changes).
-6. **Audible playback in context:** how placed takes play with the video. Proposal: schedule `<audio>` or Web Audio nodes from the player's hop logic, using `timemap` to turn a placement's anchor into a timeline start; seeking and pausing re-schedule. Decide what is in M3 (play in sync, simple) and what waits for M4's mix.
-7. **Take file format and long text:** WAV sample format (float32 or PCM16 at 24 kHz mono), the sentence splitter's maximum chunk length, crossfade length, and where split and join happen (worker versus backend).
-8. **Overflow:** definition (processed duration versus the next placement's start; M3 uses the raw take), where it is computed (pure backend function, returned with the timeline or placements state), and which fixes ship in M3 (Nudge earlier, Regenerate) versus M4 (Tighten).
-9. **Commands and undo for lines and placements:** which line edits are one undo step, how "generate" relates to undo (proposal: not undoable, takes persist), and how deleting a line treats its placements and takes (proposal: refuse while placed, takes kept on disk).
+1. **Worker protocol.** Subprocess started with an argument list; JSON lines over stdin and stdout (commands: load, generate, cancel, unload, shutdown; events: ready, progress, done, error). Library prints go to the log file so stdout stays clean. The backend uses a `WorkerClient` interface; tests use a `FakeWorker`. A crash triggers one automatic restart.
+2. **Cancel.** Between sentence chunks. A single-chunk line finishes (a few seconds) and its result is discarded, so no take is written; the UI shows "Cancelling...". No kill and restart (9 s load plus 27 s warm-up).
+3. **Seed policy.** `base_seed(project.seed, line_id)`; first generation uses the base seed; a reroll uses the lowest `base + k` whose key is not already one of the line's takes (`next_unused_seed`). Chunk `i` of a take uses `seed + i` (`chunk_seed`), so chunk 0 behaves exactly like the spike. No schema change.
+4. **Progress.** Polling a job-status endpoint (about every 500 ms while a job is active). WebSocket only if polling feels slow.
+5. **Reference clip.** Copied into `media/voice/` in the project, stored as a relative path. Validation: decodes, length sensible (warn under 5 s). Hash computed on demand, memoised in memory by size and mtime. No schema change.
+6. **Playback in context.** Web Audio: takes decoded once, each placement's start is `to_timeline(anchor)`, scheduled from the player's clock and rescheduled on seek, pause or hop. Voice plays at 1x whatever the clip speed. M3 plays raw (or tightened) takes with no mix; M4 swaps in processed takes.
+7. **Take file format and chunking.** Float32 24 kHz mono WAV. `MAX_CHUNK_CHARS = 200` (lines at or under it are never split), 40 ms equal-power crossfade. The worker loops over chunks and joins them, which is what makes cancel between chunks possible.
+8. **Overflow.** Pure `find_overflows` over timeline start and the duration of the audio that plays; `allow_overlap` flags the result as allowed (no warning). Nudge earlier uses `available_slack_ms`. All three fixes ship in M3 (the plan puts Tighten here).
+9. **Undo and deletes.** Each line edit is one undo step (text commits on blur or Enter). Generate is not undoable (takes persist). `RemoveLine` is an undoable command, allowed only for a line with no takes and no placements. A line with takes is deleted through the storage manager's "Delete line and its takes" (explicit confirmation, not undoable; allowed by rule 1 because the user does it). Deleting a take that is a line's active take clears the active take; to settle placement overrides in S3.
+10. **Cache-key details.** Text is whitespace-normalised before hashing; floats are rounded to 4 decimals; chunking constants are not part of the key (changing them never invalidates existing takes).
+11. **Tighten (new, from the plan).** Stored as a new `Placement.stretch` field (1.0 to about 1.08) with schema version 2 and a migration, added in S8 only. The stretched WAV is rendered by the backend (pedalboard time-stretch; `uv add pedalboard`, a one-time download) into `media/takes_fx/`, keyed by hash(raw key, stretch), and playback and overflow use its duration. No other M3 step changes the schema.
+12. **Waveforms (new, from the plan).** The backend computes min/max peaks for a take on demand; nothing is stored in `project.json`.
 
 ## Steps
 
-Each step ends with what to paste back and a commit point (`git status`, `git add`, `git commit -m "M3-...: ..."` using the plan ids).
+Each step ends with what to paste back and a commit point (`git status`, `git add`, `git commit -m "M3-n: ..."`).
 
-1. **S1 Decisions and seed check.** Assistant reads the pasted spec parts, `schema.py` and the spike scripts, lists decisions 1 to 9 with one-line proposals, user decides. The assistant also gives a small scratch script for the seed reproducibility check; the user runs it. *Paste back:* your choices and the script's result.
-2. **S2 Pure modules.** Presets, take cache key, sentence splitter and join plan, overflow detection, with pytest. *Paste back:* `uv run pytest`, `uv run ruff check .`.
-3. **S3 Commands, take store, session, API.** Voice profile validation, line and take commands, `media/takes_raw/` store with atomic writes and reuse by key, `Session` methods and endpoints, tested with a **fake worker** (no GPU). Sub-rounds: (a) voice profile, (b) line commands, (c) take store and reuse, (d) endpoints. *Paste back:* each sub-round's pytest output.
-4. **S4 GPU worker.** The worker process, queue, cancel, progress, warm-up and unload, the generate and reroll endpoints, status feed; the real model is exercised only by the user. Sub-rounds: (a) protocol and fake worker in tests, (b) the real worker with a single line, (c) cancel and queue order, (d) long text. *Paste back:* pytest output, the worker's log (last 30 lines), and the time and VRAM for a generation with the app window open.
-5. **S5 Line bank UI.** Line bank tab, generate and reroll, takes list (play, star, set active), status bar, hotkeys N, G, Shift+G. *Paste back:* `npm run check`, and what you see in the window.
-6. **S6 Placement.** Placement commands and endpoint, the voice lane, place at playhead (M), drag to move, overflow edge, audible playback in context, nudge earlier and regenerate fixes. Sub-rounds as the chat sees fit. *Paste back:* pytest, `npm run check`, what you see and hear.
-7. **S7 Tests and wrap-up.** End-of-task checklist: complete `PROJECT_STATE.md`, plan items to tick, spec replacement text, commit message, merge and tag `m3-done`.
+1. **S1 Decisions and seed check (chat A, done).**
+2. **S2 Pure modules (chat A).** `backend/voice/presets.py` (M3-2), `keys.py`, `chunking.py` (M3-5), `overflow.py`, `templates/emotion_presets.json`, four test files. *Paste back:* `uv run pytest`, `uv run ruff check .`.
+3. **S3 Backend: voice profile, line commands, take store, session, API (chat B; M3-1, M3-4; no GPU).** Sub-rounds: (a) voice profile import and validation, (b) line commands, (c) take store, reuse by key, delete, storage sizes, (d) endpoints. Tested with a fake worker.
+4. **S4 GPU worker (chat C; M3-3).** (a) protocol and fake worker, (b) real worker with a single line, (c) cancel and queue order, (d) long text. *Paste back:* pytest, the worker log (last 30 lines), time and VRAM with the app window open.
+5. **S5 UI (chat D; M3-1, M3-6).** Voice profile settings screen, line bank tab, generate and reroll, take picker, status bar, storage manager list, hotkeys N, G, Shift+G.
+6. **S6 Placement (chat E; M3-7).** Placement commands and endpoint, voice lane with waveform blocks, M, drag from the bank, drag to move, remove.
+7. **S7 Playback (chat F; M3-8).** Web Audio scheduling in sync with the player.
+8. **S8 Overflow fixes and wrap-up (chat F; M3-9).** Warning edge, allow-overlap, Nudge, Regenerate, Tighten (schema v2). End-of-task checklist, merge, tag `m3-done`.
 
 ## Acceptance criteria
 
 - [ ] `uv run pytest`, `uv run ruff check .` and `npm run check` are clean
+- [ ] A voice profile accepts a reference clip (copied into the project, validated, hashed); the settings screen shows its state
 - [ ] Writing a line and generating it produces a take file under `media/takes_raw/` and a `Take` in `project.json`; the take plays in the editor
 - [ ] Generating the same inputs again reuses the saved take with **no GPU job** (visible in the status bar and the worker log)
 - [ ] Reroll makes a new take with a new seed; the old take is still there; star and set-active work
 - [ ] One GPU job runs at a time; a second request waits; cancel stops the job and leaves no half-written take; the UI stays responsive during generation
 - [ ] A long line is split at sentence boundaries, generated in pieces and joined without a click
+- [ ] The storage manager lists takes with sizes per line; deleting takes (and a line with its takes) works only through it, after confirmation
 - [ ] A line placed on the footage stays attached to its moment when the footage is trimmed, reordered or sped up; deleting that footage flags the placement orphaned (and undo restores it)
+- [ ] Placed lines show as waveform blocks on the voice lane; M places at the playhead; dragging from the bank places; dragging a block moves it
 - [ ] A placed line is heard in sync with the video, including after seeking and across a cut
-- [ ] A line that runs past the next placement shows the overflow warning; allow-overlap silences it; Nudge earlier and Regenerate fix it
-- [ ] Takes are never deleted by any command or by undo (rule 1)
+- [ ] A line that runs past the next placement shows the overflow warning; allow-overlap silences it; Nudge earlier, Regenerate and Tighten (up to about 8 percent) fix it
+- [ ] Takes are never deleted by undo or by anything except the user's explicit delete (rule 1)
 - [ ] No network access at runtime after the model is downloaded (rule 8)
-- [ ] Close the app, reopen the project: lines, takes, placements and the active take are intact
-- [ ] `PROJECT_STATE.md` updated; M3 items ticked in `IMPLEMENTATION_PLAN.md`
+- [ ] **Plan "done when":** write, generate, place, reroll, close the app, reopen, and play everything with zero regeneration
+- [ ] `PROJECT_STATE.md` updated; M3-1 to M3-9 ticked in `IMPLEMENTATION_PLAN.md`
 
 ## Notes
 
-- Pure logic (presets, cache keys, sentence splitting, overflow detection, take-store bookkeeping) has no file, network or GPU access; I/O lives in thin wrappers (the take store, the worker client, `Session`).
-- Every schema change needs a migration and a spec note. M3 may well need one (for example a per-line seed field or a voice-profile hash); the assistant must say so, bump `schema_version`, and add the migration.
+- Pure logic (presets, cache keys, seeds, chunking, overflow, take-store bookkeeping) has no file, network or GPU access; I/O lives in thin wrappers (the take store, the worker client, `Session`, `load_presets_file`).
+- Every schema change needs a migration and a spec note. The only planned one is `Placement.stretch` in S8 (decision 11); say so before adding anything else.
 - Never commit weights, audio or footage (rule 9). `media/` lives in the user's project folder, not in this repo.
 - The assistant cannot see GPU errors until they are pasted: get the full traceback, the exact command, the last 30 lines of the worker log, and for the editor the browser console output before proposing a fix.
 - Treat voice cloning as for the user's own voice or voices they have permission to use (rule 15).

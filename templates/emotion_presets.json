@@ -1,0 +1,9 @@
+{
+  "presets": {
+    "neutral": { "exaggeration": 0.50, "cfg_weight": 0.50, "expression": "neutral" },
+    "excited": { "exaggeration": 0.75, "cfg_weight": 0.35, "expression": "excited" },
+    "confident": { "exaggeration": 0.55, "cfg_weight": 0.50, "expression": "smug" },
+    "nervous": { "exaggeration": 0.65, "cfg_weight": 0.40, "expression": "worried" },
+    "disappointed": { "exaggeration": 0.40, "cfg_weight": 0.55, "expression": "sad" }
+  }
+}

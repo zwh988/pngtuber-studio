@@ -2,9 +2,9 @@
 
 Living document: how the project works right now and where everything lives. **Update it at the end of every task** (see the checklist in `CLAUDE.md`). Keep it factual and short; link to files instead of copying code.
 
-- **Last updated:** 2026-10-12 (M2 chat D: editor screen S8a to S8f and wrap-up. M2 is finished on branch `m2-timeline`; merge and tag `m2-done` are the user's next commands)
-- **Current milestone:** M2 complete (pending merge to `main` and tag `m2-done`). Chat A: S1, S2 (`timemap.py`). Chat B: S3 to S5 (clip commands, orphan parking, `check_references`). Chat C: S6 (timeline state, edit endpoints, undo/redo, batch edits) and S7 (media endpoint). Chat D: S8a to S8f (editor screen) and S9 (wrap-up). Next: M3 (voice: line bank, takes, GPU worker, placing lines). A draft task file is in `docs/tasks/M3-voice.md`; reconcile it with `IMPLEMENTATION_PLAN.md` before starting.
-- **Overall status:** M0 verdict GO (see "M0 findings"). The app runs: a pywebview window shows a Svelte project screen (create from template, open, Recent, footage scan, rescan, relink) and, new in M2, a **video editor screen** reached from "Open editor": add footage to the timeline, a player that plays across the cuts (segment hopping, clip speed with pitch preserved), a custom canvas timeline (ruler, clips, cut markers, speed badges, playhead, zoom and scroll), clip selection, drag to trim and reorder, the hotkeys from spec 4.2, and unlimited undo/redo. The backend behind it (time mapping, clip commands, orphan logic, reference check, timeline API, media server) is pure and tested (490 tests passing). No voice, audio, avatar or export yet. No `install.bat` / `run.bat` yet.
+- **Last updated:** 2026-10-13 (M3 chat A: S1 decisions and S2 pure voice modules; user confirmed pytest and ruff pass)
+- **Current milestone:** M3 (voice) in progress on branch `m3-voice`. Chat A (S1, S2) done and user confirmed: decisions made, `docs/tasks/M3-voice.md` reconciled with `IMPLEMENTATION_PLAN.md`, pure modules in `backend/voice/` with tests passing and ruff clean. Next: chat B (S3: voice profile, line commands, take store, session, API; no GPU). M2 is complete (merged and tagged by the user before branching).
+- **Overall status:** M0 verdict GO (see "M0 findings"). The app runs: a pywebview window shows a Svelte project screen (create from template, open, Recent, footage scan, rescan, relink) and, new in M2, a **video editor screen** reached from "Open editor": add footage to the timeline, a player that plays across the cuts (segment hopping, clip speed with pitch preserved), a custom canvas timeline (ruler, clips, cut markers, speed badges, playhead, zoom and scroll), clip selection, drag to trim and reorder, the hotkeys from spec 4.2, and unlimited undo/redo. The backend behind it (time mapping, clip commands, orphan logic, reference check, timeline API, media server) is pure and tested (490 tests passing). No voice generation, audio, avatar or export yet (M3 chat A added only pure voice modules and tests, no GPU worker, take store or voice UI). No `install.bat` / `run.bat` yet.
 
 ## How to run / test
 
@@ -15,7 +15,7 @@ Living document: how the project works right now and where everything lives. **U
 uv sync                      # Python 3.11, torch 2.6.0+cu126, chatterbox-tts, fastapi, uvicorn, pywebview, pydantic, pytest, ruff, httpx (dev)
 
 # tests and lint (from repo root)
-uv run pytest                # 490 passed, 1 warning (user confirmed at the end of M2, 2026-10-12)
+uv run pytest                # 490 passed, 1 warning at the end of M2 (user confirmed, 2026-10-12). M3 chat A adds 60 tests (expected 550 total; the user reported all passing, the exact count was not pasted)
 uv run ruff check .
 
 # frontend (needs Node.js LTS: node v24.21.0 / npm 11.19.0 on the dev machine; build-time only)
@@ -39,6 +39,7 @@ Copy-Item "$dir\*\bin\ffprobe.exe" bin\ -Force
 uv run python scripts\spike\check_cuda.py
 uv run python scripts\spike\tts_test.py --ref "<path to reference.wav>"          # writes scripts\spike\out\
 uv run python scripts\spike\tts_grid.py --ref "<ref1.wav>" "<ref2.wav>"           # settings grid, writes scripts\spike\out\grid\
+uv run python scripts\spike\seed_check.py --ref "<ref.wav>"                     # seed reproducibility check (M3-S1), writes scripts\spike\out\seed_check\
 uv run python scripts\spike\player_spike.py --video "<path to video.mkv>"          # pywebview window, prints Range requests
 .\bin\ffmpeg.exe -hide_banner -y -ss 20 -t 10 -i "<video.mkv>" -map 0:v:0 -map "0:a:0?" -vf "scale=-2:1080" -c:v h264_nvenc -preset p5 -rc vbr -cq 23 -b:v 0 -pix_fmt yuv420p -c:a aac -b:a 192k scripts\spike\out\nvenc_test.mp4
 ```
@@ -57,10 +58,10 @@ Status values: `empty` (placeholder only), `partial`, `done`.
 | `PROJECT_STATE.md` | this file | done |
 | `IMPLEMENTATION_PLAN.md` | milestones and task checklist | done |
 | `docs/DESIGN_SPEC.md` | full design spec (source of truth for behavior) | done |
-| `docs/tasks/` | per-task breakdown files (`_TEMPLATE.md`, `M0-spike.md`, `M1-foundation.md`, `M2-timeline.md` done, `M3-voice.md` draft) | partial |
+| `docs/tasks/` | per-task breakdown files (`_TEMPLATE.md`, `M0-spike.md`, `M1-foundation.md`, `M2-timeline.md` done, `M3-voice.md` reconciled with the plan in M3 chat A) | partial |
 | `pyproject.toml`, `uv.lock`, `.python-version` | uv project: Python 3.11 only, torch pinned to 2.6.0 from the cu126 index; pydantic, fastapi, uvicorn, pywebview; dev: pytest, ruff, httpx | partial |
 | `conftest.py` | repo-root marker so pytest can import `backend` | done |
-| `scripts/spike/*` | M0 spike scripts (check_cuda, tts_test, tts_grid, player_spike with reusable `parse_range`/`iter_file`) | done (spike) |
+| `scripts/spike/*` | M0 spike scripts (check_cuda, tts_test, tts_grid, seed_check, player_spike with reusable `parse_range`/`iter_file`) | done (spike) |
 | `scripts/spike/out/` | spike output, git-ignored | n/a |
 | `backend/__init__.py` | package marker | done |
 | `backend/app.py` | FastAPI app factory `create_app(static_dir=None, session=None)`, `/api/*` routes (project, footage, recent, timeline and edits), `/media/source/{source_id}`, serves `frontend/dist` | done (M1-6, M2-S6, S7) |
@@ -87,7 +88,12 @@ Status values: `empty` (placeholder only), `partial`, `done`.
 | `backend/edl/` (rest) | ffmpeg graph builder (M6) | empty |
 | `backend/media/ranges.py` | pure `parse_range`; `iter_file` (chunked read of a byte range) | done (M2-S7) |
 | `backend/media/serve.py` | `range_response(path, range_header)`: 200 / 206 / 416 streaming response | done (M2-S7) |
-| `backend/voice/` | GPU worker, takes, cache keys, queue | empty |
+| `backend/voice/` | voice system package. Chat A added the pure modules below; the GPU worker, take store and queue are still to come (M3-3, M3-4) | partial |
+| `backend/voice/__init__.py` | package marker | done (M3 chat A, user confirmed) |
+| `backend/voice/presets.py` | emotion presets: `EmotionPreset`, `parse_presets`, `resolve_params`, `load_presets_file` (the only I/O) | done (M3-2, user confirmed) |
+| `backend/voice/keys.py` | `normalize_text`, `raw_key`, `base_seed`, `next_unused_seed`, `SEED_MODULUS` | done (M3-4 groundwork, user confirmed) |
+| `backend/voice/chunking.py` | `split_sentences`, `plan_chunks`, `chunk_seed`, `crossfade_join` | done (M3-5 pure part, user confirmed; the worker integration is M3-3) |
+| `backend/voice/overflow.py` | `PlacedLine`, `Overflow`, `find_overflows`, `available_slack_ms` | done (M3-9 groundwork, user confirmed) |
 | `backend/audio/` | FX chain, loudness, envelopes | empty |
 | `backend/avatar/` | art loader, solver, compositor | empty |
 | `backend/export/` | export pipeline, asset bundle | empty |
@@ -99,6 +105,7 @@ Status values: `empty` (placeholder only), `partial`, `done`.
 | `frontend/src/format.ts` | `clock(ms)` as m:ss.mmm | done (M2-S8) |
 | `bin/` | ffmpeg/ffprobe (git-ignored) | has ffmpeg n8.1.3 + ffprobe locally |
 | `templates/default_channel.json` | default channel template (no bookends, "Default voice" without reference clips, FX/avatar/export defaults) | done (M1-5) |
+| `templates/emotion_presets.json` | the five emotion presets from spec 6 (exaggeration, cfg_weight, default avatar expression); tune by ear | done (M3-2, user confirmed) |
 | `scripts/` | install/run helpers | spike only |
 | `tests/test_schema.py` | schema tests (29) | done |
 | `tests/test_persistence.py` | migrations, autosave tracker, store tests (28) | done |
@@ -119,6 +126,10 @@ Status values: `empty` (placeholder only), `partial`, `done`.
 | `tests/test_timeline_edit.py` | `add_clip`, undo/redo, save and reopen, `problem_count`, add/undo/redo endpoints (14) | done (M2-S6b) |
 | `tests/test_edit_ops.py` | op models, `build_command`, each operation through the session, batches as one undo step, all-or-nothing, every edit endpoint | done (M2-S6c) |
 | `tests/test_media.py` | `parse_range`, `iter_file`, media endpoint (200/206/416/404, spaces in paths, external sources, no path from the URL) | done (M2-S7) |
+| `tests/test_voice_presets.py` | presets parsing, validation, resolve, shipped file, file errors | user confirmed passing (M3 chat A) |
+| `tests/test_voice_keys.py` | cache key stability and sensitivity, normalisation, float noise, seeds | user confirmed passing (M3 chat A) |
+| `tests/test_voice_chunking.py` | sentence splitting, chunk packing, seeds, crossfade join | user confirmed passing (M3 chat A) |
+| `tests/test_voice_overflow.py` | overflow detection, allow-overlap flag, slack | user confirmed passing (M3 chat A) |
 
 ## Project folder layout (user data, not in this repo)
 
@@ -232,6 +243,12 @@ MyRack/
 
 **pywebview bridge** (`backend/main.py` `Api`): `window.pywebview.api.pick_folder()` and `pick_file()` (video file filter) return a path or `null`. Works on both the older and newer pywebview dialog constants.
 
+**Voice pure modules** (`backend/voice/`, M3 chat A; user confirmed pytest and ruff pass on the real repo after one lint fix round: RUF046, RUF007, I001). No I/O except `load_presets_file`.
+- `presets.py`: `EmotionPreset(name, exaggeration, cfg_weight, expression)`; `PresetError`; `parse_presets(data)` for `{"presets": {name: {exaggeration, cfg_weight, expression}}}` (unknown or missing keys, out-of-range values, bools and NaN rejected; `neutral` required; file order kept); `resolve_params(emotion, exaggeration_override, cfg_weight_override, presets) -> (exaggeration, cfg_weight)` (override beats preset, each independently; unknown emotion raises `PresetError`); `default_presets_path()` (= `<repo>/templates/emotion_presets.json`); `load_presets_file(path=None)`.
+- `keys.py`: `normalize_text` (collapse whitespace); `raw_key(*, text, voice_profile_id, reference_hash, exaggeration, cfg_weight, seed, model_version)` returns a SHA-256 hex (64 chars) of canonical JSON; text is normalised, floats rounded to 4 decimals, `-0.0` equals `0.0`, empty inputs and non-finite numbers raise `ValueError`; `base_seed(project_seed, line_id)`; `next_unused_seed(base, key_for_seed, existing_keys)` (lowest `base + k` whose key is unused, wraps at `SEED_MODULUS = 2**31`); first generation uses the base seed itself.
+- `chunking.py`: `MAX_CHUNK_CHARS = 200`, `CROSSFADE_MS = 40`; `split_sentences(text)` (ends at `. ! ? ...` plus closing quotes, then whitespace; not after common abbreviations such as Mr or e.g., not after lone initials other than I and a, never inside decimals); `plan_chunks(text, max_chars=200)` (text at or under the limit is one normalised chunk; longer text is split into sentences, over-long sentences are cut at commas, then spaces, then hard, and pieces are packed greedily; `max_chars` below 20 raises); `chunk_seed(seed, index)` (chunk 0 keeps the take seed); `crossfade_join(chunks, sample_rate, crossfade_ms=40)` (mono float32, equal-power, fade shortened to half the shorter neighbour, output length is the sum minus the overlaps).
+- `overflow.py`: `PlacedLine(placement_id, start_ms, duration_ms, allow_overlap)` (timeline start, duration of the audio that plays); `find_overflows(items) -> list[Overflow(placement_id, next_placement_id, overflow_ms, allowed)]` (only the immediately following placement counts; `allowed` mirrors the overflowing line's `allow_overlap`, callers warn only when it is false; sorted by start then id; negative values and duplicate ids raise); `available_slack_ms(items, placement_id)` (gap after the previous line's end, or the start itself for the first line; never negative).
+
 ## Editor screen (frontend, M2-S8; user confirmed each sub-round in the app window)
 
 - Reached from "Open editor" on the project screen (`App.svelte` `view` flag, no router). "Back to project" returns and refreshes the summary; opening or creating a project resets to the project screen. The editor renders outside `<main>` so it can use the full width.
@@ -251,7 +268,7 @@ MyRack/
 
 **Chatterbox (original `ChatterboxTTS`, not Turbo or Multilingual):**
 - API: `ChatterboxTTS.from_pretrained(device="cuda")`, then `generate(text, audio_prompt_path=..., exaggeration=0.5, cfg_weight=0.5, temperature=0.8, ...)`. Sample rate is `model.sr` = 24000.
-- `generate` has **no seed argument**. The scripts call `torch.manual_seed(seed)` before each call. Whether that makes output reproducible is **untested**.
+- `generate` has **no seed argument**. The scripts call `torch.manual_seed(seed)` before each call. Reproducible by ear (M3 chat A); bit-exact check not reported.
 - Timings: import 5.3 s, model load 9.0 s (weights cached). First generation 27.4 s (one-time warmup), later lines about 4.6 s for 5 to 6 s of audio (roughly real time). The progress bar shows about 35 to 40 it/s.
 - VRAM: 2.99 GiB after load, 3.60 GiB peak during generation, 4.83 of 8.00 GiB in use device-wide (desktop apps included). Peak with a browser or pywebview window open at the same time was **not measured**.
 - Voice quality (user confirmed): with the neutral reference (`NanairoMiku_Ref_02_Neutral-enhanced-v2.wav`), voices sound realistic but flat. Neutral 0.50/0.50 usable, slightly slow. Excited 0.75/0.35 sounded flat and sarcastic. Nervous 0.65/0.40 sounded the same as neutral. Exaggeration 1.0 to 1.2 adds some cadence and pitch movement, but the voice gets slightly garbled ("underwater"). Open questions: whether a reference clip with real emotion widens the range, and whether the "enhanced" reference clip contributes to the artifacts.
@@ -360,12 +377,28 @@ MyRack/
 | 2026-10-12 | M2 (chat D): hotkeys are hard-coded to the spec 4.2 defaults and ignored while typing in a field; Space is also swallowed on key release so a focused button is not clicked. A remappable hotkey setting is not built |
 | 2026-10-12 | M2 (chat D): the speed control is a dropdown of presets (0.25, 0.5, 0.75, 1, 1.25, 1.5, 2, 3, 4, 8) plus the clip's current value; other values only through the API |
 | 2026-10-12 | M2 (chat D): no backend or schema change in chat D, and none in M2 overall: `schema_version` stays 1 and no migration was needed |
+| 2026-10-13 | M3 (chat A): `docs/tasks/M3-voice.md` reconciled with the plan. The plan wins over the draft: waveform blocks (M3-7), Tighten (M3-9), take delete and the storage manager with sizes (M3-4), the voice profile settings screen (M3-1) and drag-to-place are in M3. Six chats (A to F) instead of five |
+| 2026-10-13 | M3 (chat A): seed check. The user ran `seed_check.py` and judged by ear that seed 1234 repeats and seed 99 differs; a bit-exact comparison was not reported. The cache-key rule does not rely on it: same key means reuse the saved take |
+| 2026-10-13 | M3 (chat A): worker protocol is a subprocess with JSON lines over stdin and stdout (commands load, generate, cancel, unload, shutdown; events ready, progress, done, error), behind a `WorkerClient` interface with a `FakeWorker` for tests; library prints go to the log file; one automatic restart after a crash |
+| 2026-10-13 | M3 (chat A): cancel happens between sentence chunks. A single-chunk line finishes and its result is discarded (no take written); the UI shows "Cancelling...". No kill and restart |
+| 2026-10-13 | M3 (chat A): seed policy. A line's first seed is `base_seed(project.seed, line_id)`; a reroll takes the lowest `base + k` whose key is not already among the line's takes; chunk `i` of a take uses `seed + i`. No schema change |
+| 2026-10-13 | M3 (chat A): cache-key details. Text is whitespace-normalised before hashing, floats are rounded to 4 decimals, and the chunking constants are not part of the key, so changing them never invalidates existing takes |
+| 2026-10-13 | M3 (chat A): job progress by polling a status endpoint (about 500 ms while a job is active); WebSocket only if polling feels slow |
+| 2026-10-13 | M3 (chat A): the reference clip is copied into `media/voice/` in the project and stored as a relative path; validated (decodes, length sensible, warn under 5 s); its hash is computed on demand and memoised by size and mtime. No schema change |
+| 2026-10-13 | M3 (chat A): take files are float32 24 kHz mono WAV under `media/takes_raw/`; lines up to 200 characters are never split; longer lines are chunked at sentence boundaries and joined by the worker with a 40 ms equal-power crossfade |
+| 2026-10-13 | M3 (chat A): in-context playback uses Web Audio, scheduled from the player's clock with each start from `to_timeline(anchor)`, rescheduled on seek, pause and hop; voice plays at 1x regardless of clip speed; M3 plays raw or tightened takes, M4 swaps in processed ones |
+| 2026-10-13 | M3 (chat A): overflow is computed by a pure function over timeline start plus audio duration; `allow_overlap` marks the result as allowed (no warning). Nudge earlier, Regenerate and Tighten all ship in M3 (the plan puts Tighten there) |
+| 2026-10-13 | M3 (chat A): undo and deletes. Each line edit is one undo step (text commits on blur or Enter); Generate is not undoable. `RemoveLine` is an undoable command only for a line with no takes and no placements. A line with takes is deleted from the storage manager ("Delete line and its takes", explicit confirmation, not undoable; allowed by rule 1 because the user does it). Deleting a take that is a line's active take clears the active take; what happens to placement take overrides is to be settled in S3 |
+| 2026-10-13 | M3 (chat A): Tighten is stored as a new `Placement.stretch` (about 1.0 to 1.08), schema version 2 with a migration, added only in S8. The stretched WAV is rendered by the backend (pedalboard time-stretch, one-time `uv add pedalboard`) into `media/takes_fx/`, keyed by hash(raw key, stretch). No other M3 step changes the schema |
+| 2026-10-13 | M3 (chat A): waveform peaks are computed on demand by the backend and not stored in `project.json` |
+| 2026-10-13 | M3 (chat A): unknown emotion on a line makes generation fail with a clear message (`PresetError`); there is no silent fallback to neutral |
+| 2026-10-13 | M3 (chat A): lint conventions learned from the user's ruff run: write `round(x)` not `int(round(x))` (RUF046); iterate successive pairs with `itertools.pairwise` (RUF007); keep imports sorted and wrapped for 88 columns (I001); new code should aim for 88 columns |
 
 ## Known issues / open questions
 
 - Voice source not final: own voice or acted character (swappable via voice profile).
 - Emotion range: neutral reference gives flat output; exaggeration >= 1.0 adds some expression but garbles slightly. Test an expressive reference clip and a non-"enhanced" clip in M3. Emotion preset numbers are still starting guesses.
-- Seed reproducibility via `torch.manual_seed` is untested (matters for cache keys, rule 3).
+- Seed reproducibility via `torch.manual_seed`: same to the ear (user, M3 chat A); a bit-exact comparison was not reported. Rule 3 does not depend on it (same key means reuse).
 - VRAM peak with the pywebview window open during generation is unmeasured.
 - First generation after model load took 27 s (warmup); the UI should show progress and the worker should warm up on start.
 - Effects slot contents not chosen (reverb, pitch shift, chorus, others).
@@ -410,9 +443,13 @@ MyRack/
 - M2 editor: `timeline.ts` duplicates a few time-mapping rules from `backend/edl/timemap.py` (display only). If the backend rounding rules ever change, update both.
 - M2: the wrap-up did not include an itemised manual acceptance run or a final `npm run check` paste (see "M2 manual checks").
 
+- M3 chat A: user confirmed all tests pass and ruff is clean (after the lint fix round). `ruff format --check` was not reported; some lines run up to about 100 characters while ruff's isort wraps at 88, so a format pass may reflow a few lines.
+- M3: `Take.line_id` points at a line; the rule for deleting a take that placements reference by `take_override_id` is open (settle in S3). `check_references` does not yet look at takes or lines (to be extended in S3).
+- M3: Tighten needs `pedalboard` (not yet in `pyproject.toml`); `uv add pedalboard` is a one-time download in S8.
+- M3: the abbreviation list in `split_sentences` is small and English only; a miss only changes where a long line is cut, never what is said.
+
 ## Next up
 
-1. **Merge M2** (the user runs these; see the chat): commit the wrap-up docs on `m2-timeline`, `git switch main`, `git merge m2-timeline`, `git tag m2-done`, push with tags.
-2. **Plan ticks:** M2-1 to M2-6 are all done (chat D ticks M2-2, M2-4 and M2-6). Add the M2 acceptance line once the manual run is ticked in the task file.
-3. **M3 (voice):** branch `m3-voice` (or the plan's name) from `main` after the merge and tag. `docs/tasks/M3-voice.md` is a **draft** written from the spec and this file, without `IMPLEMENTATION_PLAN.md` in view: the first M3 chat must reconcile its items and ids with the plan before any code. Start with the prerequisites in that file (reference clip, GPU free, seed reproducibility check).
-4. **Open questions M3 inherits:** seed reproducibility via `torch.manual_seed` is untested; VRAM peak with the pywebview window open is unmeasured; the first generation after model load takes about 27 s (warm up the worker at start); emotion presets are guesses; whether an expressive reference clip widens the emotional range; the voice source (own voice or acted character).
+1. **Commit and tick (user):** commit M3 chat A (`M3-2/M3-5: voice pure modules (presets, keys, chunking, overflow), M3 docs`); tick M3-2 in `IMPLEMENTATION_PLAN.md`. Leave M3-5 until the worker uses the chunker (S4); the pure part is done and confirmed.
+2. **Chat B (S3, M3-1 and M3-4 backend, no GPU):** start a fresh chat with `CLAUDE.md`, this file, `docs/tasks/M3-voice.md`, spec section 5 and section 6 "Take lifecycle", and the source files listed for chat B. Sub-rounds: (a) voice profile import and validation, (b) line commands, (c) take store (reuse by key, delete, sizes), (d) endpoints, all against a fake worker. Settle the take-delete versus `take_override_id` rule and extend `check_references`.
+3. **Open questions M3 inherits:** the reference clip and voice source (own voice or acted character); VRAM peak with the app window open; first generation after load takes about 27 s (warm up the worker at start); emotion presets are guesses; whether an expressive reference clip widens the range.
