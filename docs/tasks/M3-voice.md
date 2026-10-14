@@ -4,7 +4,7 @@
 
 - **Milestone items:** M3-1 to M3-9 in `IMPLEMENTATION_PLAN.md` (listed below).
 - **Spec sections:** 4.2 (Line bank tab, Voice lane, hotkeys N, G, Shift+G, M), 5 (Line, Take, Placement, VoiceProfile, the anchoring rule), 6 (voice system, take lifecycle, overflow), 11 (processes: GPU worker, queue), 2 (decisions locked)
-- **Status:** chat A (S1, S2) written; S2 awaiting the user's pytest and ruff results. S3 onward not started.
+- **Status:** chats A (S1, S2) and B (S3) written. S3 (voice profile, line bank, take store, generation planning, endpoints) was written without being run; the user runs all rounds together. S4 (chat C, GPU worker) is next.
 
 ## Plan items
 

@@ -22,6 +22,7 @@ TEMP_FILE = "project.json.tmp"
 # Subfolders created for every project (spec section 5).
 LAYOUT_DIRS = (
     "footage",
+    "media/voice",
     "media/takes_raw",
     "media/takes_fx",
     "media/envelopes",

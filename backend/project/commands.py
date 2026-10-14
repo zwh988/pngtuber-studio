@@ -189,7 +189,9 @@ class CommandStack:
     inside it into one undo step. If the block raises, the commands already
     applied are reverted, nothing is recorded, and the redo stack is restored.
     Nested groups merge into the outermost one. Undo/redo are not allowed
-    while a group is open.
+    while a group is open. If a revert (or a redo's apply) raises
+    ``CommandError``, the commands already done are undone again, the step
+    stays where it was and the error is re-raised.
     """
 
     def __init__(
@@ -270,9 +272,17 @@ class CommandStack:
         self._require_no_group()
         if not self._undo:
             return None
-        entry = self._undo.pop()
-        for command in reversed(entry.commands):
-            command.revert(self._project)
+        entry = self._undo[-1]
+        done: list[Command] = []
+        try:
+            for command in reversed(entry.commands):
+                command.revert(self._project)
+                done.append(command)
+        except CommandError:
+            for command in reversed(done):
+                command.apply(self._project)
+            raise
+        self._undo.pop()
         self._redo.append(entry)
         self._notify()
         return entry.label
@@ -282,9 +292,17 @@ class CommandStack:
         self._require_no_group()
         if not self._redo:
             return None
-        entry = self._redo.pop()
-        for command in entry.commands:
-            command.apply(self._project)
+        entry = self._redo[-1]
+        done: list[Command] = []
+        try:
+            for command in entry.commands:
+                command.apply(self._project)
+                done.append(command)
+        except CommandError:
+            for command in reversed(done):
+                command.revert(self._project)
+            raise
+        self._redo.pop()
         self._undo.append(entry)
         self._notify()
         return entry.label

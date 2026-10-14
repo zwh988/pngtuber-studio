@@ -13,10 +13,13 @@ from datetime import UTC, datetime
 from pathlib import Path
 from typing import Any
 
-from backend.edl.anchoring import check_references
+import numpy as np
+
+from backend.edl.anchoring import check_references, check_voice_references
 from backend.project.clip_commands import AddClip
 from backend.project.commands import (
     AddSource,
+    Command,
     CommandError,
     CommandStack,
     RelinkSource,
@@ -28,6 +31,8 @@ from backend.project.footage import (
     run_ffprobe,
     scan_footage,
 )
+from backend.project.line_commands import NoChange
+from backend.project.line_ops import LineEditOp, build_line_command
 from backend.project.recent import (
     RecentItem,
     add_recent,
@@ -36,7 +41,7 @@ from backend.project.recent import (
     save_recent,
 )
 from backend.project.relink import relink_mismatches, to_footage_relpath
-from backend.project.schema import Project, Source
+from backend.project.schema import Line, Project, Source, Take, new_id
 from backend.project.store import (
     ProjectError,
     create_project,
@@ -56,6 +61,37 @@ from backend.project.template import (
     load_template_file,
 )
 from backend.project.timeline import EditResult, TimelineState, build_timeline
+from backend.project.voice_commands import AddVoiceProfile, SetReferenceClip
+from backend.voice.generation import GenerationError, GenerationPlan
+from backend.voice.generation import plan_generation as build_generation_plan
+from backend.voice.linebank import LineBankState, build_line_bank
+from backend.voice.presets import EmotionPreset, PresetError, load_presets_file
+from backend.voice.profile import VoiceState, build_voice_state
+from backend.voice.reference import (
+    AudioInfoFn,
+    FileHashCache,
+    VoiceProfileError,
+    import_reference,
+    read_audio_info,
+)
+from backend.voice.takes import (
+    AddTakeResult,
+    NewTake,
+    StorageReport,
+    TakeDeleteReport,
+    TakeError,
+    TakeItem,
+    TakeRemoval,
+    build_delete_report,
+    build_storage_report,
+    build_take,
+    build_take_item,
+    find_take_by_key,
+    raw_take_relpath,
+    remove_line_and_takes,
+    remove_takes,
+)
+from backend.voice.takestore import TakeStore
 
 Probe = Callable[[Path], dict[str, Any]]
 
@@ -95,6 +131,8 @@ class Session:
         template_path: Path | None = None,
         probe: Probe | None = None,
         recent_path: Path | None = None,
+        audio_info: AudioInfoFn | None = None,
+        presets: dict[str, EmotionPreset] | None = None,
     ) -> None:
         # Re-entrant: the stack's on_change callback runs while a command
         # method already holds the lock.
@@ -102,6 +140,12 @@ class Session:
         self._template_path = template_path
         self._probe: Probe = probe if probe is not None else run_ffprobe
         self._recent_path = recent_path
+        self._audio_info: AudioInfoFn = (
+            audio_info if audio_info is not None else read_audio_info
+        )
+        self._hashes = FileHashCache()
+        # Loaded from templates/emotion_presets.json on first use when not given.
+        self._presets: dict[str, EmotionPreset] | None = presets
         self._folder: Path | None = None
         self._stack: CommandStack | None = None
         self._save_error: str | None = None
@@ -195,6 +239,244 @@ class Session:
             except CommandError as exc:
                 raise SessionError(str(exc)) from exc
             return self._report(folder, stack.project, added=0)
+
+    # ---- line bank ---------------------------------------------------------
+
+    def lines(self) -> LineBankState:
+        with self._lock:
+            return self._line_bank_state()
+
+    def edit_lines(
+        self, ops: Sequence[LineEditOp], label: str | None = None
+    ) -> LineBankState:
+        """Apply line bank edits. One op without a label is a plain undo step;
+        several ops (or a label) run as one group, so they undo together and
+        either all apply or none do. An op that would change nothing is skipped
+        and makes no undo step."""
+        if not ops:
+            raise SessionError("no edits given")
+        with self._lock:
+            _, stack = self._require_open()
+            emotions = self._presets_or_raise()
+            try:
+                commands = [
+                    build_line_command(op, known_emotions=emotions.keys())
+                    for op in ops
+                ]
+                if len(commands) == 1 and label is None:
+                    self._execute_unless_no_change(stack, commands[0])
+                else:
+                    with stack.group(label or "Edit lines"):
+                        for command in commands:
+                            self._execute_unless_no_change(stack, command)
+            except (CommandError, ValueError) as exc:
+                raise SessionError(str(exc)) from exc
+            return self._line_bank_state()
+
+    # ---- takes -------------------------------------------------------------
+
+    def takes(self, line_id: str) -> list[TakeItem]:
+        """The takes of one line, oldest first."""
+        with self._lock:
+            folder, stack = self._require_open()
+            line = self._line_or_error(stack.project, line_id)
+            store = TakeStore(folder)
+            return [
+                build_take_item(take, line, store.size(take.raw_file) is not None)
+                for take in stack.project.takes
+                if take.line_id == line_id
+            ]
+
+    def reuse_take(
+        self, new: NewTake, *, make_active: bool = True
+    ) -> AddTakeResult | None:
+        """Reuse an existing take with the same raw key (rule 3), or return None.
+
+        Call this before spending GPU time. A take of another line with the same
+        key is copied (a new take for this line, no generation). Not undoable.
+        """
+        with self._lock:
+            folder, stack = self._require_open()
+            project = stack.project
+            line = self._line_or_error(project, new.line_id)
+            store = TakeStore(folder)
+            existing = find_take_by_key(
+                project, new.raw_key, prefer_line_id=new.line_id
+            )
+            if existing is None or store.size(existing.raw_file) is None:
+                return None
+            take = existing
+            copied = False
+            try:
+                if existing.line_id != new.line_id:
+                    take_id = self._free_take_id(project, new.take_id)
+                    rel = raw_take_relpath(take_id)
+                    take = build_take(new, take_id, rel, existing.duration_ms)
+                    store.copy_raw(existing.raw_file, rel)
+                    project.takes.append(take)
+                    copied = True
+            except TakeError as exc:
+                raise SessionError(str(exc)) from exc
+            return self._finish_take(
+                line, take, reused=True, make_active=make_active, changed=copied
+            )
+
+    def add_take(
+        self,
+        new: NewTake,
+        samples: np.ndarray,
+        sample_rate: int,
+        *,
+        make_active: bool = True,
+    ) -> AddTakeResult:
+        """Store a generated take: write the file, record it, save the project.
+
+        Takes persist and are not undoable (rule 1). If a take with this key
+        already exists it is reused instead (see ``reuse_take``).
+        """
+        with self._lock:
+            reused = self.reuse_take(new, make_active=make_active)
+            if reused is not None:
+                return reused
+            folder, stack = self._require_open()
+            project = stack.project
+            line = self._line_or_error(project, new.line_id)
+            store = TakeStore(folder)
+            existing = find_take_by_key(
+                project, new.raw_key, prefer_line_id=new.line_id
+            )
+            try:
+                if existing is not None and existing.line_id == new.line_id:
+                    # The record is there but its file is gone: write it back.
+                    existing.duration_ms = store.write_raw(
+                        existing.raw_file, samples, sample_rate
+                    )
+                    take = existing
+                else:
+                    take_id = self._free_take_id(project, new.take_id)
+                    rel = raw_take_relpath(take_id)
+                    take = build_take(new, take_id, rel, 0)  # validates first
+                    take.duration_ms = store.write_raw(rel, samples, sample_rate)
+                    project.takes.append(take)
+            except TakeError as exc:
+                raise SessionError(str(exc)) from exc
+            return self._finish_take(
+                line, take, reused=False, make_active=make_active, changed=True
+            )
+
+    def delete_take(self, take_id: str) -> TakeDeleteReport:
+        """Delete one take and its file (storage manager; not undoable)."""
+        return self._delete_takes(
+            lambda project: remove_takes(project, [take_id]), removed_line=False
+        )
+
+    def delete_line(self, line_id: str) -> TakeDeleteReport:
+        """Delete a line and all its takes (storage manager; not undoable)."""
+        return self._delete_takes(
+            lambda project: remove_line_and_takes(project, line_id),
+            removed_line=True,
+        )
+
+    def plan_generation(
+        self, line_id: str, *, model_version: str, reroll: bool = False
+    ) -> GenerationPlan:
+        """Plan one generation: parameters, seed, raw key, chunks (no GPU, no
+        writes). Pair it with ``reuse_take`` and ``add_take``."""
+        with self._lock:
+            folder, stack = self._require_open()
+            voice = self._voice_state(folder, stack.project)
+            if (
+                not voice.ready
+                or voice.profile_id is None
+                or voice.hash is None
+                or voice.reference_path is None
+            ):
+                detail = "; ".join(voice.problems) or voice.status
+                raise SessionError(f"the voice reference is not ready: {detail}")
+            try:
+                return build_generation_plan(
+                    stack.project,
+                    line_id,
+                    self._presets_or_raise(),
+                    voice_profile_id=voice.profile_id,
+                    reference_hash=voice.hash,
+                    reference_path=str(folder / voice.reference_path),
+                    model_version=model_version,
+                    reroll=reroll,
+                )
+            except GenerationError as exc:
+                raise SessionError(str(exc)) from exc
+
+    def take_path(self, take_id: str) -> Path | None:
+        """Disk path of a take file of the open project, for the media endpoint.
+        None when no project is open or the id is not one of its takes."""
+        with self._lock:
+            if self._folder is None or self._stack is None:
+                return None
+            take = next(
+                (t for t in self._stack.project.takes if t.id == take_id), None
+            )
+            if take is None:
+                return None
+            try:
+                return TakeStore(self._folder).path(take.raw_file)
+            except TakeError:
+                return None
+
+    def storage(self) -> StorageReport:
+        """Disk use per line and take, plus files no take points at."""
+        with self._lock:
+            folder, stack = self._require_open()
+            store = TakeStore(folder)
+            sizes = {
+                take.raw_file: store.size(take.raw_file) for take in stack.project.takes
+            }
+            return build_storage_report(
+                stack.project, sizes, store.unreferenced(set(sizes))
+            )
+
+    # ---- voice profile -----------------------------------------------------
+
+    def voice(self) -> VoiceState:
+        """State of the project's voice profile (the first one; v1 has one)."""
+        with self._lock:
+            folder, stack = self._require_open()
+            return self._voice_state(folder, stack.project)
+
+    def set_voice_reference(self, path: str) -> VoiceState:
+        """Check a clip, copy it into ``media/voice/`` and make it the reference.
+
+        Creates the voice profile first if the project has none. The edit is one
+        undo step.
+        """
+        with self._lock:
+            folder, stack = self._require_open()
+            picked = Path(path.strip())
+            if not path.strip() or not picked.is_file():
+                raise SessionError(f"file not found: {picked}")
+            try:
+                imported = import_reference(
+                    folder,
+                    picked,
+                    audio_info=self._audio_info,
+                    hashes=self._hashes,
+                )
+            except VoiceProfileError as exc:
+                raise SessionError(str(exc)) from exc
+            profiles = stack.project.voice_profiles
+            try:
+                if not profiles:
+                    adding = AddVoiceProfile("Default")
+                    with stack.group("Set voice reference"):
+                        stack.execute(adding)
+                        stack.execute(
+                            SetReferenceClip(adding.profile_id, imported.rel_path)
+                        )
+                elif profiles[0].reference_clips != [imported.rel_path]:
+                    stack.execute(SetReferenceClip(profiles[0].id, imported.rel_path))
+            except CommandError as exc:
+                raise SessionError(str(exc)) from exc
+            return self._voice_state(folder, stack.project)
 
     # ---- media -------------------------------------------------------------
 
@@ -311,13 +593,120 @@ class Session:
         )
         return state.model_copy(update={"save_error": self._save_error})
 
+    @staticmethod
+    def _line_or_error(project: Project, line_id: str) -> Line:
+        for line in project.lines:
+            if line.id == line_id:
+                return line
+        raise SessionError(f"unknown line id {line_id!r}")
+
+    @staticmethod
+    def _free_take_id(project: Project, wanted: str | None) -> str:
+        take_id = wanted if wanted is not None else new_id()
+        if any(take.id == take_id for take in project.takes):
+            raise TakeError(f"take id {take_id!r} already exists")
+        return take_id
+
+    def _finish_take(
+        self,
+        line: Line,
+        take: Take,
+        *,
+        reused: bool,
+        make_active: bool,
+        changed: bool,
+    ) -> AddTakeResult:
+        if make_active and line.active_take_id != take.id:
+            line.active_take_id = take.id
+            changed = True
+        if changed:
+            self._on_change()
+        return AddTakeResult(take=build_take_item(take, line, True), reused=reused)
+
+    def _delete_takes(
+        self, remove: Callable[[Project], TakeRemoval], *, removed_line: bool
+    ) -> TakeDeleteReport:
+        with self._lock:
+            folder, stack = self._require_open()
+            store = TakeStore(folder)
+            try:
+                removal = remove(stack.project)
+            except TakeError as exc:
+                raise SessionError(str(exc)) from exc
+            # Earlier undo steps may point at what is gone (an active take, a
+            # star), so the history starts over.
+            stack.clear()
+            self._on_change()
+            if self._save_error is not None:
+                raise SessionError(
+                    "could not save the project, so the take files were kept: "
+                    f"{self._save_error}"
+                )
+            sizes = {rel: store.size(rel) or 0 for rel in removal.files}
+            failed = store.delete_files(removal.files)
+            freed = sum(size for rel, size in sizes.items() if rel not in failed)
+            return build_delete_report(
+                removal,
+                removed_line=removed_line,
+                freed_bytes=freed,
+                failed_files=failed,
+            )
+
+    @staticmethod
+    def _execute_unless_no_change(stack: CommandStack, command: Command) -> None:
+        try:
+            stack.execute(command)
+        except NoChange:
+            return
+
+    def _presets_or_raise(self) -> dict[str, EmotionPreset]:
+        if self._presets is None:
+            try:
+                self._presets = load_presets_file()
+            except PresetError as exc:
+                raise SessionError(str(exc)) from exc
+        return self._presets
+
+    def _line_bank_state(self) -> LineBankState:
+        _, stack = self._require_open()
+        state = build_line_bank(
+            stack.project,
+            self._presets_or_raise(),
+            can_undo=stack.can_undo,
+            can_redo=stack.can_redo,
+            undo_label=stack.undo_label,
+            redo_label=stack.redo_label,
+        )
+        return state.model_copy(update={"save_error": self._save_error})
+
+    def _voice_state(self, folder: Path, project: Project) -> VoiceState:
+        profile = project.voice_profiles[0] if project.voice_profiles else None
+        exists = False
+        info = None
+        digest = None
+        read_error = None
+        if profile is not None and profile.reference_clips:
+            clip = folder / profile.reference_clips[0]
+            exists = clip.is_file()
+            if exists:
+                try:
+                    info = self._audio_info(clip)
+                    digest = self._hashes.digest(clip)
+                except (VoiceProfileError, OSError) as exc:
+                    info = None
+                    read_error = str(exc)
+        return build_voice_state(
+            profile, exists=exists, info=info, read_error=read_error, digest=digest
+        )
+
     def _summary(self) -> ProjectSummary:
         folder, stack = self._require_open()
         summary = summarize(str(folder), stack.project)
         return summary.model_copy(
             update={
                 "save_error": self._save_error,
-                "problem_count": len(check_references(stack.project)),
+                "problem_count": len(check_references(stack.project))
+                + len(check_voice_references(stack.project)),
             }
         )
 

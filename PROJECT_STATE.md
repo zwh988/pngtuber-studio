@@ -2,9 +2,9 @@
 
 Living document: how the project works right now and where everything lives. **Update it at the end of every task** (see the checklist in `CLAUDE.md`). Keep it factual and short; link to files instead of copying code.
 
-- **Last updated:** 2026-10-13 (M3 chat A: S1 decisions and S2 pure voice modules; user confirmed pytest and ruff pass)
-- **Current milestone:** M3 (voice) in progress on branch `m3-voice`. Chat A (S1, S2) done and user confirmed: decisions made, `docs/tasks/M3-voice.md` reconciled with `IMPLEMENTATION_PLAN.md`, pure modules in `backend/voice/` with tests passing and ruff clean. Next: chat B (S3: voice profile, line commands, take store, session, API; no GPU). M2 is complete (merged and tagged by the user before branching).
-- **Overall status:** M0 verdict GO (see "M0 findings"). The app runs: a pywebview window shows a Svelte project screen (create from template, open, Recent, footage scan, rescan, relink) and, new in M2, a **video editor screen** reached from "Open editor": add footage to the timeline, a player that plays across the cuts (segment hopping, clip speed with pitch preserved), a custom canvas timeline (ruler, clips, cut markers, speed badges, playhead, zoom and scroll), clip selection, drag to trim and reorder, the hotkeys from spec 4.2, and unlimited undo/redo. The backend behind it (time mapping, clip commands, orphan logic, reference check, timeline API, media server) is pure and tested (490 tests passing). No voice generation, audio, avatar or export yet (M3 chat A added only pure voice modules and tests, no GPU worker, take store or voice UI). No `install.bat` / `run.bat` yet.
+- **Last updated:** 2026-10-14 (M3 chat B: S3 voice profile, line bank, take store, generation planning, endpoints; written without being run, the user will run all rounds together)
+- **Current milestone:** M3 (voice) in progress on branch `m3-voice`. Chat A (S1, S2) done and user confirmed. Chat B (S3, rounds a to d) written but **not yet run**: voice profile import, line bank commands, take store, generation planning and their endpoints (see "Voice backend"). Next: the user runs pytest and ruff and pastes the result, then chat C (S4: GPU worker, queue, cancel, job status, generate endpoint). M2 is complete (merged and tagged by the user before branching).
+- **Overall status:** M0 verdict GO (see "M0 findings"). The app runs: a pywebview window shows a Svelte project screen (create from template, open, Recent, footage scan, rescan, relink) and, new in M2, a **video editor screen** reached from "Open editor": add footage to the timeline, a player that plays across the cuts (segment hopping, clip speed with pitch preserved), a custom canvas timeline (ruler, clips, cut markers, speed badges, playhead, zoom and scroll), clip selection, drag to trim and reorder, the hotkeys from spec 4.2, and unlimited undo/redo. The backend behind it (time mapping, clip commands, orphan logic, reference check, timeline API, media server) is pure and tested (490 tests passing). No voice generation, audio, avatar or export yet (M3 chats A and B added the pure voice modules, voice profile import, line bank, take store, generation planning and their endpoints; there is no GPU worker and no voice UI yet). No `install.bat` / `run.bat` yet.
 
 ## How to run / test
 
@@ -15,7 +15,7 @@ Living document: how the project works right now and where everything lives. **U
 uv sync                      # Python 3.11, torch 2.6.0+cu126, chatterbox-tts, fastapi, uvicorn, pywebview, pydantic, pytest, ruff, httpx (dev)
 
 # tests and lint (from repo root)
-uv run pytest                # 490 passed, 1 warning at the end of M2 (user confirmed, 2026-10-12). M3 chat A adds 60 tests (expected 550 total; the user reported all passing, the exact count was not pasted)
+uv run pytest                # 490 passed, 1 warning at the end of M2 (user confirmed, 2026-10-12). M3 chat A adds 60 tests (expected 550 total; the user reported all passing, the exact count was not pasted) M3 chat B adds tests in rounds a to d (voice profile, line commands, line ops, line bank, take store, generation, references, command stack failures, endpoints); written without running, so the count is to be reported by the user
 uv run ruff check .
 
 # frontend (needs Node.js LTS: node v24.21.0 / npm 11.19.0 on the dev machine; build-time only)
@@ -88,12 +88,21 @@ Status values: `empty` (placeholder only), `partial`, `done`.
 | `backend/edl/` (rest) | ffmpeg graph builder (M6) | empty |
 | `backend/media/ranges.py` | pure `parse_range`; `iter_file` (chunked read of a byte range) | done (M2-S7) |
 | `backend/media/serve.py` | `range_response(path, range_header)`: 200 / 206 / 416 streaming response | done (M2-S7) |
-| `backend/voice/` | voice system package. Chat A added the pure modules below; the GPU worker, take store and queue are still to come (M3-3, M3-4) | partial |
+| `backend/voice/` | voice system package. Pure modules (chat A); voice profile, take store and generation planning (chat B). The GPU worker, queue and job endpoints are still to come (M3-3) | partial |
 | `backend/voice/__init__.py` | package marker | done (M3 chat A, user confirmed) |
 | `backend/voice/presets.py` | emotion presets: `EmotionPreset`, `parse_presets`, `resolve_params`, `load_presets_file` (the only I/O) | done (M3-2, user confirmed) |
 | `backend/voice/keys.py` | `normalize_text`, `raw_key`, `base_seed`, `next_unused_seed`, `SEED_MODULUS` | done (M3-4 groundwork, user confirmed) |
 | `backend/voice/chunking.py` | `split_sentences`, `plan_chunks`, `chunk_seed`, `crossfade_join` | done (M3-5 pure part, user confirmed; the worker integration is M3-3) |
 | `backend/voice/overflow.py` | `PlacedLine`, `Overflow`, `find_overflows`, `available_slack_ms` | done (M3-9 groundwork, user confirmed) |
+| `backend/voice/profile.py` | pure: `AudioInfo`, `check_reference` (under 1 s refused; warnings under 5 s, over 30 s, under 16 kHz), `clean_stem`, `reference_filename`, `reference_relpath`, `VoiceState`, `build_voice_state` | written, untested (M3-1, chat B) |
+| `backend/voice/reference.py` | reference clip I/O: `read_audio_info` (soundfile), `hash_file`, `FileHashCache`, `import_reference`, `VoiceProfileError` | written, untested (M3-1) |
+| `backend/voice/linebank.py` | pure: `LineItem`, `LineBankState`, `build_line_item`, `build_line_bank` | written, untested (M3-4) |
+| `backend/voice/takes.py` | pure take logic: `NewTake`, `find_take_by_key`, `build_take`, `remove_takes`, `remove_line_and_takes`, `TakeItem`, `AddTakeResult`, `TakeDeleteReport`, `StorageReport`, `build_storage_report`, `TakeError` | written, untested (M3-4) |
+| `backend/voice/takestore.py` | take file I/O in `media/takes_raw/`: `TakeStore` (atomic `write_raw`, `copy_raw`, `size`, `unreferenced`, `delete_files`) | written, untested (M3-4) |
+| `backend/voice/generation.py` | pure: `plan_generation` gives a `GenerationPlan` (parameters, seed, raw key, chunks); `GenerationError` | written, untested (M3-4) |
+| `backend/project/voice_commands.py` | `AddVoiceProfile`, `SetReferenceClip` (path must be inside `media/voice/`) | written, untested (M3-1) |
+| `backend/project/line_commands.py` | `AddLine`, `RemoveLine`, `SetLineText`, `SetLineEmotion`, `SetLineExaggeration`, `SetLineCfgWeight`, `SetAllowOverlap`, `SetActiveTake`, `StarTake`, `NoChange` | written, untested (M3-4) |
+| `backend/project/line_ops.py` | line edit op models (tag `op`), `LineEditBatch`, `build_line_command` | written, untested (M3-4) |
 | `backend/audio/` | FX chain, loudness, envelopes | empty |
 | `backend/avatar/` | art loader, solver, compositor | empty |
 | `backend/export/` | export pipeline, asset bundle | empty |
@@ -130,6 +139,10 @@ Status values: `empty` (placeholder only), `partial`, `done`.
 | `tests/test_voice_keys.py` | cache key stability and sensitivity, normalisation, float noise, seeds | user confirmed passing (M3 chat A) |
 | `tests/test_voice_chunking.py` | sentence splitting, chunk packing, seeds, crossfade join | user confirmed passing (M3 chat A) |
 | `tests/test_voice_overflow.py` | overflow detection, allow-overlap flag, slack | user confirmed passing (M3 chat A) |
+| `tests/test_voice_profile.py`, `test_voice_reference.py`, `test_voice_commands.py`, `test_voice_session.py` | voice profile: checks, names, state, import and hashing, commands, session and endpoints | written, untested (M3 chat B, round a) |
+| `tests/test_line_commands.py`, `test_line_ops.py`, `test_linebank.py`, `test_lines_session.py` | line bank commands, ops, state, session and endpoints | written, untested (round b) |
+| `tests/test_takes.py`, `test_takestore.py`, `test_takes_session.py`, `test_command_stack_failures.py` | take logic, files, session lifecycle, failing revert or redo | written, untested (round c) |
+| `tests/test_generation.py`, `test_generation_session.py`, `test_voice_references.py`, `test_takes_api.py` | seed policy and keys, generate/reuse/reroll/reopen with a fake generator, reference checks for lines and takes, take and storage endpoints | written, untested (round d) |
 
 ## Project folder layout (user data, not in this repo)
 
@@ -138,7 +151,7 @@ MyRack/
   project.json          source of truth
   project.json.bak      previous saved version (rotated on each save)
   footage/              user places recordings here (never copied)
-  media/takes_raw/  media/takes_fx/  media/envelopes/
+  media/voice/  media/takes_raw/  media/takes_fx/  media/envelopes/   (voice/ holds the reference clip copy, M3-1)
   exports/
 ```
 
@@ -151,6 +164,7 @@ MyRack/
 - `ChannelTemplate`: `name`, `intro` / `outro` (`BookendRef(path)` or null), `voice_profile`, `fx_chain`, `avatar`, `export`, `game_audio_db`.
 - Root `Project` fields: `schema_version`, `name`, `seed`, `sources`, `clips`, `lines`, `takes`, `placements`, `keyframes`, `reactions`, `voice_profiles`, `fx_chain`, `game_audio_db` (default 0.0), `avatar`, `export`. Unique ids per collection are validated; cross-references are not.
 - `Clip` uses `in_ms`/`out_ms`, `speed` 0.25 to 8, `track`, `overlay`, `effects`. `Placement`, `Keyframe`, `Reaction` carry `orphaned: bool`, set by the M2 commands (see "Anchoring and parking API"). **No schema change in M2 so far; no migration needed.**
+- M3 chat B: **no schema change**; `VoiceProfile.reference_clips[0]` holds the relative path `media/voice/<stem>-<hash8><ext>`. The only later schema change planned is `Placement.stretch` in S8 (schema version 2).
 
 **Store API** (`backend/project/store.py`): `create_project(folder, project)`, `load_project(folder, *, use_backup=False, migrations=None)`, `save_project(folder, project)`, `ensure_layout(folder)`, `project_file`/`backup_file`. Errors: `ProjectError`, `ProjectExistsError`, `ProjectLoadError`.
 - Save order: temp file (flush, fsync) in the project folder, copy current `project.json` to `.bak` (only if it is valid JSON), `os.replace` temp over `project.json`. Failure leaves the old file and cleans up temp files.
@@ -170,7 +184,7 @@ MyRack/
 **Anchoring and parking API** (`backend/edl/anchoring.py` is pure; `backend/project/parking.py` changes in-memory objects only; M2-S5, user confirmed tests pass):
 - `AnchoredItem = Placement | Keyframe | Reaction`. `anchored_items(project, clip_id=None)` (placements, then keyframes, then reactions), `items_in_source_range(project, clip_id, lo, hi)` (`lo` inclusive, `hi` exclusive, `hi=None` unbounded), `item_kind(item)`, `find_orphans(project)` (items flagged `orphaned`; for the export pre-flight).
 - `edge_anchors(clips, cut_ms, *, spans=None) -> (before, after)`: `before` = `Anchor(last clip ending at or before cut_ms, out_ms - 1)`, `after` = `Anchor(first clip starting at or after cut_ms, in_ms)`; either is `None` when there is no footage on that side. `park_anchor(clips, cut_ms, offset_ms, region_ms, *, spans=None) -> Anchor | None` picks the nearer edge by old-timeline distance (offset clamped to the region), a tie goes to `before`, and it returns `None` when no clip survives.
-- `check_references(project) -> list[ReferenceProblem]`; `ReferenceProblem(kind, owner_id, missing_id, message)` with kind `clip_missing_source` or `item_missing_clip`. It only reports; it never changes the project and never blocks loading.
+- `check_references(project) -> list[ReferenceProblem]`; `ReferenceProblem(kind, owner_id, missing_id, message)` with kind `clip_missing_source` or `item_missing_clip`. It only reports; it never changes the project and never blocks loading. M3 chat B added a separate `check_voice_references(project)` (kinds `take_missing_line`, `line_missing_take`, `placement_missing_line`, `placement_missing_take`); it is separate because the M2 tests build placements without lines. `ProjectSummary.problem_count` counts both; `TimelineState.problems` still comes from `check_references` only.
 - `parking.py`: a command calls `collect_cut_away(project, cuts, region_start_ms)` **before** changing clips (`cuts` = `(clip_id, lo, hi_or_None)` source ranges; offsets are measured in the old timeline), then `park_cut_away(project, cut_away, *, cut_ms, region_ms)` **after**, keeps the returned `list[ParkedItem(item, old_anchor, old_orphaned)]`, and calls `restore_parked(parked)` in `revert`. An item with no surviving clip is flagged and keeps its anchor.
 
 **Timeline state and edit API** (`timeline.py` and `edit_ops.py` are pure; M2-S6, user confirmed tests pass):
@@ -190,6 +204,7 @@ MyRack/
 - `Command` (abstract): `label`, `apply(project)`, `revert(project)`. `apply` validates first and raises `CommandError` before changing anything; it records what it needs to undo itself, and may be re-applied after `revert` (redo).
 - Commands: `AddSource(source)` (rejects duplicate id or case-insensitive duplicate path; stores a deep copy), `RemoveSource(source_id)` (refused with `CommandError` while any clip uses the source; undo restores the original list position), `RenameProject(name)` (strips; empty name rejected at construction), `RelinkSource(source_id, new_path)` (path only, no re-probe; rejects invalid paths and paths used by another source).
 - `CommandStack(project, on_change=None)`: `execute(cmd)`, `group(label)` context manager, `undo()` / `redo()` (return the label or `None`), `clear()`, `can_undo`, `can_redo`, `undo_label`, `redo_label`, `in_group`, `project`. A new command clears redo. A group is one undo step; if its block raises, applied commands are reverted, nothing is recorded, and the previous redo stack is restored. Nested groups merge into the outermost. Undo, redo and clear raise `CommandError` while a group is open. `on_change` fires once per top-level change (execute outside a group, committed group, undo, redo) and never for failures, empty groups or rollbacks.
+- M3 chat B: if a `revert` (undo) or an `apply` during redo raises `CommandError`, the commands already done are undone again, the step stays on its stack and the error is re-raised (before, the entry was dropped). `AddLine.revert` refuses once the line has takes or placements.
 
 **Clip command API** (`backend/project/clip_commands.py`, `backend/project/cut_commands.py`; M2-S3 to S5, user confirmed tests pass). All follow the command contract above, edit **track-0 clips only** (a clip on another track or an unknown id is refused), and leave other-track clips untouched. Positions count among track-0 clips, not raw list indices. All times are integer ms.
 - `AddClip(source_id, *, position=None, clip_id=None)`: a clip covering the whole source (in 0, out `duration_ms`, speed 1, overlay on). Default position is before a trailing bookend (last clip, `external` source, `overlay=False`), else the end. Refused for an unknown source, a duplicate clip id, a bad position, or a source shorter than one frame. The clip id is generated when the command is created, so redo reuses it.
@@ -203,8 +218,9 @@ MyRack/
 - The caller probes bookend files (Session does this with ffprobe) and passes the Sources in. A bookend in the template without a matching source, or the reverse, is an error.
 - Applied bookends become ordinary clips with `overlay=False`, covering the whole source; intro first, outro last. The template's voice profile is copied with a fresh id. The template object is never mutated. Name is stripped; empty is rejected.
 
-**Session API** (`backend/project/session.py`): `Session(*, template_path=None, probe=None, recent_path=None)`. Holds the one open project and its `CommandStack`; thread-safe (re-entrant lock).
+**Session API** (`backend/project/session.py`): `Session(*, template_path=None, probe=None, recent_path=None, audio_info=None, presets=None)`. Holds the one open project and its `CommandStack`; thread-safe (re-entrant lock).
 - `current() -> ProjectSummary | None`, `new_project(parent, name)`, `open_project(folder)`, `footage() -> FootageReport`, `rescan_footage()`, `relink_source(source_id, new_path)`, `recent() -> list[RecentItem]`, `forget_recent(folder)`, plus the timeline, edit, undo/redo and `source_path` methods above. Errors: `SessionError`; other module errors (`ProjectError`, `TemplateError`, `FootageError`) pass through.
+- M3 chat B additions: `voice()`, `set_voice_reference(path)`; `lines()`, `edit_lines(ops, label=None)`; `takes(line_id)`, `reuse_take(new, *, make_active=True)`, `add_take(new, samples, sample_rate, *, make_active=True)`, `plan_generation(line_id, *, model_version, reroll=False)`, `delete_take(id)`, `delete_line(id)`, `storage()`, `take_path(take_id)`. `audio_info` replaces the audio header reader in tests; `presets` replaces `templates/emotion_presets.json` (loaded on first use otherwise).
 - `clean_folder_name(name)` (pure): Windows-safe project name (no `< > : " / \ | ? *`, no trailing dot, no reserved names such as CON or LPT1).
 - Opening or creating runs a footage scan automatically; new files are added with `AddSource` inside one `Add footage` group. Scan trouble on open (for example no ffprobe) never blocks opening; it appears in the footage report `errors`.
 - Every change through the stack saves `project.json` immediately (`on_change`). A failed save sets `ProjectSummary.save_error` and does not block the edit.
@@ -238,6 +254,15 @@ MyRack/
 | `POST /api/timeline/remove` | `{clip_id}` | `TimelineState` |
 | `POST /api/timeline/batch` | `{label, ops: EditOp[]}` (each op carries its `op` tag) | `TimelineState`, one undo step |
 | `GET /media/source/{source_id}` | optional `Range` header | video bytes: 200, 206, or 416; 404 for an unknown source, a missing file, or no open project |
+| `GET /api/voice` | | `VoiceState {status, ready, profile_id, name, reference_path, duration_ms, sample_rate, hash, problems, warnings}`; `status` is `no_profile`, `no_reference`, `file_missing`, `unreadable`, `invalid` or `ready` |
+| `POST /api/voice/reference` | `{path}` (absolute path of an audio file) | `VoiceState`; checks and copies the clip into `media/voice/`; one undo step |
+| `GET /api/lines` | | `LineBankState {lines, emotions, can_undo, can_redo, undo_label, redo_label, save_error}` |
+| `POST /api/lines/edit` | `{label?, ops: LineEditOp[]}` | `LineBankState`. Ops: `add_line`, `remove_line`, `set_line_text`, `set_line_emotion`, `set_line_exaggeration` / `set_line_cfg_weight` (`value` or null), `set_allow_overlap`, `set_active_take`, `star_take`. One op without a label is one undo step; several ops or a label are one group; an op that changes nothing is skipped |
+| `GET /api/lines/{line_id}/takes` | | `TakeItem[]`, oldest first |
+| `POST /api/takes/delete` | `{take_id}` | `TakeDeleteReport`; not undoable and resets undo history |
+| `POST /api/lines/delete` | `{line_id}` | `TakeDeleteReport` (the line and all its takes); refused while the line is placed |
+| `GET /api/storage` | | `StorageReport {lines, take_count, total_bytes, missing_file_count, unreferenced, unreferenced_bytes}` |
+| `GET /media/take/{take_id}` | optional `Range` header | take WAV bytes through `range_response`; 404 for an unknown take, a missing file or no open project |
 
 `ProjectSummary`: `name`, `folder`, `schema_version`, `source_count`, `clip_count`, `voice_status`, `avatar_status` ("not configured" or "path set" text only), `save_error`, `problem_count` (broken references from `check_references`; 0 when sound). Static frontend is mounted at `/` after the API routes; if `frontend/dist` has no `index.html`, `/` shows a "Frontend not built" page. Errors from commands are HTTP 400 `{"detail": message}`; a malformed request body is FastAPI's standard 422.
 
@@ -248,6 +273,14 @@ MyRack/
 - `keys.py`: `normalize_text` (collapse whitespace); `raw_key(*, text, voice_profile_id, reference_hash, exaggeration, cfg_weight, seed, model_version)` returns a SHA-256 hex (64 chars) of canonical JSON; text is normalised, floats rounded to 4 decimals, `-0.0` equals `0.0`, empty inputs and non-finite numbers raise `ValueError`; `base_seed(project_seed, line_id)`; `next_unused_seed(base, key_for_seed, existing_keys)` (lowest `base + k` whose key is unused, wraps at `SEED_MODULUS = 2**31`); first generation uses the base seed itself.
 - `chunking.py`: `MAX_CHUNK_CHARS = 200`, `CROSSFADE_MS = 40`; `split_sentences(text)` (ends at `. ! ? ...` plus closing quotes, then whitespace; not after common abbreviations such as Mr or e.g., not after lone initials other than I and a, never inside decimals); `plan_chunks(text, max_chars=200)` (text at or under the limit is one normalised chunk; longer text is split into sentences, over-long sentences are cut at commas, then spaces, then hard, and pieces are packed greedily; `max_chars` below 20 raises); `chunk_seed(seed, index)` (chunk 0 keeps the take seed); `crossfade_join(chunks, sample_rate, crossfade_ms=40)` (mono float32, equal-power, fade shortened to half the shorter neighbour, output length is the sum minus the overlaps).
 - `overflow.py`: `PlacedLine(placement_id, start_ms, duration_ms, allow_overlap)` (timeline start, duration of the audio that plays); `find_overflows(items) -> list[Overflow(placement_id, next_placement_id, overflow_ms, allowed)]` (only the immediately following placement counts; `allowed` mirrors the overflowing line's `allow_overlap`, callers warn only when it is false; sorted by start then id; negative values and duplicate ids raise); `available_slack_ms(items, placement_id)` (gap after the previous line's end, or the start itself for the first line; never negative).
+
+**Voice backend (M3 chat B, rounds a to d; written without being run).**
+- Voice profile: v1 uses `project.voice_profiles[0]`. `Session.set_voice_reference(path)` decodes the header (`soundfile`), checks it (`check_reference`), copies it to `media/voice/<stem>-<hash8><ext>` (allowed: .wav .flac .ogg .mp3; same file again reuses the copy) and sets it as the profile's only reference clip through `SetReferenceClip` (creates a "Default" profile first if there is none). The reference hash is `sha256` of the file bytes, memoised by path, size and mtime. `voice()` returns `VoiceState`.
+- Line bank: line edits are commands on the shared `CommandStack`; ops in `line_ops.py`. Unknown emotions are refused (checked against the presets). `LineItem` carries the stored overrides, the effective values (preset, then override; null if the emotion is no longer in the presets) and take and placement counts; `generated` means the line has an active take.
+- Take store: `media/takes_raw/<take_id>.wav`, float32 mono WAV written through a temp file and `os.replace`. `add_take` writes the file, appends the `Take`, makes it the line's active take (unless `make_active=False`) and saves. Takes are **not undoable** (rule 1). `reuse_take` finds a take with the same raw key (rule 3); a take of another line with the same key is copied into a new take for this line, no generation. If the record exists but its file is gone, `add_take` writes the audio back into the same record.
+- Delete: `delete_take` / `delete_line` remove records (project saved first), then files. A line's active take that goes is cleared; a placement `take_override_id` that goes is cleared (the placement falls back to the line's active take); both are listed in `TakeDeleteReport`. Undo history is reset. A line delete is refused while placements use the line. Files that cannot be deleted are listed in `failed_files`.
+- Generation flow for chat C: `plan = session.plan_generation(line_id, model_version=..., reroll=...)`; `session.reuse_take(plan.new_take)`; if None, the worker generates `plan.chunks` with `plan.reference_path` and `plan.new_take.seed` (chunk `i` uses `chunk_seed(seed, i)`), then `session.add_take(plan.new_take, samples, 24000)`. `plan_generation` needs a ready voice reference and a line with text and a known emotion; first generation uses `base_seed(project.seed, line_id)`, a reroll the lowest unused `base + k` among the line's takes.
+- Storage: `storage()` gives sizes per line and take, missing files, and files in `media/takes_raw/` that no take points at (reported only; the app never deletes them by itself).
 
 ## Editor screen (frontend, M2-S8; user confirmed each sub-round in the app window)
 
@@ -393,6 +426,17 @@ MyRack/
 | 2026-10-13 | M3 (chat A): waveform peaks are computed on demand by the backend and not stored in `project.json` |
 | 2026-10-13 | M3 (chat A): unknown emotion on a line makes generation fail with a clear message (`PresetError`); there is no silent fallback to neutral |
 | 2026-10-13 | M3 (chat A): lint conventions learned from the user's ruff run: write `round(x)` not `int(round(x))` (RUF046); iterate successive pairs with `itertools.pairwise` (RUF007); keep imports sorted and wrapped for 88 columns (I001); new code should aim for 88 columns |
+| 2026-10-14 | M3 (chat B): a deleted take that a placement uses as `take_override_id` clears the override; the placement falls back to the line's active take; the delete report lists the affected placements. Nothing is orphaned or silently dropped |
+| 2026-10-14 | M3 (chat B): take and line deletes reset the undo history (older steps such as set-active-take or star could point at what is gone). The delete confirmation should say so |
+| 2026-10-14 | M3 (chat B): undoing `AddLine` is refused once the line has takes or placements (takes are generated outside the undo stack). `CommandStack.undo`/`redo` now keep the step and restore the project when a revert or redo apply raises `CommandError` |
+| 2026-10-14 | M3 (chat B): v1 uses the first voice profile only; setting a reference replaces it (single clip). Allowed audio types .wav .flac .ogg .mp3; under 1 s refused; warnings under 5 s, over 30 s, under 16 kHz (starting values, tune by ear) |
+| 2026-10-14 | M3 (chat B): the new take becomes the line's active take by default; reusing a take re-activates it. Pressing Generate (not reroll) after a reroll therefore re-activates the base-seed take; the UI decides whether to offer it |
+| 2026-10-14 | M3 (chat B): a take of another line with the same raw key is copied (new take, same key, copied file) so no GPU time is spent (rule 3) |
+| 2026-10-14 | M3 (chat B): delete order is save the project, then delete files; if the save fails the files are kept and an error is raised. Files nothing points at are reported by the storage report and never deleted automatically |
+| 2026-10-14 | M3 (chat B): line edits that change nothing raise `NoChange` and `Session.edit_lines` skips them without an undo step, so the UI can send edits on blur without comparing values |
+| 2026-10-14 | M3 (chat B): generation planning (`plan_generation`) is pure and lives with the take store; chat C owns the worker, queue, job status and the generate endpoint and calls plan, reuse, worker, add. `model_version` is supplied by the caller (the worker reports it) |
+| 2026-10-14 | M3 (chat B): broken links between lines, takes and placements are reported by a separate `check_voice_references` (four kinds), not by `check_references`: the M2 tests build placements without lines and assert exact results. `problem_count` counts both |
+| 2026-10-14 | M3 (chat B): no schema change in S3; the new folder `media/voice/` is added to the project layout |
 
 ## Known issues / open questions
 
@@ -414,10 +458,10 @@ MyRack/
 - `scan_footage` probes files one after another (sync, 60 s timeout each) inside the request. Fine for a few recordings; a big batch would make Rescan wait.
 - `default_ffprobe_path()` assumes `bin/ffprobe.exe` at the repo root. Revisit when `install.bat`/packaging lands (M7).
 - The built frontend (`frontend/dist`) is git-ignored; `install.bat` (M7) must build it or ship it.
-- If a command's `revert` fails partway through an undo (should only happen on a bug), the undo entry is dropped and state may be partly reverted. Not handled; revisit if it ever appears.
+- (Fixed in M3 chat B, untested) A command whose `revert` fails during undo used to drop the entry; the stack now keeps the step and restores the project. See the decisions log.
 - ffprobe reports a 12.8 s duration for a nominal 10 s `-c copy` clip (probably keyframe alignment; not verified).
 - No file watcher for `footage/` (by design for M1): rescan on open plus the Rescan button.
-- The project screen shows voice profile and avatar art as simple "not configured" / "path set" text only; real validation comes with M3-1 and M5-1.
+- The project screen shows voice profile and avatar art as simple "not configured" / "path set" text only; real validation comes with M3-1 and M5-1. M3 chat B: `GET /api/voice` gives the real voice state; `ProjectSummary.voice_status` is still the simple text.
 - M2: at speed > 1, an anchor in the last half-speed milliseconds of a clip maps to that clip's end, which is the next clip's start, so a later `to_source` returns the next clip. Known quantization edge. Decided in chat B: parking ignores it (see decisions log). The editor does not treat it (nothing in the UI creates anchored items yet).
 - M2: still images and freeze-frames are not supported in v1 (see decisions log). Revisit only if the user adds a backlog item.
 - M2-S2 tests were first run in a sandbox with a stand-in `Clip`/`Anchor`, then confirmed by the user on the real repo (all passing, ruff clean after one PIE808 fix).
@@ -444,12 +488,19 @@ MyRack/
 - M2: the wrap-up did not include an itemised manual acceptance run or a final `npm run check` paste (see "M2 manual checks").
 
 - M3 chat A: user confirmed all tests pass and ruff is clean (after the lint fix round). `ruff format --check` was not reported; some lines run up to about 100 characters while ruff's isort wraps at 88, so a format pass may reflow a few lines.
-- M3: `Take.line_id` points at a line; the rule for deleting a take that placements reference by `take_override_id` is open (settle in S3). `check_references` does not yet look at takes or lines (to be extended in S3).
+- M3: the take-delete versus `take_override_id` rule is settled (clears the override). `check_voice_references` covers lines, takes and placements (chat B, untested); the editor's `TimelineState.problems` does not include it yet (add in S5 if the UI should show it).
 - M3: Tighten needs `pedalboard` (not yet in `pyproject.toml`); `uv add pedalboard` is a one-time download in S8.
 - M3: the abbreviation list in `split_sentences` is small and English only; a miss only changes where a long line is cut, never what is said.
+- **M3 chat B: all S3 code and tests (rounds a to d) were written without being run by the assistant** (the sandbox has no pydantic, pytest, soundfile or fastapi; only syntax checks ran). The user runs everything together; until then every `written, untested` item above is unconfirmed.
+- M3 chat B: `soundfile` is assumed to be installed as a Chatterbox dependency; if `import soundfile` fails, run `uv add soundfile`. Reference clip headers and take WAVs both use it.
+- M3 chat B: `backend/media/serve.py` was not shown, so the MIME type `range_response` gives for `.wav` is unchecked (the take media test checks status and bytes only). If the browser refuses to play a take, paste `serve.py`.
+- M3 chat B: take WAV writes are atomic (temp file, `os.replace`) but not `fsync`ed; a crash right after a generation can leave a record whose file is missing or short. The storage report shows missing files, and `add_take` writes the audio back for the same key.
+- M3 chat B: a template voice profile whose `reference_clips` holds an absolute path outside the project is not handled (the default template has none).
+- M3 chat B: ruff style. New code keeps imports sorted and wrapped, but many test lines run past 88 columns (up to about 100), as in chat A; a `ruff format` pass may reflow them.
 
 ## Next up
 
-1. **Commit and tick (user):** commit M3 chat A (`M3-2/M3-5: voice pure modules (presets, keys, chunking, overflow), M3 docs`); tick M3-2 in `IMPLEMENTATION_PLAN.md`. Leave M3-5 until the worker uses the chunker (S4); the pure part is done and confirmed.
-2. **Chat B (S3, M3-1 and M3-4 backend, no GPU):** start a fresh chat with `CLAUDE.md`, this file, `docs/tasks/M3-voice.md`, spec section 5 and section 6 "Take lifecycle", and the source files listed for chat B. Sub-rounds: (a) voice profile import and validation, (b) line commands, (c) take store (reuse by key, delete, sizes), (d) endpoints, all against a fake worker. Settle the take-delete versus `take_override_id` rule and extend `check_references`.
-3. **Open questions M3 inherits:** the reference clip and voice source (own voice or acted character); VRAM peak with the app window open; first generation after load takes about 27 s (warm up the worker at start); emotion presets are guesses; whether an expressive reference clip widens the range.
+1. **Run and commit (user):** apply `m3-s3a`, `m3-s3b`, `m3-s3c` and `m3-s3d` in order (or just the last if all rounds are already extracted), then `uv run pytest` and `uv run ruff check .` and paste the pass count and any failures (traceback, last 30 lines). Fix round if needed. Suggested commits on `m3-voice`: `M3-1: voice profile reference import, validation and hash`, `M3-4: line bank commands, ops, state and endpoints`, `M3-4: take store, reuse by key, delete, storage report`, `M3-4: generation planning, take and storage endpoints, line and take reference checks`.
+2. **Tick in `IMPLEMENTATION_PLAN.md`:** nothing yet. M3-1 needs the settings screen (S5) and M3-4 needs the generate endpoint and UI (S4, S5); their backend parts are done once the tests pass. Merge and tag `m3-done` only at the end of M3 (S8).
+3. **Chat C (S4, M3-3 GPU worker):** fresh chat with `CLAUDE.md`, this file, `docs/tasks/M3-voice.md`, spec section 6 (Take lifecycle, Queue) and section 11 (Processes), plus `session.py`, `app.py`, `main.py`, `backend/voice/takes.py`, `takestore.py`, `generation.py`, and `scripts/spike/tts_test.py`. It builds the `WorkerClient` and `FakeWorker`, the queue and cancel, job status, and the generate and reroll endpoints on top of the flow in "Voice backend".
+4. **Open questions M3 inherits:** the reference clip and voice source (own voice or acted character); VRAM peak with the app window open; first generation after load takes about 27 s (warm up the worker at start); emotion presets are guesses; whether an expressive reference clip widens the range.

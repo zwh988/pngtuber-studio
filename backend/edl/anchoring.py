@@ -140,10 +140,17 @@ def park_anchor(
 
 @dataclass(frozen=True)
 class ReferenceProblem:
-    """One broken reference. ``owner_id`` is the clip or item that holds it and
-    ``missing_id`` the source or clip it points at."""
+    """One broken reference. ``owner_id`` is the clip, item, line, take or
+    placement that holds it and ``missing_id`` what it points at."""
 
-    kind: Literal["clip_missing_source", "item_missing_clip"]
+    kind: Literal[
+        "clip_missing_source",
+        "item_missing_clip",
+        "take_missing_line",
+        "line_missing_take",
+        "placement_missing_line",
+        "placement_missing_take",
+    ]
     owner_id: str
     missing_id: str
     message: str
@@ -177,6 +184,73 @@ def check_references(project: Project) -> list[ReferenceProblem]:
                     message=(
                         f"{item_kind(item)} {item.id} is anchored to missing clip "
                         f"{item.anchor.clip_id}"
+                    ),
+                )
+            )
+    return problems
+
+
+def check_voice_references(project: Project) -> list[ReferenceProblem]:
+    """Broken links between lines, takes and placements (M3). Reports only.
+
+    Kept apart from ``check_references`` so the M2 checks (and the tests that
+    build placements without lines) are unchanged.
+    """
+    problems: list[ReferenceProblem] = []
+    line_ids = {line.id for line in project.lines}
+    takes = {take.id: take for take in project.takes}
+    for take in project.takes:
+        if take.line_id not in line_ids:
+            problems.append(
+                ReferenceProblem(
+                    kind="take_missing_line",
+                    owner_id=take.id,
+                    missing_id=take.line_id,
+                    message=f"take {take.id} belongs to missing line {take.line_id}",
+                )
+            )
+    for line in project.lines:
+        if line.active_take_id is None:
+            continue
+        active = takes.get(line.active_take_id)
+        if active is None or active.line_id != line.id:
+            problems.append(
+                ReferenceProblem(
+                    kind="line_missing_take",
+                    owner_id=line.id,
+                    missing_id=line.active_take_id,
+                    message=(
+                        f"line {line.id} has active take {line.active_take_id}, "
+                        "which is missing or belongs to another line"
+                    ),
+                )
+            )
+    for placement in project.placements:
+        if placement.line_id not in line_ids:
+            problems.append(
+                ReferenceProblem(
+                    kind="placement_missing_line",
+                    owner_id=placement.id,
+                    missing_id=placement.line_id,
+                    message=(
+                        f"placement {placement.id} points at missing line "
+                        f"{placement.line_id}"
+                    ),
+                )
+            )
+        override = placement.take_override_id
+        if override is None:
+            continue
+        chosen = takes.get(override)
+        if chosen is None or chosen.line_id != placement.line_id:
+            problems.append(
+                ReferenceProblem(
+                    kind="placement_missing_take",
+                    owner_id=placement.id,
+                    missing_id=override,
+                    message=(
+                        f"placement {placement.id} overrides with take {override}, "
+                        "which is missing or belongs to another line"
                     ),
                 )
             )

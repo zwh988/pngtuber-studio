@@ -20,6 +20,7 @@ from backend.project.edit_ops import (
     TrimClipOp,
 )
 from backend.project.footage import FootageError
+from backend.project.line_ops import LineEditBatch
 from backend.project.recent import RecentItem
 from backend.project.schema import SCHEMA_VERSION
 from backend.project.session import Session, SessionError
@@ -27,6 +28,9 @@ from backend.project.store import ProjectError
 from backend.project.summary import FootageReport, ProjectSummary
 from backend.project.template import TemplateError
 from backend.project.timeline import EditResult, TimelineState
+from backend.voice.linebank import LineBankState
+from backend.voice.profile import VoiceState
+from backend.voice.takes import StorageReport, TakeDeleteReport, TakeItem
 
 APP_NAME = "PNGtuber Studio"
 
@@ -62,6 +66,18 @@ class RelinkRequest(BaseModel):
 class AddClipRequest(BaseModel):
     source_id: str
     position: int | None = None
+
+
+class VoiceReferenceRequest(BaseModel):
+    path: str
+
+
+class TakeIdRequest(BaseModel):
+    take_id: str
+
+
+class LineIdRequest(BaseModel):
+    line_id: str
 
 
 def default_static_dir() -> Path:
@@ -150,6 +166,62 @@ def create_app(
         except _API_ERRORS as exc:
             raise HTTPException(status_code=400, detail=str(exc)) from exc
 
+    @app.get("/api/voice")
+    def get_voice() -> VoiceState:
+        try:
+            return active.voice()
+        except _API_ERRORS as exc:
+            raise HTTPException(status_code=400, detail=str(exc)) from exc
+
+    @app.post("/api/voice/reference")
+    def set_voice_reference(request: VoiceReferenceRequest) -> VoiceState:
+        try:
+            return active.set_voice_reference(request.path)
+        except _API_ERRORS as exc:
+            raise HTTPException(status_code=400, detail=str(exc)) from exc
+
+    @app.get("/api/lines")
+    def get_lines() -> LineBankState:
+        try:
+            return active.lines()
+        except _API_ERRORS as exc:
+            raise HTTPException(status_code=400, detail=str(exc)) from exc
+
+    @app.post("/api/lines/edit")
+    def edit_lines(batch: LineEditBatch) -> LineBankState:
+        try:
+            return active.edit_lines(batch.ops, batch.label)
+        except _API_ERRORS as exc:
+            raise HTTPException(status_code=400, detail=str(exc)) from exc
+
+    @app.get("/api/lines/{line_id}/takes")
+    def get_line_takes(line_id: str) -> list[TakeItem]:
+        try:
+            return active.takes(line_id)
+        except _API_ERRORS as exc:
+            raise HTTPException(status_code=400, detail=str(exc)) from exc
+
+    @app.post("/api/takes/delete")
+    def delete_take(request: TakeIdRequest) -> TakeDeleteReport:
+        try:
+            return active.delete_take(request.take_id)
+        except _API_ERRORS as exc:
+            raise HTTPException(status_code=400, detail=str(exc)) from exc
+
+    @app.post("/api/lines/delete")
+    def delete_line(request: LineIdRequest) -> TakeDeleteReport:
+        try:
+            return active.delete_line(request.line_id)
+        except _API_ERRORS as exc:
+            raise HTTPException(status_code=400, detail=str(exc)) from exc
+
+    @app.get("/api/storage")
+    def get_storage() -> StorageReport:
+        try:
+            return active.storage()
+        except _API_ERRORS as exc:
+            raise HTTPException(status_code=400, detail=str(exc)) from exc
+
     @app.get("/api/recent")
     def get_recent() -> list[RecentItem]:
         return active.recent()
@@ -168,6 +240,14 @@ def create_app(
         path = active.source_path(source_id)
         if path is None or not path.is_file():
             raise HTTPException(status_code=404, detail="footage file not found")
+        return range_response(path, request.headers.get("range"))
+
+    @app.get("/media/take/{take_id}")
+    def get_take_media(take_id: str, request: Request) -> Response:
+        # The file comes from the open project's take list, never from the URL.
+        path = active.take_path(take_id)
+        if path is None or not path.is_file():
+            raise HTTPException(status_code=404, detail="take file not found")
         return range_response(path, request.headers.get("range"))
 
     def run_edit(ops: Sequence[EditOp], label: str | None = None) -> TimelineState:
