@@ -1,7 +1,10 @@
 <script lang="ts">
+  import { onDestroy, tick } from "svelte";
   import {
     addClip,
+    cancelJob,
     getFootage,
+    getJobs,
     getTimeline,
     redoEdit,
     removeClip,
@@ -12,12 +15,15 @@
     undoEdit,
     type EditResult,
     type FootageItem,
+    type JobStatus,
     type TimelineState,
   } from "./api";
   import { clock } from "./format";
+  import LineBank from "./LineBank.svelte";
   import Player from "./Player.svelte";
   import Timeline from "./Timeline.svelte";
   import { clipIndexAt, stepFrame } from "./timeline";
+  import { isLive, jobText, workerText } from "./voice";
 
   let { onclose }: { onclose: () => void } = $props();
 
@@ -31,6 +37,20 @@
   /** Selected clip id (click a clip on the timeline). */
   let selectedId = $state<string | null>(null);
   let player = $state<ReturnType<typeof Player> | null>(null);
+  /** Which tab of the footage / line bank panel is showing. */
+  let tab = $state<"footage" | "lines">("footage");
+  /** Bumped after an undo or redo so the line bank reloads. */
+  let lineReload = $state(0);
+  let lineBank = $state<ReturnType<typeof LineBank> | null>(null);
+  /** The voice job list; refreshed every 500 ms while a job is queued or running. */
+  let jobs = $state<JobStatus | null>(null);
+  let pollTimer: number | undefined;
+
+  const liveJobs = $derived(jobs === null ? [] : jobs.jobs.filter(isLive));
+  const lastJob = $derived.by(() => {
+    const finished = jobs === null ? [] : jobs.jobs.filter((j) => !isLive(j));
+    return finished[finished.length - 1];
+  });
 
   const SPEEDS = [0.25, 0.5, 0.75, 1, 1.25, 1.5, 2, 3, 4, 8];
 
@@ -88,6 +108,7 @@
     try {
       const result = await action();
       timeline = result.timeline;
+      lineReload += 1;
       notice = result.label === null ? nothing : `${verb}: ${result.label}`;
     } catch (err) {
       error = message(err);
@@ -110,6 +131,79 @@
   async function reorderByDrag(clipId: string, newPosition: number): Promise<void> {
     player?.pause();
     await edit(() => reorderClip(clipId, newPosition));
+  }
+
+  /**
+   * A line edit went onto the shared undo stack. Refresh only the undo and redo fields,
+   * so the player and the timeline are not redrawn.
+   */
+  async function syncHistory(): Promise<void> {
+    try {
+      const state = await getTimeline();
+      if (timeline !== null) {
+        timeline.can_undo = state.can_undo;
+        timeline.can_redo = state.can_redo;
+        timeline.undo_label = state.undo_label;
+        timeline.redo_label = state.redo_label;
+        timeline.save_error = state.save_error;
+      }
+    } catch (err) {
+      error = message(err);
+    }
+  }
+
+  /** Fetch the job list; keeps polling while a job is active and reloads the lines when one ends. */
+  async function refreshJobs(): Promise<void> {
+    window.clearTimeout(pollTimer);
+    const before = jobs === null ? [] : jobs.jobs.filter(isLive).map((j) => j.id);
+    try {
+      const next = await getJobs();
+      jobs = next;
+      const ended = before.some((id) => {
+        const job = next.jobs.find((j) => j.id === id);
+        return job === undefined || !isLive(job);
+      });
+      if (ended) {
+        lineReload += 1;
+        void syncHistory();
+      }
+      if (next.active) {
+        pollTimer = window.setTimeout(() => void refreshJobs(), 500);
+      }
+    } catch (err) {
+      error = message(err);
+      if (jobs !== null && jobs.active) {
+        pollTimer = window.setTimeout(() => void refreshJobs(), 2000);
+      }
+    }
+  }
+
+  /** A job was started or cancelled: refresh the list, then the lines (a reused take finishes at once). */
+  async function jobsChanged(): Promise<void> {
+    await refreshJobs();
+    lineReload += 1;
+    void syncHistory();
+  }
+
+  async function cancelFirstJob(): Promise<void> {
+    const job = liveJobs[0];
+    if (job === undefined) {
+      return;
+    }
+    try {
+      jobs = await cancelJob(job.id);
+    } catch (err) {
+      error = message(err);
+    }
+    await jobsChanged();
+  }
+
+  onDestroy(() => window.clearTimeout(pollTimer));
+
+  /** Hotkey N: show the line bank and add a line. */
+  function newLine(): void {
+    tab = "lines";
+    void tick().then(() => lineBank?.addLine());
   }
 
   function undo(): void {
@@ -210,6 +304,13 @@
         e.preventDefault();
         stepBy(1);
         break;
+      case "n":
+      case "N":
+        e.preventDefault();
+        if (canEdit) {
+          newLine();
+        }
+        break;
       case "s":
       case "S":
         e.preventDefault();
@@ -248,6 +349,7 @@
   }
 
   void load();
+  void refreshJobs();
 </script>
 
 <svelte:window onkeydown={onKeyDown} onkeyup={onKeyUp} />
@@ -334,7 +436,7 @@
           <span class="hint">No clip selected. Click a clip on the timeline.</span>
         {/if}
         <p class="keys">
-          Space play/pause, , and . step a frame, S split at playhead, Delete remove selected clip,
+          Space play/pause, , and . step a frame, S split at playhead, N new voice line, Delete remove selected clip,
           [ and ] cut the selected clip's in/out at the playhead, Ctrl+Z / Ctrl+Y undo / redo.
           Drag a clip's edge to trim it, drag a clip sideways to reorder; each drag is one undo step.
         </p>
@@ -342,7 +444,27 @@
     {/if}
 
     <section>
-      <h3>Footage</h3>
+      <div class="tabs" role="tablist">
+        <button
+          type="button"
+          role="tab"
+          aria-selected={tab === "footage"}
+          class:on={tab === "footage"}
+          onclick={() => (tab = "footage")}
+        >
+          Footage
+        </button>
+        <button
+          type="button"
+          role="tab"
+          aria-selected={tab === "lines"}
+          class:on={tab === "lines"}
+          onclick={() => (tab = "lines")}
+        >
+          Line bank
+        </button>
+      </div>
+      <div hidden={tab !== "footage"}>
       {#if sources.length === 0}
         <p class="hint">No footage in this project yet. Go back and rescan.</p>
       {:else}
@@ -362,6 +484,16 @@
           {/each}
         </ul>
       {/if}
+      </div>
+      <div hidden={tab !== "lines"}>
+        <LineBank
+          bind:this={lineBank}
+          reloadToken={lineReload}
+          onedited={() => void syncHistory()}
+          {jobs}
+          onjobchange={() => void jobsChanged()}
+        />
+      </div>
     </section>
 
     <section>
@@ -415,6 +547,23 @@
         </table>
       {/if}
     </section>
+
+    <footer class="statusbar">
+      <span>Voice model: {workerText(jobs)}</span>
+      <span>
+        GPU queue:
+        {#if liveJobs.length === 0}
+          idle
+        {:else}
+          {jobText(liveJobs[0])}{#if liveJobs.length > 1} (+{liveJobs.length - 1} waiting){/if}
+        {/if}
+      </span>
+      {#if liveJobs.length > 0}
+        <button type="button" onclick={() => void cancelFirstJob()}>Cancel</button>
+      {:else if lastJob !== undefined}
+        <span>Last job: {jobText(lastJob)}</span>
+      {/if}
+    </footer>
   {/if}
 </div>
 
@@ -499,6 +648,39 @@
     text-align: left;
     text-decoration: underline;
     cursor: pointer;
+  }
+  .statusbar {
+    position: sticky;
+    bottom: 0;
+    display: flex;
+    flex-wrap: wrap;
+    align-items: center;
+    gap: 1.25rem;
+    margin-top: 1rem;
+    padding: 0.4rem 0;
+    border-top: 1px solid #8884;
+    background: Canvas;
+    font-size: 0.9rem;
+  }
+  .tabs {
+    display: flex;
+    gap: 0.25rem;
+    border-bottom: 1px solid #8884;
+  }
+  .tabs button {
+    margin: 0 0 -1px;
+    padding: 0.35rem 0.9rem;
+    border: 1px solid transparent;
+    border-bottom: none;
+    background: none;
+    color: inherit;
+    font: inherit;
+    cursor: pointer;
+  }
+  .tabs button.on {
+    border-color: #8884;
+    background: #4a90e233;
+    font-weight: 600;
   }
   tr.missing td,
   li.missing {
