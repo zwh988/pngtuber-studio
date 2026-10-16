@@ -28,13 +28,17 @@ from backend.project.store import ProjectError
 from backend.project.summary import FootageReport, ProjectSummary
 from backend.project.template import TemplateError
 from backend.project.timeline import EditResult, TimelineState
+from backend.voice.engine import chatterbox_model_version
+from backend.voice.jobqueue import JobError, JobQueue
+from backend.voice.jobs import JobItem, JobStatus
 from backend.voice.linebank import LineBankState
 from backend.voice.profile import VoiceState
+from backend.voice.subprocess_worker import SubprocessWorker, default_worker_log_path
 from backend.voice.takes import StorageReport, TakeDeleteReport, TakeItem
 
 APP_NAME = "PNGtuber Studio"
 
-_API_ERRORS = (SessionError, ProjectError, TemplateError, FootageError)
+_API_ERRORS = (SessionError, ProjectError, TemplateError, FootageError, JobError)
 
 _MISSING_FRONTEND_HTML = (
     "<!doctype html><title>PNGtuber Studio</title>"
@@ -80,16 +84,34 @@ class LineIdRequest(BaseModel):
     line_id: str
 
 
+class JobIdRequest(BaseModel):
+    job_id: str
+
+
 def default_static_dir() -> Path:
     """``<repo>/frontend/dist``."""
     return Path(__file__).resolve().parents[1] / "frontend" / "dist"
 
 
 def create_app(
-    static_dir: Path | None = None, session: Session | None = None
+    static_dir: Path | None = None,
+    session: Session | None = None,
+    jobs: JobQueue | None = None,
 ) -> FastAPI:
+    """``jobs`` is the voice generation queue. By default one is built around the
+    real GPU worker; nothing starts until the first job is submitted. The caller
+    that owns the app (``main.py``) closes it."""
     app = FastAPI(title=APP_NAME)
     active = session if session is not None else Session()
+    queue = (
+        jobs
+        if jobs is not None
+        else JobQueue(
+            active,
+            SubprocessWorker(log_path=default_worker_log_path()),
+            model_version=chatterbox_model_version,
+        )
+    )
 
     @app.get("/api/hello")
     def hello() -> dict[str, str | int]:
@@ -212,6 +234,38 @@ def create_app(
     def delete_line(request: LineIdRequest) -> TakeDeleteReport:
         try:
             return active.delete_line(request.line_id)
+        except _API_ERRORS as exc:
+            raise HTTPException(status_code=400, detail=str(exc)) from exc
+
+    @app.post("/api/voice/generate")
+    def generate_line(request: LineIdRequest) -> JobItem:
+        try:
+            return queue.submit(request.line_id)
+        except _API_ERRORS as exc:
+            raise HTTPException(status_code=400, detail=str(exc)) from exc
+
+    @app.post("/api/voice/reroll")
+    def reroll_line(request: LineIdRequest) -> JobItem:
+        try:
+            return queue.submit(request.line_id, reroll=True)
+        except _API_ERRORS as exc:
+            raise HTTPException(status_code=400, detail=str(exc)) from exc
+
+    @app.get("/api/voice/jobs")
+    def get_jobs() -> JobStatus:
+        return queue.status()
+
+    @app.post("/api/voice/jobs/cancel")
+    def cancel_job(request: JobIdRequest) -> JobStatus:
+        try:
+            return queue.cancel(request.job_id)
+        except _API_ERRORS as exc:
+            raise HTTPException(status_code=400, detail=str(exc)) from exc
+
+    @app.post("/api/voice/worker/unload")
+    def unload_worker() -> JobItem:
+        try:
+            return queue.submit_unload()
         except _API_ERRORS as exc:
             raise HTTPException(status_code=400, detail=str(exc)) from exc
 

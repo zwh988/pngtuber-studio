@@ -14,6 +14,9 @@ import webview
 from backend.app import APP_NAME, create_app
 from backend.project.recent import default_recent_path
 from backend.project.session import Session
+from backend.voice.engine import chatterbox_model_version
+from backend.voice.jobqueue import JobQueue
+from backend.voice.subprocess_worker import SubprocessWorker, default_worker_log_path
 
 VIDEO_FILE_TYPES = (
     "Video files (*.mkv;*.mp4;*.mov;*.avi;*.webm;*.m4v;*.flv;*.ts)",
@@ -62,8 +65,13 @@ def _free_port() -> int:
 def main() -> None:
     port = _free_port()
     session = Session(recent_path=default_recent_path())
+    jobs = JobQueue(
+        session,
+        SubprocessWorker(log_path=default_worker_log_path()),
+        model_version=chatterbox_model_version,
+    )
     config = uvicorn.Config(
-        create_app(session=session),
+        create_app(session=session, jobs=jobs),
         host="127.0.0.1",
         port=port,
         log_level="warning",
@@ -88,6 +96,7 @@ def main() -> None:
     webview.start()
 
     server.should_exit = True
+    jobs.close()  # cancels a running job and stops the GPU worker
     thread.join(timeout=5.0)
 
 

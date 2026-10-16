@@ -288,14 +288,21 @@ class Session:
             ]
 
     def reuse_take(
-        self, new: NewTake, *, make_active: bool = True
+        self,
+        new: NewTake,
+        *,
+        make_active: bool = True,
+        project_key: str | None = None,
     ) -> AddTakeResult | None:
         """Reuse an existing take with the same raw key (rule 3), or return None.
 
         Call this before spending GPU time. A take of another line with the same
         key is copied (a new take for this line, no generation). Not undoable.
+        ``project_key`` (from ``project_key()``) refuses the call when another
+        project has been opened since.
         """
         with self._lock:
+            self._check_project(project_key)
             folder, stack = self._require_open()
             project = stack.project
             line = self._line_or_error(project, new.line_id)
@@ -328,14 +335,19 @@ class Session:
         sample_rate: int,
         *,
         make_active: bool = True,
+        project_key: str | None = None,
     ) -> AddTakeResult:
         """Store a generated take: write the file, record it, save the project.
 
         Takes persist and are not undoable (rule 1). If a take with this key
-        already exists it is reused instead (see ``reuse_take``).
+        already exists it is reused instead (see ``reuse_take``). ``project_key``
+        refuses the call when another project has been opened since the request.
         """
         with self._lock:
-            reused = self.reuse_take(new, make_active=make_active)
+            self._check_project(project_key)
+            reused = self.reuse_take(
+                new, make_active=make_active, project_key=project_key
+            )
             if reused is not None:
                 return reused
             folder, stack = self._require_open()
@@ -378,11 +390,17 @@ class Session:
         )
 
     def plan_generation(
-        self, line_id: str, *, model_version: str, reroll: bool = False
+        self,
+        line_id: str,
+        *,
+        model_version: str,
+        reroll: bool = False,
+        project_key: str | None = None,
     ) -> GenerationPlan:
         """Plan one generation: parameters, seed, raw key, chunks (no GPU, no
         writes). Pair it with ``reuse_take`` and ``add_take``."""
         with self._lock:
+            self._check_project(project_key)
             folder, stack = self._require_open()
             voice = self._voice_state(folder, stack.project)
             if (
@@ -433,6 +451,21 @@ class Session:
             }
             return build_storage_report(
                 stack.project, sizes, store.unreferenced(set(sizes))
+            )
+
+    def project_key(self) -> str | None:
+        """Identifies the open project (its folder), or None when none is open.
+        The job queue passes it back so a job requested for one project can
+        never write into another."""
+        with self._lock:
+            return None if self._folder is None else str(self._folder)
+
+    def _check_project(self, expected: str | None) -> None:
+        if expected is None:
+            return
+        if self._folder is None or str(self._folder) != expected:
+            raise SessionError(
+                "the open project changed since this job was requested"
             )
 
     # ---- voice profile -----------------------------------------------------
