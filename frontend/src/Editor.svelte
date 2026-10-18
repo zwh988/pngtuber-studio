@@ -1,3 +1,8 @@
+<script module lang="ts">
+  /** Pane sizes in px; they survive leaving and re-entering the editor during one app session. */
+  const layout = { sideW: 520, topH: 360 };
+</script>
+
 <script lang="ts">
   import { onDestroy, tick } from "svelte";
   import {
@@ -458,6 +463,67 @@
     }
   }
 
+  const SIDE_MIN = 320;
+  const TOP_MIN = 180;
+  let sideW = $state(layout.sideW);
+  let topH = $state(layout.topH);
+  let divider: { axis: "v" | "h"; startPos: number; startSize: number } | null = null;
+
+  function clampSide(px: number): number {
+    return Math.min(Math.max(px, SIDE_MIN), Math.max(SIDE_MIN, window.innerWidth - 360));
+  }
+
+  function clampTop(px: number): number {
+    return Math.min(Math.max(px, TOP_MIN), Math.max(TOP_MIN, window.innerHeight - 320));
+  }
+
+  function startDivider(e: PointerEvent, axis: "v" | "h"): void {
+    e.preventDefault();
+    if (e.currentTarget instanceof HTMLElement) {
+      e.currentTarget.setPointerCapture(e.pointerId);
+    }
+    divider = {
+      axis,
+      startPos: axis === "v" ? e.clientX : e.clientY,
+      startSize: axis === "v" ? sideW : topH,
+    };
+  }
+
+  function moveDivider(e: PointerEvent): void {
+    if (divider === null) {
+      return;
+    }
+    if (divider.axis === "v") {
+      // The side panel is on the right: dragging left makes it wider.
+      sideW = clampSide(divider.startSize - (e.clientX - divider.startPos));
+    } else {
+      topH = clampTop(divider.startSize + (e.clientY - divider.startPos));
+    }
+  }
+
+  function endDivider(): void {
+    if (divider !== null) {
+      layout.sideW = sideW;
+      layout.topH = topH;
+      divider = null;
+    }
+  }
+
+  /** Arrow keys resize a focused divider (Shift for bigger steps). */
+  function nudgeDivider(e: KeyboardEvent, axis: "v" | "h"): void {
+    const step = e.shiftKey ? 80 : 24;
+    if (axis === "v" && (e.key === "ArrowLeft" || e.key === "ArrowRight")) {
+      sideW = clampSide(sideW + (e.key === "ArrowLeft" ? step : -step));
+    } else if (axis === "h" && (e.key === "ArrowUp" || e.key === "ArrowDown")) {
+      topH = clampTop(topH + (e.key === "ArrowDown" ? step : -step));
+    } else {
+      return;
+    }
+    e.preventDefault();
+    layout.sideW = sideW;
+    layout.topH = topH;
+  }
+
   void load();
   void refreshJobs();
   void refreshStorage();
@@ -489,207 +555,242 @@
   </header>
 
   {#if error !== null}
-    <p class="error">{error}</p>
+    <p class="error msg">{error}</p>
   {/if}
   {#if notice !== null}
-    <p class="note">{notice}</p>
+    <p class="note msg">{notice}</p>
   {/if}
   {#if timeline !== null && timeline.save_error !== null}
-    <p class="error">Could not save the project: {timeline.save_error}</p>
+    <p class="error msg">Could not save the project: {timeline.save_error}</p>
   {/if}
 
   {#if timeline === null}
-    <p>Loading...</p>
+    <p class="msg">Loading...</p>
   {:else}
-    {#if timeline.clips.length > 0}
-      <section>
-        <Player
-          bind:this={player}
-          clips={timeline.clips}
-          durationMs={timeline.duration_ms}
-          bind:playheadMs
-        />
-      </section>
-      <section>
-        <Timeline
-          clips={timeline.clips}
-          durationMs={timeline.duration_ms}
-          bind:playheadMs
-          bind:selectedId
-          bind:selectedPlacementId
-          placements={timeline.placements}
-          {peaks}
-          locked={busy}
-          label={(clip) => sourceName(clip.source_id)}
-          ontrim={trimByDrag}
-          onreorder={reorderByDrag}
-          onplace={placeAt}
-          onmoveplacement={movePlacementByDrag}
-        />
-      </section>
-      <section class="clipbar">
-        {#if selectedClip !== null}
-          {@const clip = selectedClip}
-          <strong>Clip {clip.position + 1}: {sourceName(clip.source_id)}</strong>
-          <label>
-            Speed
-            <select
-              value={String(clip.speed)}
-              disabled={busy}
-              onchange={(e) => {
-                const speed = Number(e.currentTarget.value);
-                e.currentTarget.blur();
-                void edit(() => setClipSpeed(clip.id, speed));
+    <div class="workspace">
+      <div class="top" style:height="{topH}px" style:--top-h="{topH}px">
+        <div class="preview">
+          {#if timeline.clips.length > 0}
+            <Player
+              bind:this={player}
+              clips={timeline.clips}
+              durationMs={timeline.duration_ms}
+              bind:playheadMs
+            />
+          {:else}
+            <p class="hint">The timeline is empty. Add a recording from the Footage tab.</p>
+          {/if}
+        </div>
+        <div
+          class="divider v"
+          role="separator"
+          aria-orientation="vertical"
+          aria-label="Resize the side panel"
+          tabindex="0"
+          onpointerdown={(e) => startDivider(e, "v")}
+          onpointermove={moveDivider}
+          onpointerup={endDivider}
+          onpointercancel={endDivider}
+          onkeydown={(e) => nudgeDivider(e, "v")}
+        ></div>
+        <div class="side" style:width="{sideW}px">
+          <div class="tabs" role="tablist">
+            <button
+              type="button"
+              role="tab"
+              aria-selected={tab === "footage"}
+              class:on={tab === "footage"}
+              onclick={() => (tab = "footage")}
+            >
+              Footage
+            </button>
+            <button
+              type="button"
+              role="tab"
+              aria-selected={tab === "lines"}
+              class:on={tab === "lines"}
+              onclick={() => (tab = "lines")}
+            >
+              Line bank
+            </button>
+            <button
+              type="button"
+              role="tab"
+              aria-selected={tab === "storage"}
+              class:on={tab === "storage"}
+              onclick={() => {
+                tab = "storage";
+                void refreshStorage();
               }}
             >
-              {#each speedChoices(clip.speed) as speed}
-                <option value={String(speed)}>{speed}x</option>
-              {/each}
-            </select>
-          </label>
-          <button type="button" disabled={busy} onclick={removeSelected}>Remove clip</button>
-        {:else if selectedPlacement === null}
-          <span class="hint">No clip selected. Click a clip on the timeline.</span>
-        {/if}
-        {#if selectedPlacement !== null}
-          {@const placed = selectedPlacement}
-          <strong>Placed line: {placed.line_text === "" ? "(line gone)" : placed.line_text}</strong>
-          {#if placed.orphaned}
-            <span class="hint">Its footage was cut away; it is parked at a clip edge.</span>
-          {/if}
-          {#if placed.take_id === null}
-            <span class="hint">This line has no take to play.</span>
-          {/if}
-          <button type="button" disabled={busy} onclick={removeSelected}>Remove placed line</button>
-        {/if}
-        <p class="keys">
-          Space play/pause, , and . step a frame, S split at playhead, N new voice line, G generate, Shift+G reroll, M place the selected line at the playhead, Delete remove the selected clip or placed line,
-          [ and ] cut the selected clip's in/out at the playhead, Ctrl+Z / Ctrl+Y undo / redo.
-          Drag a clip's edge to trim it, drag a clip sideways to reorder, drag a voice block to move it, drag a line from the bank onto the timeline to place it; each drag is one undo step.
-        </p>
-      </section>
-    {/if}
+              Storage
+            </button>
+          </div>
+          <div class="pane">
+            <div hidden={tab !== "footage"}>
+              {#if sources.length === 0}
+                <p class="hint">No footage in this project yet. Go back and rescan.</p>
+              {:else}
+                <ul class="sources">
+                  {#each sources as item (item.id)}
+                    <li class:missing={!item.exists}>
+                      <span class="name">{fileName(item.path)}</span>
+                      <span class="meta">{clock(item.duration_ms)}</span>
+                      <button
+                        type="button"
+                        disabled={busy || !item.exists}
+                        onclick={() => edit(() => addClip(item.id))}
+                      >
+                        Add to timeline
+                      </button>
+                    </li>
+                  {/each}
+                </ul>
+              {/if}
+            </div>
+            <div hidden={tab !== "lines"}>
+              <LineBank
+                bind:this={lineBank}
+                reloadToken={lineReload}
+                onedited={() => void syncHistory()}
+                {jobs}
+                onjobchange={() => void jobsChanged()}
+              />
+            </div>
+            <div hidden={tab !== "storage"}>
+              <StorageList report={storage} onchanged={takesDeleted} />
+            </div>
+          </div>
+        </div>
+      </div>
 
-    <section>
-      <div class="tabs" role="tablist">
-        <button
-          type="button"
-          role="tab"
-          aria-selected={tab === "footage"}
-          class:on={tab === "footage"}
-          onclick={() => (tab = "footage")}
-        >
-          Footage
-        </button>
-        <button
-          type="button"
-          role="tab"
-          aria-selected={tab === "lines"}
-          class:on={tab === "lines"}
-          onclick={() => (tab = "lines")}
-        >
-          Line bank
-        </button>
-        <button
-          type="button"
-          role="tab"
-          aria-selected={tab === "storage"}
-          class:on={tab === "storage"}
-          onclick={() => {
-            tab = "storage";
-            void refreshStorage();
-          }}
-        >
-          Storage
-        </button>
-      </div>
-      <div hidden={tab !== "footage"}>
-      {#if sources.length === 0}
-        <p class="hint">No footage in this project yet. Go back and rescan.</p>
-      {:else}
-        <ul class="sources">
-          {#each sources as item (item.id)}
-            <li class:missing={!item.exists}>
-              <span class="name">{fileName(item.path)}</span>
-              <span class="meta">{clock(item.duration_ms)}</span>
-              <button
-                type="button"
-                disabled={busy || !item.exists}
-                onclick={() => edit(() => addClip(item.id))}
-              >
-                Add to timeline
-              </button>
-            </li>
-          {/each}
-        </ul>
-      {/if}
-      </div>
-      <div hidden={tab !== "lines"}>
-        <LineBank
-          bind:this={lineBank}
-          reloadToken={lineReload}
-          onedited={() => void syncHistory()}
-          {jobs}
-          onjobchange={() => void jobsChanged()}
-        />
-      </div>
-      <div hidden={tab !== "storage"}>
-        <StorageList report={storage} onchanged={takesDeleted} />
-      </div>
-    </section>
+      <div
+        class="divider h"
+        role="separator"
+        aria-orientation="horizontal"
+        aria-label="Resize the preview and the timeline"
+        tabindex="0"
+        onpointerdown={(e) => startDivider(e, "h")}
+        onpointermove={moveDivider}
+        onpointerup={endDivider}
+        onpointercancel={endDivider}
+        onkeydown={(e) => nudgeDivider(e, "h")}
+      ></div>
 
-    <section>
-      <h3>Timeline: {timeline.clips.length} clip(s), {clock(timeline.duration_ms)}</h3>
-      {#if timeline.other_track_clips > 0}
-        <p class="hint">{timeline.other_track_clips} clip(s) on other tracks are not shown.</p>
-      {/if}
-      {#if timeline.orphan_count > 0}
-        <p class="error">{timeline.orphan_count} item(s) lost their footage (orphaned).</p>
-      {/if}
-      {#each timeline.problems as problem}
-        <p class="error">{problem.message}</p>
-      {/each}
-      {#if timeline.clips.length === 0}
-        <p>The timeline is empty. Add a recording above.</p>
-      {:else}
-        <table>
-          <thead>
-            <tr>
-              <th>#</th>
-              <th>Source</th>
-              <th>Timeline</th>
-              <th>Length</th>
-              <th>Source in..out</th>
-              <th>Speed</th>
-            </tr>
-          </thead>
-          <tbody>
-            {#each timeline.clips as clip, i (clip.id)}
-              <tr
-                class:missing={clip.source?.file_missing ?? true}
-                class:selected={clip.id === selectedId}
-                class:active={i === activeIndex}
-              >
-                <td>{clip.position + 1}</td>
-                <td class="file">
-                  <button type="button" class="pick" onclick={() => {
-                      selectedId = clip.id;
-                      selectedPlacementId = null;
-                      playheadMs = clip.start_ms;
-                    }}>
-                    {sourceName(clip.source_id)}
-                  </button>
-                </td>
-                <td>{clock(clip.start_ms)} to {clock(clip.end_ms)}</td>
-                <td>{clock(clip.duration_ms)}</td>
-                <td>{clock(clip.in_ms)} to {clock(clip.out_ms)}</td>
-                <td>{clip.speed}x</td>
+      <div class="bottom">
+        {#if timeline.clips.length > 0}
+          <Timeline
+            clips={timeline.clips}
+            durationMs={timeline.duration_ms}
+            bind:playheadMs
+            bind:selectedId
+            bind:selectedPlacementId
+            placements={timeline.placements}
+            {peaks}
+            locked={busy}
+            label={(clip) => sourceName(clip.source_id)}
+            ontrim={trimByDrag}
+            onreorder={reorderByDrag}
+            onplace={placeAt}
+            onmoveplacement={movePlacementByDrag}
+          />
+          <div class="clipbar">
+            {#if selectedClip !== null}
+              {@const clip = selectedClip}
+              <strong>Clip {clip.position + 1}: {sourceName(clip.source_id)}</strong>
+              <label>
+                Speed
+                <select
+                  value={String(clip.speed)}
+                  disabled={busy}
+                  onchange={(e) => {
+                    const speed = Number(e.currentTarget.value);
+                    e.currentTarget.blur();
+                    void edit(() => setClipSpeed(clip.id, speed));
+                  }}
+                >
+                  {#each speedChoices(clip.speed) as speed}
+                    <option value={String(speed)}>{speed}x</option>
+                  {/each}
+                </select>
+              </label>
+              <button type="button" disabled={busy} onclick={removeSelected}>Remove clip</button>
+            {:else if selectedPlacement === null}
+              <span class="hint">No clip selected. Click a clip on the timeline.</span>
+            {/if}
+            {#if selectedPlacement !== null}
+              {@const placed = selectedPlacement}
+              <strong>Placed line: {placed.line_text === "" ? "(line gone)" : placed.line_text}</strong>
+              {#if placed.orphaned}
+                <span class="hint">Its footage was cut away; it is parked at a clip edge.</span>
+              {/if}
+              {#if placed.take_id === null}
+                <span class="hint">This line has no take to play.</span>
+              {/if}
+              <button type="button" disabled={busy} onclick={removeSelected}>Remove placed line</button>
+            {/if}
+          </div>
+          <details class="keys">
+            <summary>Shortcuts</summary>
+            <p>
+              Space play/pause, , and . step a frame, S split at playhead, N new voice line, G generate, Shift+G reroll, M place the selected line at the playhead, Delete remove the selected clip or placed line,
+              [ and ] cut the selected clip's in/out at the playhead, Ctrl+Z / Ctrl+Y undo / redo.
+              Drag a clip's edge to trim it, drag a clip sideways to reorder, drag a voice block to move it, drag a line from the bank onto the timeline to place it; each drag is one undo step.
+              Drag the thin bars between the panels to resize them (arrow keys work when a bar is focused).
+            </p>
+          </details>
+        {/if}
+
+        <h3>Timeline: {timeline.clips.length} clip(s), {clock(timeline.duration_ms)}</h3>
+        {#if timeline.other_track_clips > 0}
+          <p class="hint">{timeline.other_track_clips} clip(s) on other tracks are not shown.</p>
+        {/if}
+        {#if timeline.orphan_count > 0}
+          <p class="error">{timeline.orphan_count} item(s) lost their footage (orphaned).</p>
+        {/if}
+        {#each timeline.problems as problem}
+          <p class="error">{problem.message}</p>
+        {/each}
+        {#if timeline.clips.length > 0}
+          <table>
+            <thead>
+              <tr>
+                <th>#</th>
+                <th>Source</th>
+                <th>Timeline</th>
+                <th>Length</th>
+                <th>Source in..out</th>
+                <th>Speed</th>
               </tr>
-            {/each}
-          </tbody>
-        </table>
-      {/if}
-    </section>
+            </thead>
+            <tbody>
+              {#each timeline.clips as clip, i (clip.id)}
+                <tr
+                  class:missing={clip.source?.file_missing ?? true}
+                  class:selected={clip.id === selectedId}
+                  class:active={i === activeIndex}
+                >
+                  <td>{clip.position + 1}</td>
+                  <td class="file">
+                    <button type="button" class="pick" onclick={() => {
+                        selectedId = clip.id;
+                        selectedPlacementId = null;
+                        playheadMs = clip.start_ms;
+                      }}>
+                      {sourceName(clip.source_id)}
+                    </button>
+                  </td>
+                  <td>{clock(clip.start_ms)} to {clock(clip.end_ms)}</td>
+                  <td>{clock(clip.duration_ms)}</td>
+                  <td>{clock(clip.in_ms)} to {clock(clip.out_ms)}</td>
+                  <td>{clip.speed}x</td>
+                </tr>
+              {/each}
+            </tbody>
+          </table>
+        {/if}
+      </div>
+    </div>
 
     <footer class="statusbar">
       <span>Voice model: {workerText(jobs)}</span>
@@ -718,22 +819,117 @@
 
 <style>
   .editor {
+    --bg: #15161a;
+    --panel: #1d1f25;
+    --panel-2: #262932;
+    --line: #353944;
+    --text: #e7e8ec;
+    --muted: #9ca0ab;
+    --accent: #4a90e2;
+    --danger: #ff7a7a;
+    position: fixed;
+    inset: 0;
+    display: flex;
+    flex-direction: column;
+    color-scheme: dark;
+    background: var(--bg);
+    color: var(--text);
     font-family: system-ui, sans-serif;
-    padding: 1rem 1.5rem;
   }
   header {
+    flex: none;
     display: flex;
     align-items: center;
     gap: 0.5rem;
+    padding: 0.4rem 0.75rem;
+    border-bottom: 1px solid var(--line);
+    background: var(--panel);
   }
   header h2 {
     margin: 0 0 0 0.5rem;
+    font-size: 1.05rem;
+    font-weight: 600;
   }
   .spacer {
     flex: 1;
   }
-  section {
-    margin-top: 1.25rem;
+  .msg {
+    flex: none;
+    margin: 0;
+    padding: 0.35rem 0.75rem;
+  }
+  .workspace {
+    flex: 1;
+    min-height: 0;
+    display: flex;
+    flex-direction: column;
+  }
+  .top {
+    flex: none;
+    min-height: 0;
+    max-height: 65%;
+    display: flex;
+  }
+  .preview {
+    flex: 1;
+    min-width: 0;
+    padding: 0.5rem 0.75rem;
+    overflow: auto;
+  }
+  .preview :global(.player) {
+    max-width: none;
+  }
+  .preview :global(video) {
+    max-height: calc(var(--top-h) - 5.5rem);
+  }
+  .side {
+    flex: none;
+    max-width: 70%;
+    min-width: 0;
+    display: flex;
+    flex-direction: column;
+    background: var(--panel);
+    border-left: 1px solid var(--line);
+  }
+  .pane {
+    flex: 1;
+    min-height: 0;
+    overflow: auto;
+    padding: 0.5rem 0.75rem;
+  }
+  .side :global(.bank) {
+    grid-template-columns: minmax(0, 1fr);
+  }
+  .divider {
+    flex: none;
+    background: var(--line);
+    touch-action: none;
+  }
+  .divider:hover,
+  .divider:focus-visible {
+    background: var(--accent);
+    outline: none;
+  }
+  .divider.v {
+    width: 6px;
+    cursor: col-resize;
+  }
+  .divider.h {
+    height: 6px;
+    cursor: row-resize;
+  }
+  .bottom {
+    flex: 1;
+    min-height: 0;
+    overflow: auto;
+    padding: 0.5rem 0.75rem 1rem;
+    background: var(--bg);
+  }
+  .bottom h3 {
+    margin: 1rem 0 0;
+    font-size: 0.95rem;
+    font-weight: 600;
+    color: var(--muted);
   }
   .sources {
     list-style: none;
@@ -745,7 +941,7 @@
     align-items: center;
     gap: 0.75rem;
     padding: 0.35rem 0;
-    border-bottom: 1px solid #8884;
+    border-bottom: 1px solid var(--line);
   }
   .sources .name {
     flex: 1;
@@ -753,7 +949,7 @@
     overflow-wrap: anywhere;
   }
   .meta {
-    opacity: 0.7;
+    color: var(--muted);
   }
   table {
     width: 100%;
@@ -764,7 +960,11 @@
   td {
     text-align: left;
     padding: 0.3rem 0.5rem;
-    border-bottom: 1px solid #8884;
+    border-bottom: 1px solid var(--line);
+  }
+  th {
+    color: var(--muted);
+    font-weight: 500;
   }
   td.file {
     overflow-wrap: anywhere;
@@ -780,12 +980,19 @@
     align-items: center;
     flex-wrap: wrap;
     gap: 0.75rem;
+    margin-top: 0.5rem;
+    min-height: 2rem;
   }
   .keys {
-    flex-basis: 100%;
-    margin: 0;
+    margin-top: 0.4rem;
     font-size: 0.85rem;
-    opacity: 0.7;
+    color: var(--muted);
+  }
+  .keys summary {
+    cursor: pointer;
+  }
+  .keys p {
+    margin: 0.4rem 0 0;
   }
   .pick {
     background: none;
@@ -799,50 +1006,48 @@
     cursor: pointer;
   }
   .statusbar {
-    position: sticky;
-    bottom: 0;
+    flex: none;
     display: flex;
     flex-wrap: wrap;
     align-items: center;
     gap: 1.25rem;
-    margin-top: 1rem;
-    padding: 0.4rem 0;
-    border-top: 1px solid #8884;
-    background: Canvas;
-    font-size: 0.9rem;
-  }
-  .statusbar .missing {
-    color: #b00020;
+    padding: 0.35rem 0.75rem;
+    border-top: 1px solid var(--line);
+    background: var(--panel);
+    font-size: 0.85rem;
+    color: var(--muted);
   }
   .tabs {
+    flex: none;
     display: flex;
     gap: 0.25rem;
-    border-bottom: 1px solid #8884;
+    padding: 0.35rem 0.5rem 0;
+    border-bottom: 1px solid var(--line);
   }
   .tabs button {
     margin: 0 0 -1px;
     padding: 0.35rem 0.9rem;
     border: 1px solid transparent;
     border-bottom: none;
+    border-radius: 6px 6px 0 0;
     background: none;
-    color: inherit;
+    color: var(--muted);
     font: inherit;
     cursor: pointer;
   }
   .tabs button.on {
-    border-color: #8884;
-    background: #4a90e233;
+    border-color: var(--line);
+    background: var(--panel-2);
+    color: var(--text);
     font-weight: 600;
   }
-  tr.missing td,
-  li.missing {
-    color: #b00020;
+  .editor :global(.error),
+  .editor :global(.missing),
+  .editor :global(.bad) {
+    color: var(--danger);
   }
   .hint,
   .note {
-    opacity: 0.75;
-  }
-  .error {
-    color: #b00020;
+    color: var(--muted);
   }
 </style>
