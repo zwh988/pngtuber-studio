@@ -3,6 +3,7 @@
     getFootage,
     getProject,
     getRecent,
+    getVoice,
     newProject,
     openProject,
     pickFile,
@@ -10,15 +11,20 @@
     relinkSource,
     removeRecent,
     rescanFootage,
+    setVoiceReference,
     type FootageReport,
     type ProjectSummary,
     type RecentItem,
+    type VoiceState,
   } from "./api";
   import Editor from "./Editor.svelte";
+  import { cleanPathInput, voiceStatusText } from "./voice";
 
   let current = $state<ProjectSummary | null>(null);
   let footage = $state<FootageReport | null>(null);
   let recent = $state<RecentItem[]>([]);
+  let voice = $state<VoiceState | null>(null);
+  let referencePath = $state("");
   let error = $state<string | null>(null);
   let busy = $state(false);
   let view = $state<"project" | "editor">("project");
@@ -34,6 +40,7 @@
   async function refreshProject(): Promise<void> {
     current = await getProject();
     footage = current === null ? null : await getFootage();
+    voice = current === null ? null : await getVoice();
   }
 
   async function run(action: () => Promise<ProjectSummary>): Promise<void> {
@@ -43,6 +50,7 @@
       current = await action();
       view = "project";
       footage = await getFootage();
+      voice = await getVoice();
       recent = await getRecent();
     } catch (err) {
       error = message(err);
@@ -78,6 +86,33 @@
       error = message(err);
     } finally {
       busy = false;
+    }
+  }
+
+  /** Check the audio file, copy it into the project and make it the voice reference. */
+  async function useReference(path: string): Promise<void> {
+    const cleaned = cleanPathInput(path);
+    if (cleaned === "") {
+      error = "Enter or choose the path of an audio file first.";
+      return;
+    }
+    busy = true;
+    error = null;
+    try {
+      voice = await setVoiceReference(cleaned);
+      current = await getProject();
+      referencePath = "";
+    } catch (err) {
+      error = message(err);
+    } finally {
+      busy = false;
+    }
+  }
+
+  async function chooseReference(): Promise<void> {
+    const path = await pickFile();
+    if (path !== null) {
+      await useReference(path);
     }
   }
 
@@ -213,6 +248,50 @@
           </tbody>
         </table>
       {/if}
+    </section>
+
+    <section>
+      <h2>Voice</h2>
+      {#if voice !== null}
+        <p class:error={!voice.ready}>{voiceStatusText(voice)}</p>
+        {#if voice.reference_path !== null}
+          <dl>
+            <dt>Reference clip</dt>
+            <dd>{voice.reference_path}</dd>
+            {#if voice.duration_ms !== null}
+              <dt>Length</dt>
+              <dd>{(voice.duration_ms / 1000).toFixed(1)} s</dd>
+            {/if}
+            {#if voice.sample_rate !== null}
+              <dt>Sample rate</dt>
+              <dd>{voice.sample_rate} Hz</dd>
+            {/if}
+            {#if voice.hash !== null}
+              <dt>Fingerprint</dt>
+              <dd>{voice.hash.slice(0, 8)}</dd>
+            {/if}
+          </dl>
+        {/if}
+        {#each voice.problems as item}
+          <p class="error">{item}</p>
+        {/each}
+        {#each voice.warnings as item}
+          <p class="warn">{item}</p>
+        {/each}
+      {/if}
+      <p class="hint">
+        A clean recording of one voice, 5 to 30 seconds long, works best. Use only your own voice
+        or a voice you have permission to use. The file is copied into the project. Changing the
+        clip keeps every take you made; lines you generate again make new takes with the new clip.
+      </p>
+      <label>
+        Reference clip path
+        <input bind:value={referencePath} placeholder="D:\Voices\reference.wav" disabled={busy} />
+      </label>
+      <button type="button" onclick={chooseReference} disabled={busy}>Choose file...</button>
+      <button type="button" onclick={() => useReference(referencePath)} disabled={busy}>
+        Use this path
+      </button>
     </section>
   {/if}
 
@@ -369,5 +448,8 @@
   }
   .error {
     color: #b00020;
+  }
+  .warn {
+    color: #8a5a00;
   }
 </style>

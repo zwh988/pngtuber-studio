@@ -6,12 +6,12 @@ orphan count and undo/redo status. No file or network access: whether a source
 file is missing on disk is passed in by the caller.
 """
 
-from collections.abc import Collection
+from collections.abc import Collection, Sequence
 
 from pydantic import BaseModel, Field
 
 from backend.edl.anchoring import check_references, find_orphans
-from backend.edl.timemap import clip_spans, timeline_duration
+from backend.edl.timemap import ClipSpan, clip_spans, timeline_duration, to_timeline
 from backend.project.schema import Project
 
 
@@ -50,8 +50,31 @@ class TimelineProblem(BaseModel):
     message: str
 
 
+class TimelinePlacement(BaseModel):
+    """A placed line as the editor draws it on the voice lane."""
+
+    id: str
+    line_id: str
+    # Empty when the line no longer exists (reported by check_voice_references).
+    line_text: str
+    allow_overlap: bool
+    # The take that plays: the placement's override, else the line's active take.
+    # None when neither exists, so the block has no audio to show.
+    take_id: str | None
+    duration_ms: int | None
+    # Timeline time of the anchor; None when its clip is not on track 0 or the
+    # source time lies outside the clip (nothing to draw).
+    start_ms: int | None
+    end_ms: int | None
+    anchor_clip_id: str
+    anchor_source_ms: int
+    orphaned: bool
+
+
 class TimelineState(BaseModel):
     clips: list[TimelineClip] = Field(default_factory=list)
+    # Placed lines, ordered by start time (unmappable ones last).
+    placements: list[TimelinePlacement] = Field(default_factory=list)
     duration_ms: int = 0
     # Clips on tracks other than 0: kept by every command, not shown in M2.
     other_track_clips: int = 0
@@ -99,9 +122,10 @@ def build_timeline(
     }
     by_id = {clip.id: clip for clip in project.clips}
     clips: list[TimelineClip] = []
+    spans = clip_spans(project.clips)
     # clip_spans covers track 0 only, in list order, so the loop counter is
     # the track-0 position.
-    for position, span in enumerate(clip_spans(project.clips)):
+    for position, span in enumerate(spans):
         clip = by_id[span.clip_id]
         clips.append(
             TimelineClip(
@@ -120,6 +144,7 @@ def build_timeline(
         )
     return TimelineState(
         clips=clips,
+        placements=_build_placements(project, spans),
         duration_ms=timeline_duration(project.clips),
         other_track_clips=sum(1 for clip in project.clips if clip.track != 0),
         orphan_count=len(find_orphans(project)),
@@ -137,3 +162,38 @@ def build_timeline(
         undo_label=undo_label,
         redo_label=redo_label,
     )
+
+
+def _build_placements(
+    project: Project, spans: Sequence[ClipSpan]
+) -> list[TimelinePlacement]:
+    lines = {line.id: line for line in project.lines}
+    takes = {take.id: take for take in project.takes}
+    shown: list[TimelinePlacement] = []
+    for placement in project.placements:
+        line = lines.get(placement.line_id)
+        take = None
+        if placement.take_override_id is not None:
+            take = takes.get(placement.take_override_id)
+        if take is None and line is not None and line.active_take_id is not None:
+            take = takes.get(line.active_take_id)
+        start = to_timeline(project.clips, placement.anchor, spans=spans)
+        duration = None if take is None else take.duration_ms
+        end = None if start is None or duration is None else start + duration
+        shown.append(
+            TimelinePlacement(
+                id=placement.id,
+                line_id=placement.line_id,
+                line_text="" if line is None else line.text,
+                allow_overlap=False if line is None else line.allow_overlap,
+                take_id=None if take is None else take.id,
+                duration_ms=duration,
+                start_ms=start,
+                end_ms=end,
+                anchor_clip_id=placement.anchor.clip_id,
+                anchor_source_ms=placement.anchor.source_ms,
+                orphaned=placement.orphaned,
+            )
+        )
+    shown.sort(key=lambda p: (p.start_ms is None, p.start_ms or 0, p.id))
+    return shown

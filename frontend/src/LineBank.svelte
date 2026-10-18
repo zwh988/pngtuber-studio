@@ -179,6 +179,26 @@
     onjobchange();
   }
 
+  /** Hotkeys G (generate) and Shift+G (reroll) for the selected line. */
+  export async function generateSelected(reroll: boolean): Promise<void> {
+    const line = selected;
+    if (line === null) {
+      error = "Select a line first.";
+      return;
+    }
+    if (isBlank(line)) {
+      error = "Write some text for this line first.";
+      return;
+    }
+    if (!line.emotion_known) {
+      error = "Pick an emotion that is in the presets first.";
+      return;
+    }
+    if (liveJob === undefined) {
+      await startGenerate(line, reroll);
+    }
+  }
+
   async function useTake(line: LineItem, take: TakeItem): Promise<void> {
     await apply([{ op: "set_active_take", line_id: line.id, take_id: take.id }]);
   }

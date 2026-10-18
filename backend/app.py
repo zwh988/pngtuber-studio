@@ -10,9 +10,12 @@ from pydantic import BaseModel
 
 from backend.media.serve import range_response
 from backend.project.edit_ops import (
+    AddPlacementOp,
     EditBatch,
     EditOp,
+    MovePlacementOp,
     RemoveClipOp,
+    RemovePlacementOp,
     ReorderClipOp,
     RippleDeleteOp,
     SetSpeedOp,
@@ -32,6 +35,7 @@ from backend.voice.engine import chatterbox_model_version
 from backend.voice.jobqueue import JobError, JobQueue
 from backend.voice.jobs import JobItem, JobStatus
 from backend.voice.linebank import LineBankState
+from backend.voice.peaks import PeaksError, PeaksReport, read_take_peaks
 from backend.voice.profile import VoiceState
 from backend.voice.subprocess_worker import SubprocessWorker, default_worker_log_path
 from backend.voice.takes import StorageReport, TakeDeleteReport, TakeItem
@@ -304,6 +308,17 @@ def create_app(
             raise HTTPException(status_code=404, detail="take file not found")
         return range_response(path, request.headers.get("range"))
 
+    @app.get("/api/takes/{take_id}/peaks")
+    def get_take_peaks(take_id: str, buckets: int = 400) -> PeaksReport:
+        # Computed on demand from the take file; nothing is stored (M3 decision 12).
+        path = active.take_path(take_id)
+        if path is None or not path.is_file():
+            raise HTTPException(status_code=404, detail="take file not found")
+        try:
+            return read_take_peaks(path, take_id, buckets)
+        except PeaksError as exc:
+            raise HTTPException(status_code=400, detail=str(exc)) from exc
+
     def run_edit(ops: Sequence[EditOp], label: str | None = None) -> TimelineState:
         try:
             return active.edit(ops, label)
@@ -332,6 +347,18 @@ def create_app(
 
     @app.post("/api/timeline/remove")
     def remove_clip(op: RemoveClipOp) -> TimelineState:
+        return run_edit([op])
+
+    @app.post("/api/timeline/place")
+    def place_line(op: AddPlacementOp) -> TimelineState:
+        return run_edit([op])
+
+    @app.post("/api/timeline/move-placement")
+    def move_placement(op: MovePlacementOp) -> TimelineState:
+        return run_edit([op])
+
+    @app.post("/api/timeline/remove-placement")
+    def remove_placement(op: RemovePlacementOp) -> TimelineState:
         return run_edit([op])
 
     @app.post("/api/timeline/batch")

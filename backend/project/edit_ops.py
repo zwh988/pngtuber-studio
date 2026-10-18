@@ -1,4 +1,4 @@
-"""Edit operations the API accepts, and how each becomes a Command (M2-S6c).
+"""Edit operations the API accepts, and how each becomes a Command (M2-S6c, M3-7).
 
 Pure: no file or network access. Each op is a small validated request body;
 ``build_command`` turns it into the matching clip command. A batch of ops runs
@@ -16,6 +16,11 @@ from pydantic import BaseModel, ConfigDict, Field
 from backend.project.clip_commands import AddClip, RemoveClip, ReorderClip, SetSpeed
 from backend.project.commands import Command, CommandError
 from backend.project.cut_commands import RippleDelete, SplitClip, TrimClip
+from backend.project.placement_commands import (
+    AddPlacement,
+    MovePlacement,
+    RemovePlacement,
+)
 
 
 class _Op(BaseModel):
@@ -67,6 +72,26 @@ class RippleDeleteOp(_Op):
     right_clip_id: str | None = None
 
 
+class AddPlacementOp(_Op):
+    op: Literal["add_placement"] = "add_placement"
+    line_id: str
+    # A TIMELINE time; the command turns it into an anchor (clip + source time).
+    timeline_ms: int
+    placement_id: str | None = None
+
+
+class MovePlacementOp(_Op):
+    op: Literal["move_placement"] = "move_placement"
+    placement_id: str
+    # A TIMELINE time: where the start of the placed line goes.
+    timeline_ms: int
+
+
+class RemovePlacementOp(_Op):
+    op: Literal["remove_placement"] = "remove_placement"
+    placement_id: str
+
+
 EditOp = Annotated[
     AddClipOp
     | RemoveClipOp
@@ -74,7 +99,10 @@ EditOp = Annotated[
     | ReorderClipOp
     | SplitClipOp
     | TrimClipOp
-    | RippleDeleteOp,
+    | RippleDeleteOp
+    | AddPlacementOp
+    | MovePlacementOp
+    | RemovePlacementOp,
     Field(discriminator="op"),
 ]
 
@@ -101,4 +129,10 @@ def build_command(op: EditOp) -> Command:
         return TrimClip(op.clip_id, op.edge, op.source_ms)
     if isinstance(op, RippleDeleteOp):
         return RippleDelete(op.start_ms, op.end_ms, right_clip_id=op.right_clip_id)
+    if isinstance(op, AddPlacementOp):
+        return AddPlacement(op.line_id, op.timeline_ms, placement_id=op.placement_id)
+    if isinstance(op, MovePlacementOp):
+        return MovePlacement(op.placement_id, op.timeline_ms)
+    if isinstance(op, RemovePlacementOp):
+        return RemovePlacement(op.placement_id)
     raise CommandError(f"unsupported edit {op!r}")

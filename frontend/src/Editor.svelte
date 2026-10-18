@@ -5,6 +5,7 @@
     cancelJob,
     getFootage,
     getJobs,
+    getStorage,
     getTimeline,
     redoEdit,
     removeClip,
@@ -16,14 +17,16 @@
     type EditResult,
     type FootageItem,
     type JobStatus,
+    type StorageReport,
     type TimelineState,
   } from "./api";
   import { clock } from "./format";
   import LineBank from "./LineBank.svelte";
+  import StorageList from "./StorageList.svelte";
   import Player from "./Player.svelte";
   import Timeline from "./Timeline.svelte";
   import { clipIndexAt, stepFrame } from "./timeline";
-  import { isLive, jobText, workerText } from "./voice";
+  import { formatBytes, isLive, jobText, workerText } from "./voice";
 
   let { onclose }: { onclose: () => void } = $props();
 
@@ -38,13 +41,15 @@
   let selectedId = $state<string | null>(null);
   let player = $state<ReturnType<typeof Player> | null>(null);
   /** Which tab of the footage / line bank panel is showing. */
-  let tab = $state<"footage" | "lines">("footage");
+  let tab = $state<"footage" | "lines" | "storage">("footage");
   /** Bumped after an undo or redo so the line bank reloads. */
   let lineReload = $state(0);
   let lineBank = $state<ReturnType<typeof LineBank> | null>(null);
   /** The voice job list; refreshed every 500 ms while a job is queued or running. */
   let jobs = $state<JobStatus | null>(null);
   let pollTimer: number | undefined;
+  /** Disk usage of the takes; refreshed when takes are made or deleted. */
+  let storage = $state<StorageReport | null>(null);
 
   const liveJobs = $derived(jobs === null ? [] : jobs.jobs.filter(isLive));
   const lastJob = $derived.by(() => {
@@ -152,6 +157,21 @@
     }
   }
 
+  async function refreshStorage(): Promise<void> {
+    try {
+      storage = await getStorage();
+    } catch (err) {
+      error = message(err);
+    }
+  }
+
+  /** Takes were deleted: reload the lines, the undo state and the disk usage. */
+  function takesDeleted(): void {
+    lineReload += 1;
+    void syncHistory();
+    void refreshStorage();
+  }
+
   /** Fetch the job list; keeps polling while a job is active and reloads the lines when one ends. */
   async function refreshJobs(): Promise<void> {
     window.clearTimeout(pollTimer);
@@ -166,6 +186,7 @@
       if (ended) {
         lineReload += 1;
         void syncHistory();
+        void refreshStorage();
       }
       if (next.active) {
         pollTimer = window.setTimeout(() => void refreshJobs(), 500);
@@ -183,6 +204,7 @@
     await refreshJobs();
     lineReload += 1;
     void syncHistory();
+    void refreshStorage();
   }
 
   async function cancelFirstJob(): Promise<void> {
@@ -304,6 +326,14 @@
         e.preventDefault();
         stepBy(1);
         break;
+      case "g":
+      case "G":
+        e.preventDefault();
+        if (canEdit) {
+          tab = "lines";
+          void lineBank?.generateSelected(e.shiftKey);
+        }
+        break;
       case "n":
       case "N":
         e.preventDefault();
@@ -350,6 +380,7 @@
 
   void load();
   void refreshJobs();
+  void refreshStorage();
 </script>
 
 <svelte:window onkeydown={onKeyDown} onkeyup={onKeyUp} />
@@ -436,7 +467,7 @@
           <span class="hint">No clip selected. Click a clip on the timeline.</span>
         {/if}
         <p class="keys">
-          Space play/pause, , and . step a frame, S split at playhead, N new voice line, Delete remove selected clip,
+          Space play/pause, , and . step a frame, S split at playhead, N new voice line, G generate, Shift+G reroll, Delete remove selected clip,
           [ and ] cut the selected clip's in/out at the playhead, Ctrl+Z / Ctrl+Y undo / redo.
           Drag a clip's edge to trim it, drag a clip sideways to reorder; each drag is one undo step.
         </p>
@@ -462,6 +493,18 @@
           onclick={() => (tab = "lines")}
         >
           Line bank
+        </button>
+        <button
+          type="button"
+          role="tab"
+          aria-selected={tab === "storage"}
+          class:on={tab === "storage"}
+          onclick={() => {
+            tab = "storage";
+            void refreshStorage();
+          }}
+        >
+          Storage
         </button>
       </div>
       <div hidden={tab !== "footage"}>
@@ -493,6 +536,9 @@
           {jobs}
           onjobchange={() => void jobsChanged()}
         />
+      </div>
+      <div hidden={tab !== "storage"}>
+        <StorageList report={storage} onchanged={takesDeleted} />
       </div>
     </section>
 
@@ -562,6 +608,12 @@
         <button type="button" onclick={() => void cancelFirstJob()}>Cancel</button>
       {:else if lastJob !== undefined}
         <span>Last job: {jobText(lastJob)}</span>
+      {/if}
+      {#if storage !== null}
+        <span>Takes on disk: {formatBytes(storage.total_bytes)} ({storage.take_count})</span>
+        {#if storage.missing_file_count > 0}
+          <span class="missing">{storage.missing_file_count} take file(s) missing</span>
+        {/if}
       {/if}
     </footer>
   {/if}
@@ -661,6 +713,9 @@
     border-top: 1px solid #8884;
     background: Canvas;
     font-size: 0.9rem;
+  }
+  .statusbar .missing {
+    color: #b00020;
   }
   .tabs {
     display: flex;

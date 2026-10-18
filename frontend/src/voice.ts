@@ -1,4 +1,4 @@
-import type { JobItem, JobState, JobStatus, LineItem, VoiceState } from "./api";
+import type { JobItem, JobState, JobStatus, LineItem, TakeDeleteReport, VoiceState } from "./api";
 
 /** Jobs in these states are over; nothing more will change them. */
 const FINISHED: readonly JobState[] = ["done", "cancelled", "failed", "reused"];
@@ -155,4 +155,31 @@ export function workerText(status: JobStatus | null): string {
 /** Collapse whitespace the way line text is compared against a take's saved text. */
 export function normalizeText(text: string): string {
   return text.trim().replace(/\s+/g, " ");
+}
+
+function count(n: number, one: string, many: string): string {
+  return n === 1 ? `1 ${one}` : `${n} ${many}`;
+}
+
+/** One short paragraph telling the user what a delete did. */
+export function deleteReportText(report: TakeDeleteReport): string {
+  const takes = count(report.removed_take_count, "take", "takes");
+  const parts = [
+    report.removed_line ? `Deleted the line and ${takes}.` : `Deleted ${takes}.`,
+    `Freed ${formatBytes(report.freed_bytes)}.`,
+  ];
+  if (report.cleared_active_line_ids.length > 0) {
+    parts.push(`${count(report.cleared_active_line_ids.length, "line has", "lines have")} no active take now.`);
+  }
+  if (report.cleared_override_placement_ids.length > 0) {
+    parts.push(
+      `${count(report.cleared_override_placement_ids.length, "placement lost its", "placements lost their")} take override.`,
+    );
+  }
+  if (report.failed_files.length > 0) {
+    parts.push(
+      `${count(report.failed_files.length, "file", "files")} could not be deleted (still open?) and will show as unreferenced.`,
+    );
+  }
+  return parts.join(" ");
 }
