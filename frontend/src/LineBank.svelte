@@ -20,6 +20,7 @@
     type TakeItem,
   } from "./api";
   import ParamSlider from "./ParamSlider.svelte";
+  import { LINE_DRAG_TYPE } from "./timeline";
   import {
     isBlank,
     jobText,
@@ -179,6 +180,20 @@
     onjobchange();
   }
 
+  /** Start dragging a line onto the voice lane: selects it and carries its id. */
+  function startDrag(e: DragEvent, line: LineItem): void {
+    selectedId = line.id;
+    if (e.dataTransfer !== null) {
+      e.dataTransfer.setData(LINE_DRAG_TYPE, line.id);
+      e.dataTransfer.effectAllowed = "copy";
+    }
+  }
+
+  /** Hotkey M: the id of the selected line, or null when none is selected. */
+  export function selectedLineId(): string | null {
+    return selected === null ? null : selected.id;
+  }
+
   /** Hotkeys G (generate) and Shift+G (reroll) for the selected line. */
   export async function generateSelected(reroll: boolean): Promise<void> {
     const line = selected;
@@ -296,6 +311,8 @@
                 type="button"
                 class="row"
                 class:selected={line.id === selectedId}
+                draggable="true"
+                ondragstart={(e) => startDrag(e, line)}
                 onclick={() => (selectedId = line.id)}
               >
                 <span class="num">{i + 1}</span>

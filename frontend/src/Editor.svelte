@@ -6,9 +6,13 @@
     getFootage,
     getJobs,
     getStorage,
+    getTakePeaks,
     getTimeline,
+    movePlacement,
+    placeLine,
     redoEdit,
     removeClip,
+    removePlacement,
     reorderClip,
     setClipSpeed,
     splitClip,
@@ -17,6 +21,7 @@
     type EditResult,
     type FootageItem,
     type JobStatus,
+    type PeaksReport,
     type StorageReport,
     type TimelineState,
   } from "./api";
@@ -26,7 +31,7 @@
   import Player from "./Player.svelte";
   import Timeline from "./Timeline.svelte";
   import { clipIndexAt, stepFrame } from "./timeline";
-  import { formatBytes, isLive, jobText, workerText } from "./voice";
+  import { formatBytes, isLive, jobText, newLineId, workerText } from "./voice";
 
   let { onclose }: { onclose: () => void } = $props();
 
@@ -39,6 +44,11 @@
   let playheadMs = $state(0);
   /** Selected clip id (click a clip on the timeline). */
   let selectedId = $state<string | null>(null);
+  /** Selected placed line (click a block on the voice lane). Never set together with `selectedId`. */
+  let selectedPlacementId = $state<string | null>(null);
+  /** Waveform peaks by take id, loaded once per take (a take's audio never changes). */
+  let peaks = $state<Record<string, PeaksReport>>({});
+  const peaksRequested = new Set<string>();
   let player = $state<ReturnType<typeof Player> | null>(null);
   /** Which tab of the footage / line bank panel is showing. */
   let tab = $state<"footage" | "lines" | "storage">("footage");
@@ -61,6 +71,9 @@
 
   /** The selected clip; null when nothing is selected or the clip is gone (after an edit or undo). */
   const selectedClip = $derived(timeline?.clips.find((c) => c.id === selectedId) ?? null);
+  const selectedPlacement = $derived(
+    timeline?.placements.find((p) => p.id === selectedPlacementId) ?? null,
+  );
 
   /** Index of the clip under the playhead (highlighted in the table). */
   const activeIndex = $derived(timeline === null ? -1 : clipIndexAt(timeline.clips, playheadMs));
@@ -250,7 +263,67 @@
     void edit(() => splitClip(at));
   }
 
+  /** Fetch the waveform of every placed take that has none yet. A failure leaves a plain block. */
+  $effect(() => {
+    for (const placement of timeline?.placements ?? []) {
+      const takeId = placement.take_id;
+      if (takeId === null || peaksRequested.has(takeId)) {
+        continue;
+      }
+      peaksRequested.add(takeId);
+      getTakePeaks(takeId)
+        .then((report) => {
+          peaks[takeId] = report;
+        })
+        .catch(() => undefined);
+    }
+  });
+
+  /** Place a line so that it starts at a timeline time, then select the new block. */
+  async function placeAt(lineId: string, timelineMs: number): Promise<void> {
+    const placementId = newLineId();
+    player?.pause();
+    await edit(() => placeLine(lineId, Math.round(timelineMs), placementId));
+    if (error === null) {
+      selectedPlacementId = placementId;
+      selectedId = null;
+      lineReload += 1;
+    }
+  }
+
+  /** Hotkey M: put the line selected in the bank at the playhead. */
+  function placeSelected(): void {
+    const lineId = lineBank?.selectedLineId() ?? null;
+    if (lineId === null) {
+      error = "Select a line in the line bank first.";
+      return;
+    }
+    void placeAt(lineId, playheadMs);
+  }
+
+  /** A voice block was dragged to a new start time (one undo step). */
+  async function movePlacementByDrag(placementId: string, timelineMs: number): Promise<void> {
+    player?.pause();
+    await edit(() => movePlacement(placementId, timelineMs));
+  }
+
+  function removePlaced(placementId: string): void {
+    player?.pause();
+    void edit(() => removePlacement(placementId)).then(() => {
+      if (error === null) {
+        selectedPlacementId = null;
+        lineReload += 1;
+      }
+    });
+  }
+
+  /** Delete: remove the selected placed line, or else the selected clip. */
   function removeSelected(): void {
+    const placed = selectedPlacement;
+    if (placed !== null) {
+      removePlaced(placed.id);
+      return;
+    }
     const clip = selectedClip;
     if (clip === null) {
       error = "Select a clip first (click it on the timeline).";
@@ -339,6 +412,13 @@
         e.preventDefault();
         if (canEdit) {
           newLine();
+        }
+        break;
+      case "m":
+      case "M":
+        e.preventDefault();
+        if (canEdit) {
+          placeSelected();
         }
         break;
       case "s":
@@ -436,10 +516,15 @@
           durationMs={timeline.duration_ms}
           bind:playheadMs
           bind:selectedId
+          bind:selectedPlacementId
+          placements={timeline.placements}
+          {peaks}
           locked={busy}
           label={(clip) => sourceName(clip.source_id)}
           ontrim={trimByDrag}
           onreorder={reorderByDrag}
+          onplace={placeAt}
+          onmoveplacement={movePlacementByDrag}
         />
       </section>
       <section class="clipbar">
@@ -463,13 +548,24 @@
             </select>
           </label>
           <button type="button" disabled={busy} onclick={removeSelected}>Remove clip</button>
-        {:else}
+        {:else if selectedPlacement === null}
           <span class="hint">No clip selected. Click a clip on the timeline.</span>
         {/if}
+        {#if selectedPlacement !== null}
+          {@const placed = selectedPlacement}
+          <strong>Placed line: {placed.line_text === "" ? "(line gone)" : placed.line_text}</strong>
+          {#if placed.orphaned}
+            <span class="hint">Its footage was cut away; it is parked at a clip edge.</span>
+          {/if}
+          {#if placed.take_id === null}
+            <span class="hint">This line has no take to play.</span>
+          {/if}
+          <button type="button" disabled={busy} onclick={removeSelected}>Remove placed line</button>
+        {/if}
         <p class="keys">
-          Space play/pause, , and . step a frame, S split at playhead, N new voice line, G generate, Shift+G reroll, Delete remove selected clip,
+          Space play/pause, , and . step a frame, S split at playhead, N new voice line, G generate, Shift+G reroll, M place the selected line at the playhead, Delete remove the selected clip or placed line,
           [ and ] cut the selected clip's in/out at the playhead, Ctrl+Z / Ctrl+Y undo / redo.
-          Drag a clip's edge to trim it, drag a clip sideways to reorder; each drag is one undo step.
+          Drag a clip's edge to trim it, drag a clip sideways to reorder, drag a voice block to move it, drag a line from the bank onto the timeline to place it; each drag is one undo step.
         </p>
       </section>
     {/if}
@@ -578,6 +674,7 @@
                 <td class="file">
                   <button type="button" class="pick" onclick={() => {
                       selectedId = clip.id;
+                      selectedPlacementId = null;
                       playheadMs = clip.start_ms;
                     }}>
                     {sourceName(clip.source_id)}

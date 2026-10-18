@@ -125,8 +125,28 @@ export type TimelineProblem = {
   message: string;
 };
 
+/** A placed line on the voice lane. Times are TIMELINE ms; null when there is nothing to draw. */
+export type TimelinePlacement = {
+  id: string;
+  line_id: string;
+  /** Empty when the line no longer exists. */
+  line_text: string;
+  allow_overlap: boolean;
+  /** The take that plays (override, else the line's active take); null when there is none. */
+  take_id: string | null;
+  duration_ms: number | null;
+  start_ms: number | null;
+  end_ms: number | null;
+  anchor_clip_id: string;
+  anchor_source_ms: number;
+  /** Its footage was cut away; the placement is parked at a clip edge. */
+  orphaned: boolean;
+};
+
 export type TimelineState = {
   clips: TimelineClip[];
+  /** Placed lines ordered by start time (unmappable ones last). */
+  placements: TimelinePlacement[];
   duration_ms: number;
   other_track_clips: number;
   orphan_count: number;
@@ -171,7 +191,10 @@ export type EditOp =
   | { op: "reorder_clip"; clip_id: string; new_position: number }
   | { op: "split_clip"; timeline_ms: number; right_clip_id?: string | null }
   | { op: "trim_clip"; clip_id: string; edge: "in" | "out"; source_ms: number }
-  | { op: "ripple_delete"; start_ms: number; end_ms: number; right_clip_id?: string | null };
+  | { op: "ripple_delete"; start_ms: number; end_ms: number; right_clip_id?: string | null }
+  | { op: "add_placement"; line_id: string; timeline_ms: number; placement_id?: string | null }
+  | { op: "move_placement"; placement_id: string; timeline_ms: number }
+  | { op: "remove_placement"; placement_id: string };
 
 export function splitClip(timelineMs: number): Promise<TimelineState> {
   return post<TimelineState>("/api/timeline/split", { timeline_ms: timelineMs });
@@ -206,6 +229,45 @@ export function setClipSpeed(clipId: string, speed: number): Promise<TimelineSta
 
 export function removeClip(clipId: string): Promise<TimelineState> {
   return post<TimelineState>("/api/timeline/remove", { clip_id: clipId });
+}
+
+/** Put a generated line on the timeline. `timelineMs` is TIMELINE time; the backend anchors it to footage. */
+export function placeLine(
+  lineId: string,
+  timelineMs: number,
+  placementId?: string,
+): Promise<TimelineState> {
+  return post<TimelineState>("/api/timeline/place", {
+    line_id: lineId,
+    timeline_ms: Math.round(timelineMs),
+    placement_id: placementId ?? null,
+  });
+}
+
+/** `timelineMs` is where the START of the placed line goes (TIMELINE time). */
+export function movePlacement(placementId: string, timelineMs: number): Promise<TimelineState> {
+  return post<TimelineState>("/api/timeline/move-placement", {
+    placement_id: placementId,
+    timeline_ms: Math.round(timelineMs),
+  });
+}
+
+export function removePlacement(placementId: string): Promise<TimelineState> {
+  return post<TimelineState>("/api/timeline/remove-placement", { placement_id: placementId });
+}
+
+/** Lowest and highest sample of each bucket of a take, -1 to 1, left to right. */
+export type PeaksReport = {
+  take_id: string;
+  duration_ms: number;
+  sample_rate: number;
+  buckets: number;
+  lows: number[];
+  highs: number[];
+};
+
+export function getTakePeaks(takeId: string, buckets = 400): Promise<PeaksReport> {
+  return request<PeaksReport>(`/api/takes/${encodeURIComponent(takeId)}/peaks?buckets=${buckets}`);
 }
 
 /** Several edits as ONE undo step; all apply or none do. */

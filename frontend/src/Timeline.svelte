@@ -1,23 +1,33 @@
 <script lang="ts">
   import { untrack } from "svelte";
-  import type { TimelineClip } from "./api";
+  import type { PeaksReport, TimelineClip, TimelinePlacement } from "./api";
   import { clock } from "./format";
-  import { dropSlot, trimTarget, withTrim } from "./timeline";
+  import { LINE_DRAG_TYPE, dropSlot, peakSpan, trimTarget, withTrim } from "./timeline";
 
   let {
     clips,
     durationMs,
     playheadMs = $bindable(0),
     selectedId = $bindable(null),
+    placements = [],
+    peaks = {},
+    selectedPlacementId = $bindable(null),
     locked = false,
     label,
     ontrim,
     onreorder,
+    onplace,
+    onmoveplacement,
   }: {
     clips: TimelineClip[];
     durationMs: number;
     playheadMs?: number;
     selectedId?: string | null;
+    /** Placed lines for the voice lane. */
+    placements?: TimelinePlacement[];
+    /** Waveform peaks by take id; a block without an entry is drawn plain. */
+    peaks?: Record<string, PeaksReport>;
+    selectedPlacementId?: string | null;
     /** True while an edit is in flight: drags that would edit are ignored. */
     locked?: boolean;
     label: (clip: TimelineClip) => string;
@@ -25,6 +35,10 @@
     ontrim: (clipId: string, edge: "in" | "out", sourceMs: number) => Promise<void>;
     /** One call per drag, on release. `newPosition` is the clip's position after the move. */
     onreorder: (clipId: string, newPosition: number) => Promise<void>;
+    /** A line was dropped from the bank. `timelineMs` is TIMELINE time. Resolves when the edit is done. */
+    onplace: (lineId: string, timelineMs: number) => Promise<void>;
+    /** A voice block was dragged. `timelineMs` is where its START goes (TIMELINE time). */
+    onmoveplacement: (placementId: string, timelineMs: number) => Promise<void>;
   } = $props();
 
   /** Width of the grab zone at each clip edge, in pixels. */
@@ -32,7 +46,12 @@
   const RULER_H = 26;
   const LANE_Y = 32;
   const LANE_H = 60;
-  const HEIGHT = 100;
+  /** The voice lane sits under the video lane. */
+  const VOICE_Y = LANE_Y + LANE_H + 8;
+  const VOICE_H = 46;
+  const HEIGHT = VOICE_Y + VOICE_H + 10;
+  /** Width given to a placed line that has no take yet, in ms. */
+  const PLACEHOLDER_MS = 1000;
   /** Empty space kept to the right of the last clip, in pixels. */
   const GUTTER = 40;
   const MIN_PX = 0.0005;
@@ -53,14 +72,24 @@
   type Hit = { clip: TimelineClip; part: "in" | "out" | "body" };
   type TrimDrag = { mode: "trim"; clip: TimelineClip; edge: "in" | "out"; sourceMs: number };
   type MoveDrag = { mode: "move"; clip: TimelineClip; grabDx: number; slot: number };
+  type PlacementDrag = {
+    mode: "pmove";
+    placement: TimelinePlacement;
+    grabDx: number;
+    startMs: number;
+  };
   type Drag =
     | { mode: "scrub" }
     | { mode: "press"; clip: TimelineClip; startX: number }
+    | { mode: "ppress"; placement: TimelinePlacement; startX: number }
     | TrimDrag
-    | MoveDrag;
+    | MoveDrag
+    | PlacementDrag;
   type DragUi =
     | { kind: "trim"; x: number }
-    | { kind: "move"; clipId: string; ghostX: number; slotMs: number };
+    | { kind: "move"; clipId: string; ghostX: number; slotMs: number }
+    | { kind: "pmove"; ghostX: number; width: number }
+    | { kind: "drop"; x: number };
 
   /** Pointer interaction in progress (not reactive: only the handlers use it). */
   let drag: Drag | null = null;
@@ -73,6 +102,10 @@
 
   function xPos(ms: number): number {
     return (ms - scrollMs) * pxPerMs;
+  }
+
+  function placementWidth(p: TimelinePlacement): number {
+    return Math.max(3, (p.duration_ms ?? PLACEHOLDER_MS) * pxPerMs);
   }
 
   function clampPx(px: number): number {
@@ -220,6 +253,70 @@
       ctx.stroke();
     }
 
+    // Voice lane: placed lines as blocks with their waveform
+    ctx.fillStyle = "#23232b";
+    ctx.fillRect(0, VOICE_Y, viewWidth, VOICE_H);
+    if (placements.length === 0) {
+      ctx.fillStyle = "#7a7a88";
+      ctx.textBaseline = "middle";
+      ctx.fillText(
+        "Voice lane: select a line in the bank, move the playhead, press M",
+        8,
+        VOICE_Y + VOICE_H / 2,
+      );
+      ctx.textBaseline = "top";
+    }
+    for (const p of placements) {
+      if (p.start_ms === null) {
+        continue;
+      }
+      const x0 = xOf(p.start_ms);
+      const w = placementWidth(p);
+      if (x0 + w < 0 || x0 > viewWidth) {
+        continue;
+      }
+      const picked = p.id === selectedPlacementId;
+      const noAudio = p.take_id === null;
+      ctx.fillStyle = noAudio ? "#3a3a44" : picked ? "#4f9a7e" : "#3b7a64";
+      ctx.fillRect(x0, VOICE_Y + 2, Math.max(1, w - 1), VOICE_H - 4);
+      const report = p.take_id === null ? undefined : peaks[p.take_id];
+      if (report !== undefined && w > 4) {
+        const midY = VOICE_Y + 14 + (VOICE_H - 18) / 2;
+        const half = (VOICE_H - 18) / 2 - 1;
+        ctx.fillStyle = "#ffffffcc";
+        const first = Math.max(0, Math.floor(-x0));
+        const last = Math.min(Math.ceil(w), Math.ceil(viewWidth - x0));
+        for (let col = first; col < last; col += 1) {
+          const [low, high] = peakSpan(report.lows, report.highs, col / w, (col + 1) / w);
+          const top = midY - high * half;
+          const bottom = midY - low * half;
+          ctx.fillRect(x0 + col, top, 1, Math.max(1, bottom - top));
+        }
+      }
+      if (w > 30) {
+        const text = p.line_text === "" ? "(line gone)" : p.line_text;
+        ctx.save();
+        ctx.beginPath();
+        ctx.rect(x0, VOICE_Y, Math.max(1, w - 1), VOICE_H);
+        ctx.clip();
+        ctx.fillStyle = "#ffffff";
+        ctx.textBaseline = "top";
+        ctx.font = "10px system-ui, sans-serif";
+        ctx.fillText(noAudio ? `${text} (no take)` : text, x0 + 4, VOICE_Y + 4);
+        ctx.restore();
+      }
+      if (p.orphaned) {
+        ctx.strokeStyle = "#f5a142";
+        ctx.lineWidth = 2;
+        ctx.strokeRect(x0 + 1, VOICE_Y + 3, Math.max(1, w - 3), VOICE_H - 6);
+      }
+      if (picked) {
+        ctx.strokeStyle = "#ffffff";
+        ctx.lineWidth = 2;
+        ctx.strokeRect(x0 + 1, VOICE_Y + 3, Math.max(1, w - 3), VOICE_H - 6);
+      }
+    }
+
     // Drag feedback: a dashed line at the pointer while trimming; a ghost and a drop marker
     // while reordering.
     const ui = dragUi;
@@ -246,6 +343,24 @@
       ctx.beginPath();
       ctx.moveTo(slotX, LANE_Y - 6);
       ctx.lineTo(slotX, LANE_Y + LANE_H + 6);
+      ctx.stroke();
+    } else if (ui !== null && ui.kind === "pmove") {
+      ctx.globalAlpha = 0.7;
+      ctx.fillStyle = "#9be0c2";
+      ctx.fillRect(ui.ghostX, VOICE_Y + 2, Math.max(4, ui.width - 1), VOICE_H - 4);
+      ctx.globalAlpha = 1;
+      ctx.strokeStyle = "#9be0c2";
+      ctx.lineWidth = 2;
+      ctx.beginPath();
+      ctx.moveTo(Math.round(ui.ghostX), VOICE_Y - 4);
+      ctx.lineTo(Math.round(ui.ghostX), VOICE_Y + VOICE_H + 4);
+      ctx.stroke();
+    } else if (ui !== null && ui.kind === "drop") {
+      ctx.strokeStyle = "#ffffff";
+      ctx.lineWidth = 2;
+      ctx.beginPath();
+      ctx.moveTo(Math.round(ui.x), VOICE_Y - 4);
+      ctx.lineTo(Math.round(ui.x), VOICE_Y + VOICE_H + 4);
       ctx.stroke();
     }
 
@@ -346,6 +461,22 @@
       }
       return null;
     }
+    function hitPlacement(x: number, y: number): TimelinePlacement | null {
+      if (y < VOICE_Y || y > VOICE_Y + VOICE_H) {
+        return null;
+      }
+      for (let i = placements.length - 1; i >= 0; i -= 1) {
+        const p = placements[i];
+        if (p === undefined || p.start_ms === null) {
+          continue;
+        }
+        const x0 = xPos(p.start_ms);
+        if (x >= x0 && x <= x0 + placementWidth(p)) {
+          return p;
+        }
+      }
+      return null;
+    }
     function updateMove(d: MoveDrag, x: number): void {
       d.slot = dropSlot(clips, d.clip.id, scrollMs + x / pxPerMs);
       const others = clips.filter((c) => c.id !== d.clip.id);
@@ -355,6 +486,11 @@
         ghostX: x - d.grabDx,
         slotMs: others[d.slot]?.start_ms ?? durationMs,
       };
+    }
+    function updatePlacementMove(d: PlacementDrag, x: number): void {
+      const start = Math.round(scrollMs + (x - d.grabDx) / pxPerMs);
+      d.startMs = Math.min(Math.max(start, 0), Math.max(0, durationMs - 1));
+      dragUi = { kind: "pmove", ghostX: xPos(d.startMs), width: placementWidth(d.placement) };
     }
     /** Keep the drag picture until the backend answered, so the timeline does not flicker back. */
     async function finish(job: Promise<void>): Promise<void> {
@@ -371,6 +507,17 @@
       }
       canvas.setPointerCapture(e.pointerId);
       const { x, y } = pointerXY(e);
+      const placed = hitPlacement(x, y);
+      if (placed !== null) {
+        // A voice block: select it (and nothing else); the playhead stays where it is.
+        selectedPlacementId = placed.id;
+        selectedId = null;
+        drag = locked ? null : { mode: "ppress", placement: placed, startX: x };
+        return;
+      }
+      if (y >= LANE_Y) {
+        selectedPlacementId = null;
+      }
       const target = hit(x, y);
       if (target !== null && !locked && target.part !== "body") {
         // Grab a clip edge: trim.
@@ -425,6 +572,20 @@
           drag = next;
           updateMove(next, x);
         }
+      } else if (d.mode === "ppress") {
+        const start = d.placement.start_ms;
+        if (start !== null && Math.abs(x - d.startX) > 4) {
+          const next: PlacementDrag = {
+            mode: "pmove",
+            placement: d.placement,
+            grabDx: d.startX - xPos(start),
+            startMs: start,
+          };
+          drag = next;
+          updatePlacementMove(next, x);
+        }
+      } else if (d.mode === "pmove") {
+        updatePlacementMove(d, x);
       } else {
         updateMove(d, x);
       }
@@ -449,7 +610,39 @@
         } else {
           dragUi = null;
         }
+      } else if (d.mode === "pmove") {
+        if (d.startMs !== d.placement.start_ms) {
+          void finish(onmoveplacement(d.placement.id, d.startMs));
+        } else {
+          dragUi = null;
+        }
       }
+    }
+    function dropX(e: DragEvent): number {
+      return e.clientX - (canvas?.getBoundingClientRect().left ?? 0);
+    }
+    function dragover(e: DragEvent): void {
+      if (locked || e.dataTransfer === null || !e.dataTransfer.types.includes(LINE_DRAG_TYPE)) {
+        return;
+      }
+      e.preventDefault();
+      e.dataTransfer.dropEffect = "copy";
+      dragUi = { kind: "drop", x: dropX(e) };
+    }
+    function dragleave(): void {
+      if (dragUi !== null && dragUi.kind === "drop") {
+        dragUi = null;
+      }
+    }
+    function drop(e: DragEvent): void {
+      const lineId = e.dataTransfer?.getData(LINE_DRAG_TYPE) ?? "";
+      if (locked || lineId === "") {
+        dragUi = null;
+        return;
+      }
+      e.preventDefault();
+      const ms = Math.round(scrollMs + dropX(e) / pxPerMs);
+      void finish(onplace(lineId, Math.max(0, ms)));
     }
     function cancel(): void {
       drag = null;
@@ -473,7 +666,13 @@
     canvas.addEventListener("pointerup", up);
     canvas.addEventListener("pointercancel", cancel);
     canvas.addEventListener("wheel", wheel, { passive: false });
+    canvas.addEventListener("dragover", dragover);
+    canvas.addEventListener("dragleave", dragleave);
+    canvas.addEventListener("drop", drop);
     return () => {
+      canvas.removeEventListener("dragover", dragover);
+      canvas.removeEventListener("dragleave", dragleave);
+      canvas.removeEventListener("drop", drop);
       canvas.removeEventListener("pointerdown", down);
       canvas.removeEventListener("pointermove", move);
       canvas.removeEventListener("pointerup", up);
@@ -488,7 +687,7 @@
     <button type="button" onclick={() => zoomAt(1 / 1.5, viewWidth / 2)}>Zoom out</button>
     <button type="button" onclick={() => zoomAt(1.5, viewWidth / 2)}>Zoom in</button>
     <button type="button" onclick={fit}>Fit</button>
-    <span class="hint">Click the ruler to seek, click a clip to select it, drag its edge to trim, drag it sideways to reorder. Wheel scrolls, Ctrl+wheel zooms.</span>
+    <span class="hint">Click the ruler to seek, click a clip to select it, drag its edge to trim, drag it sideways to reorder. Click a voice block to select it and drag it to move it; drag a line from the bank onto the timeline to place it. Wheel scrolls, Ctrl+wheel zooms.</span>
   </div>
   <div class="view" bind:clientWidth={viewWidth}>
     <canvas bind:this={canvasEl} style:width="{viewWidth}px" style:height="{HEIGHT}px"></canvas>

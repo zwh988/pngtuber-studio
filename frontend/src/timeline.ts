@@ -1,5 +1,8 @@
 import type { TimelineClip } from "./api";
 
+/** Drag-and-drop data type for a line dragged from the line bank onto the voice lane. */
+export const LINE_DRAG_TYPE = "application/x-pngtuber-line";
+
 /**
  * Index of the clip under a timeline time. Times past the end give the last clip,
  * negative times give the first, an empty list gives -1.
@@ -112,4 +115,29 @@ export function dropSlot(clips: TimelineClip[], draggedId: string, timelineMs: n
     }
   }
   return slot;
+}
+
+/**
+ * Lowest and highest peak between two fractions (0 to 1) of a take's length, read from its
+ * peak buckets. Used to draw one pixel column of a waveform block. Empty input gives [0, 0].
+ */
+export function peakSpan(
+  lows: number[],
+  highs: number[],
+  from: number,
+  to: number,
+): [number, number] {
+  const count = Math.min(lows.length, highs.length);
+  if (count === 0) {
+    return [0, 0];
+  }
+  const first = Math.min(Math.max(Math.floor(from * count), 0), count - 1);
+  const last = Math.min(Math.max(Math.ceil(to * count), first + 1), count);
+  let low = 0;
+  let high = 0;
+  for (let i = first; i < last; i += 1) {
+    low = Math.min(low, lows[i] ?? 0);
+    high = Math.max(high, highs[i] ?? 0);
+  }
+  return [low, high];
 }
