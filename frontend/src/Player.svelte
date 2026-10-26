@@ -8,12 +8,18 @@
     clips,
     durationMs,
     playheadMs = $bindable(0),
-  }: { clips: TimelineClip[]; durationMs: number; playheadMs?: number } = $props();
+    playing = $bindable(false),
+  }: {
+    clips: TimelineClip[];
+    durationMs: number;
+    playheadMs?: number;
+    /** True while the video is playing; the editor reads it to start and stop the voice. */
+    playing?: boolean;
+  } = $props();
 
   let video = $state<HTMLVideoElement | null>(null);
   /** The source the <video> element currently has loaded (or is loading). */
   let activeSourceId = $state<string | null>(null);
-  let playing = $state(false);
   let curIdx = $state(0);
   let error = $state<string | null>(null);
 

@@ -4,7 +4,7 @@
 </script>
 
 <script lang="ts">
-  import { onDestroy, tick } from "svelte";
+  import { onDestroy, tick, untrack } from "svelte";
   import {
     addClip,
     cancelJob,
@@ -37,6 +37,7 @@
   import Timeline from "./Timeline.svelte";
   import { clipIndexAt, stepFrame } from "./timeline";
   import { formatBytes, isLive, jobText, newLineId, workerText } from "./voice";
+  import { VoicePlayback } from "./voicePlayback";
 
   let { onclose }: { onclose: () => void } = $props();
 
@@ -55,6 +56,15 @@
   let peaks = $state<Record<string, PeaksReport>>({});
   const peaksRequested = new Set<string>();
   let player = $state<ReturnType<typeof Player> | null>(null);
+  /** True while the player plays (bound from `Player`). */
+  let playing = $state(false);
+  /** Plays the placed takes in time with the video (Web Audio). */
+  const voice = new VoicePlayback((text) => {
+    error = text;
+  });
+  /** Playback began but the playhead has not moved yet; the voice starts on the first real advance. */
+  let voiceArmed = false;
+  let voiceArmedMs = 0;
   /** Which tab of the footage / line bank panel is showing. */
   let tab = $state<"footage" | "lines" | "storage">("footage");
   /** Bumped after an undo or redo so the line bank reloads. */
@@ -238,7 +248,39 @@
     await jobsChanged();
   }
 
-  onDestroy(() => window.clearTimeout(pollTimer));
+  onDestroy(() => {
+    window.clearTimeout(pollTimer);
+    voice.dispose();
+  });
+
+  /** Keep the voice engine's placement list current (it loads new takes and re-plans while playing). */
+  $effect(() => {
+    const list = timeline?.placements ?? [];
+    untrack(() => voice.setPlacements(list));
+  });
+
+  /**
+   * Voice follows the player. When playback begins the voice waits for the playhead to actually
+   * move (the video may still be seeking), then starts there; after that every playhead change
+   * is checked for drift. Pause, an edit or the end of the timeline sets `playing` to false.
+   */
+  $effect(() => {
+    const isPlaying = playing;
+    const ms = playheadMs;
+    untrack(() => {
+      if (!isPlaying) {
+        voiceArmed = false;
+        voice.stop();
+      } else if (voice.running) {
+        voice.sync(ms);
+      } else if (!voiceArmed) {
+        voiceArmed = true;
+        voiceArmedMs = ms;
+      } else if (ms !== voiceArmedMs) {
+        voice.start(ms);
+      }
+    });
+  });
 
   /** Hotkey N: show the line bank and add a line. */
   function newLine(): void {
@@ -576,6 +618,7 @@
               clips={timeline.clips}
               durationMs={timeline.duration_ms}
               bind:playheadMs
+              bind:playing
             />
           {:else}
             <p class="hint">The timeline is empty. Add a recording from the Footage tab.</p>
