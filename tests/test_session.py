@@ -2,7 +2,7 @@ from pathlib import Path
 
 import pytest
 
-from backend.project.schema import Project
+from backend.project.schema import SCHEMA_VERSION, Project
 from backend.project.session import Session, SessionError, clean_folder_name
 from backend.project.store import project_file
 from backend.project.summary import NOT_CONFIGURED, PATH_SET, summarize
@@ -25,7 +25,7 @@ def test_summarize_defaults() -> None:
     summary = summarize("C:/x", Project(name="P"))
     assert summary.name == "P"
     assert summary.folder == "C:/x"
-    assert summary.schema_version == 1
+    assert summary.schema_version == SCHEMA_VERSION
     assert summary.source_count == 0
     assert summary.clip_count == 0
     assert summary.voice_status == NOT_CONFIGURED

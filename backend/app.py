@@ -18,6 +18,7 @@ from backend.project.edit_ops import (
     RemovePlacementOp,
     ReorderClipOp,
     RippleDeleteOp,
+    SetPlacementStretchOp,
     SetSpeedOp,
     SplitClipOp,
     TrimClipOp,
@@ -37,6 +38,7 @@ from backend.voice.jobs import JobItem, JobStatus
 from backend.voice.linebank import LineBankState
 from backend.voice.peaks import PeaksError, PeaksReport, read_take_peaks
 from backend.voice.profile import VoiceState
+from backend.voice.stretchrender import StretchError, ensure_stretched
 from backend.voice.subprocess_worker import SubprocessWorker, default_worker_log_path
 from backend.voice.takes import StorageReport, TakeDeleteReport, TakeItem
 
@@ -301,11 +303,19 @@ def create_app(
         return range_response(path, request.headers.get("range"))
 
     @app.get("/media/take/{take_id}")
-    def get_take_media(take_id: str, request: Request) -> Response:
+    def get_take_media(
+        take_id: str, request: Request, stretch: float = 1.0
+    ) -> Response:
         # The file comes from the open project's take list, never from the URL.
+        # ``stretch`` only picks a number; a stretched copy is rendered once and kept.
         path = active.take_path(take_id)
         if path is None or not path.is_file():
             raise HTTPException(status_code=404, detail="take file not found")
+        if stretch != 1.0:
+            try:
+                path = ensure_stretched(path, stretch)
+            except StretchError as exc:
+                raise HTTPException(status_code=400, detail=str(exc)) from exc
         return range_response(path, request.headers.get("range"))
 
     @app.get("/api/takes/{take_id}/peaks")
@@ -359,6 +369,10 @@ def create_app(
 
     @app.post("/api/timeline/remove-placement")
     def remove_placement(op: RemovePlacementOp) -> TimelineState:
+        return run_edit([op])
+
+    @app.post("/api/timeline/stretch")
+    def set_placement_stretch(op: SetPlacementStretchOp) -> TimelineState:
         return run_edit([op])
 
     @app.post("/api/timeline/batch")

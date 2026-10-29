@@ -20,6 +20,7 @@
     removePlacement,
     reorderClip,
     setClipSpeed,
+    setPlacementStretch,
     splitClip,
     trimClip,
     undoEdit,
@@ -35,6 +36,7 @@
   import StorageList from "./StorageList.svelte";
   import Player from "./Player.svelte";
   import Timeline from "./Timeline.svelte";
+  import { STRETCH_MAX, STRETCH_MIN, STRETCH_WARN, stretchText, tightenTarget } from "./stretch";
   import { clipIndexAt, stepFrame } from "./timeline";
   import { formatBytes, isLive, jobText, newLineId, workerText } from "./voice";
   import { VoicePlayback } from "./voicePlayback";
@@ -179,6 +181,9 @@
         timeline.undo_label = state.undo_label;
         timeline.redo_label = state.redo_label;
         timeline.save_error = state.save_error;
+        // Line edits and finished jobs change what a placement plays (active take, length,
+        // allow overlap), so refresh the placements too.
+        timeline.placements = state.placements;
       }
     } catch (err) {
       error = message(err);
@@ -352,6 +357,30 @@
   async function movePlacementByDrag(placementId: string, timelineMs: number): Promise<void> {
     player?.pause();
     await edit(() => movePlacement(placementId, timelineMs));
+  }
+
+  /** Nudge earlier: move a block up by the overflow, or by the slack when that is less. */
+  function nudgeEarlier(placementId: string): void {
+    const placed = timeline?.placements.find((p) => p.id === placementId);
+    if (placed === undefined || placed.start_ms === null) {
+      return;
+    }
+    const amount = Math.min(placed.overflow_ms, placed.slack_ms);
+    if (amount <= 0) {
+      return;
+    }
+    player?.pause();
+    void edit(() => movePlacement(placementId, (placed.start_ms ?? 0) - amount));
+  }
+
+  /** Tighten and the speed slider: set how much faster a placed line plays (one undo step). */
+  function setStretch(placementId: string, stretch: number): void {
+    const placed = timeline?.placements.find((p) => p.id === placementId);
+    if (placed === undefined || Math.abs(placed.stretch - stretch) < 0.0005) {
+      return;
+    }
+    player?.pause();
+    void edit(() => setPlacementStretch(placementId, stretch));
   }
 
   function removePlaced(placementId: string): void {
@@ -770,6 +799,50 @@
               {#if placed.take_id === null}
                 <span class="hint">This line has no take to play.</span>
               {/if}
+              {#if placed.overflow_ms > 0 && !placed.allow_overlap}
+                <span class="error">
+                  Runs {(placed.overflow_ms / 1000).toFixed(2)} s into the next line.
+                  Tick "Allow overlap" for this line in the Line bank if that is intended.
+                </span>
+                {@const tighten = tightenTarget(placed.fit_stretch, placed.stretch)}
+                {#if tighten !== null}
+                  <button type="button" disabled={busy} onclick={() => setStretch(placed.id, tighten)}>
+                    Tighten {stretchText(tighten)}
+                    {placed.fit_stretch !== null && placed.fit_stretch > tighten + 0.0005
+                      ? `(clearing it needs ${stretchText(placed.fit_stretch)}: use the slider)`
+                      : ""}
+                  </button>
+                {/if}
+                {#if placed.fit_stretch !== null && placed.fit_stretch > STRETCH_MAX}
+                  <span class="hint">Even {stretchText(STRETCH_MAX)} would not clear it: also nudge or shorten the line.</span>
+                {/if}
+                {#if placed.slack_ms > 0}
+                  <button type="button" disabled={busy} onclick={() => nudgeEarlier(placed.id)}>
+                    Nudge earlier {(Math.min(placed.overflow_ms, placed.slack_ms) / 1000).toFixed(2)} s
+                    {placed.slack_ms < placed.overflow_ms ? "(not enough room to clear it)" : ""}
+                  </button>
+                {:else}
+                  <span class="hint">No room to nudge earlier: the previous line ends where this one starts.</span>
+                {/if}
+              {/if}
+              {#if placed.take_id !== null}
+                <label class="stretch">
+                  Speed up
+                  <input
+                    type="range"
+                    min={STRETCH_MIN}
+                    max={STRETCH_MAX}
+                    step="0.01"
+                    value={placed.stretch}
+                    disabled={busy}
+                    onchange={(event) => setStretch(placed.id, event.currentTarget.valueAsNumber)}
+                  />
+                  {placed.stretch === 1 ? "as recorded" : stretchText(placed.stretch)}
+                </label>
+                {#if placed.stretch > STRETCH_WARN}
+                  <span class="hint">Above +15% the voice may sound unnatural.</span>
+                {/if}
+              {/if}
               <button type="button" disabled={busy} onclick={removeSelected}>Remove placed line</button>
             {/if}
           </div>
@@ -1092,5 +1165,10 @@
   .hint,
   .note {
     color: var(--muted);
+  }
+  .stretch {
+    display: inline-flex;
+    align-items: center;
+    gap: 0.4rem;
   }
 </style>

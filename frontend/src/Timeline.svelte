@@ -305,6 +305,11 @@
         ctx.fillText(noAudio ? `${text} (no take)` : text, x0 + 4, VOICE_Y + 4);
         ctx.restore();
       }
+      if (p.overflow_ms > 0 && !p.allow_overlap) {
+        // Runs into the next line: red edge at the end of the block.
+        ctx.fillStyle = "#e5484d";
+        ctx.fillRect(x0 + Math.max(1, w - 1) - 3, VOICE_Y + 2, 3, VOICE_H - 4);
+      }
       if (p.orphaned) {
         ctx.strokeStyle = "#f5a142";
         ctx.lineWidth = 2;

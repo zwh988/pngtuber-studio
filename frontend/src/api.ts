@@ -141,6 +141,17 @@ export type TimelinePlacement = {
   anchor_source_ms: number;
   /** Its footage was cut away; the placement is parked at a clip edge. */
   orphaned: boolean;
+  /** Ms this line's audio runs past the start of the next playing line; 0 when it does not. */
+  overflow_ms: number;
+  overflow_next_id: string | null;
+  /** Ms it could start earlier without touching the previous playing line; set when it overflows. */
+  slack_ms: number;
+  /** Speed-up of this line's audio (1 to 1.25); `duration_ms` is the length that plays. */
+  stretch: number;
+  /** The take as recorded, before the stretch. */
+  raw_duration_ms: number | null;
+  /** The stretch that clears this line's overflow exactly; null when it has none or none can. */
+  fit_stretch: number | null;
 };
 
 export type TimelineState = {
@@ -245,6 +256,13 @@ export function placeLine(
 }
 
 /** `timelineMs` is where the START of the placed line goes (TIMELINE time). */
+export function setPlacementStretch(placementId: string, stretch: number): Promise<TimelineState> {
+  return post<TimelineState>("/api/timeline/stretch", {
+    placement_id: placementId,
+    stretch,
+  });
+}
+
 export function movePlacement(placementId: string, timelineMs: number): Promise<TimelineState> {
   return post<TimelineState>("/api/timeline/move-placement", {
     placement_id: placementId,
@@ -520,6 +538,8 @@ export function deleteLine(lineId: string): Promise<TakeDeleteReport> {
 }
 
 /** URL an <audio> tag can play for a take of the open project (Range supported). */
-export function takeMediaUrl(takeId: string): string {
-  return `/media/take/${encodeURIComponent(takeId)}`;
+/** Audio of a take. With a stretch above 1 the backend serves the sped-up copy (made once, then kept). */
+export function takeMediaUrl(takeId: string, stretch = 1): string {
+  const base = `/media/take/${encodeURIComponent(takeId)}`;
+  return stretch === 1 ? base : `${base}?stretch=${stretch}`;
 }

@@ -12,10 +12,17 @@ from backend.project.schema import SCHEMA_VERSION
 
 Migration = Callable[[dict[str, Any]], dict[str, Any]]
 
+
+def _v1_to_v2(data: dict[str, Any]) -> dict[str, Any]:
+    """v2 adds ``Placement.stretch`` (default 1.0: the take plays as recorded)."""
+    for placement in data.get("placements", []):
+        if isinstance(placement, dict):
+            placement.setdefault("stretch", 1.0)
+    return data
+
+
 # Maps "from version" -> function upgrading that version to version + 1.
-# Empty while the schema is at v1. Example for a future v2:
-#     MIGRATIONS[1] = _v1_to_v2
-MIGRATIONS: dict[int, Migration] = {}
+MIGRATIONS: dict[int, Migration] = {1: _v1_to_v2}
 
 
 class MigrationError(Exception):

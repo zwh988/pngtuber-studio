@@ -12,7 +12,7 @@ from backend.project.migrations import (
     ProjectTooNewError,
     migrate,
 )
-from backend.project.schema import Line, Project, new_id
+from backend.project.schema import SCHEMA_VERSION, Line, Project, new_id
 from backend.project.store import (
     LAYOUT_DIRS,
     ProjectExistsError,
@@ -28,7 +28,7 @@ from backend.project.store import (
 
 
 def test_migrate_noop_at_current_version() -> None:
-    data = {"schema_version": 1, "name": "x"}
+    data = {"schema_version": SCHEMA_VERSION, "name": "x"}
     assert migrate(data) == data
 
 
@@ -167,7 +167,7 @@ def test_create_makes_layout_and_valid_file(folder: Path) -> None:
         assert (folder / rel).is_dir()
     assert project_file(folder).is_file()
     data = json.loads(project_file(folder).read_text(encoding="utf-8"))
-    assert data["schema_version"] == 1
+    assert data["schema_version"] == SCHEMA_VERSION
     assert isinstance(data["seed"], int)
 
 

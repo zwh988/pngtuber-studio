@@ -156,7 +156,7 @@ def test_take_requires_valid_raw_file_path() -> None:
 
 def test_project_defaults() -> None:
     project = Project(name="MyRack")
-    assert project.schema_version == SCHEMA_VERSION == 1
+    assert project.schema_version == SCHEMA_VERSION
     assert isinstance(project.seed, int)
     assert project.export.height == 1080
     assert project.export.fps == "match"

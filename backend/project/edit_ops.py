@@ -20,6 +20,7 @@ from backend.project.placement_commands import (
     AddPlacement,
     MovePlacement,
     RemovePlacement,
+    SetPlacementStretch,
 )
 
 
@@ -92,6 +93,13 @@ class RemovePlacementOp(_Op):
     placement_id: str
 
 
+class SetPlacementStretchOp(_Op):
+    op: Literal["set_placement_stretch"] = "set_placement_stretch"
+    placement_id: str
+    # 1.0 (as recorded) to 1.25 (25 percent faster); rounded to 3 decimals.
+    stretch: float
+
+
 EditOp = Annotated[
     AddClipOp
     | RemoveClipOp
@@ -102,7 +110,8 @@ EditOp = Annotated[
     | RippleDeleteOp
     | AddPlacementOp
     | MovePlacementOp
-    | RemovePlacementOp,
+    | RemovePlacementOp
+    | SetPlacementStretchOp,
     Field(discriminator="op"),
 ]
 
@@ -135,4 +144,6 @@ def build_command(op: EditOp) -> Command:
         return MovePlacement(op.placement_id, op.timeline_ms)
     if isinstance(op, RemovePlacementOp):
         return RemovePlacement(op.placement_id)
+    if isinstance(op, SetPlacementStretchOp):
+        return SetPlacementStretch(op.placement_id, op.stretch)
     raise CommandError(f"unsupported edit {op!r}")

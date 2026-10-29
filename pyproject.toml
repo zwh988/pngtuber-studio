@@ -5,6 +5,7 @@ requires-python = "==3.11.*"
 dependencies = [
     "chatterbox-tts>=0.1.7",
     "fastapi>=0.143.0",
+    "pedalboard>=0.9.26",
     "pydantic>=2.14.0",
     "pywebview>=6.2.1",
     "setuptools<81",

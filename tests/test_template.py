@@ -5,6 +5,7 @@ import pytest
 from pydantic import ValidationError
 
 from backend.project.schema import (
+    SCHEMA_VERSION,
     BookendRef,
     ChannelTemplate,
     Project,
@@ -149,7 +150,7 @@ def test_apply_without_bookends() -> None:
     project = apply_template(template, "  My Rack ", seed=123)
     assert project.name == "My Rack"
     assert project.seed == 123
-    assert project.schema_version == 1
+    assert project.schema_version == SCHEMA_VERSION
     assert project.sources == [] and project.clips == []
     assert len(project.voice_profiles) == 1
     assert project.voice_profiles[0].id != "000000000000"

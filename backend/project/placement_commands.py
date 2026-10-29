@@ -12,7 +12,15 @@ changes anything; ``revert`` restores the state from before ``apply``.
 
 from backend.edl.timemap import to_source
 from backend.project.commands import Command, CommandError
-from backend.project.schema import Anchor, Line, Placement, Project, new_id
+from backend.project.schema import (
+    STRETCH_MAX,
+    STRETCH_MIN,
+    Anchor,
+    Line,
+    Placement,
+    Project,
+    new_id,
+)
 
 
 def _find_line(project: Project, line_id: str) -> Line:
@@ -138,3 +146,38 @@ class MovePlacement(Command):
         _, placement = _find_placement(project, self.placement_id)
         placement.anchor = self._old_anchor.model_copy()
         placement.orphaned = self._old_orphaned
+
+
+class SetPlacementStretch(Command):
+    """Speed a placed line's audio up (Tighten). 1.0 is the take as recorded.
+
+    The value is rounded to 3 decimals so cache file names stay stable. Setting
+    the current value is refused, so no empty undo step is made.
+    """
+
+    def __init__(self, placement_id: str, stretch: float) -> None:
+        value = round(float(stretch), 3)
+        if not STRETCH_MIN <= value <= STRETCH_MAX:  # also false for NaN
+            raise CommandError(
+                f"stretch must be between {STRETCH_MIN} and {STRETCH_MAX}"
+            )
+        self.placement_id = placement_id
+        self.stretch = value
+        self._old: float | None = None
+
+    @property
+    def label(self) -> str:
+        return "Tighten placed line"
+
+    def apply(self, project: Project) -> None:
+        _, placement = _find_placement(project, self.placement_id)
+        if placement.stretch == self.stretch:
+            raise CommandError("the line already has that stretch")
+        self._old = placement.stretch
+        placement.stretch = self.stretch
+
+    def revert(self, project: Project) -> None:
+        if self._old is None:
+            raise CommandError("nothing to restore: command was not applied")
+        _, placement = _find_placement(project, self.placement_id)
+        placement.stretch = self._old

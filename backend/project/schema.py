@@ -1,4 +1,4 @@
-"""Pydantic v2 schema for ``project.json`` (schema version 1).
+"""Pydantic v2 schema for ``project.json`` (schema version 2).
 
 Conventions (see PROJECT_STATE.md decisions log):
 - All times are integer milliseconds. Anchor times are in *source* time.
@@ -24,7 +24,12 @@ from pydantic import (
     model_validator,
 )
 
-SCHEMA_VERSION = 1
+SCHEMA_VERSION = 2
+
+# Placement.stretch is a speed-up factor for a placed line (Tighten, M3-9):
+# 1.0 plays the take as it is, 1.25 plays it 25 percent faster (shorter).
+STRETCH_MIN = 1.0
+STRETCH_MAX = 1.25
 
 # --------------------------------------------------------------------------
 # Primitive types
@@ -184,6 +189,9 @@ class Placement(_Model):
     anchor: Anchor
     take_override_id: EntityId | None = None
     orphaned: bool = False
+    # Speed-up of the take's audio, pitch kept (schema v2). Duration on the
+    # timeline is take length / stretch.
+    stretch: float = Field(default=STRETCH_MIN, ge=STRETCH_MIN, le=STRETCH_MAX)
 
 
 class Keyframe(_Model):
