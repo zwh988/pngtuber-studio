@@ -1,0 +1,60 @@
+{
+  "presets": {
+    "Clean": {
+      "eq_bass_db": 0.0,
+      "eq_mid_db": 0.0,
+      "eq_treble_db": 0.0,
+      "compressor": {
+        "enabled": false,
+        "threshold_db": -18.0,
+        "ratio": 3.0,
+        "attack_ms": 10.0,
+        "release_ms": 100.0
+      },
+      "effects": [],
+      "loudness_target_lufs": -16.0
+    },
+    "Warm": {
+      "eq_bass_db": 3.0,
+      "eq_mid_db": -1.0,
+      "eq_treble_db": -2.0,
+      "compressor": {
+        "enabled": true,
+        "threshold_db": -20.0,
+        "ratio": 2.5,
+        "attack_ms": 15.0,
+        "release_ms": 120.0
+      },
+      "effects": [],
+      "loudness_target_lufs": -16.0
+    },
+    "Radio": {
+      "eq_bass_db": -8.0,
+      "eq_mid_db": 4.0,
+      "eq_treble_db": -2.0,
+      "compressor": {
+        "enabled": true,
+        "threshold_db": -24.0,
+        "ratio": 4.0,
+        "attack_ms": 5.0,
+        "release_ms": 80.0
+      },
+      "effects": [],
+      "loudness_target_lufs": -16.0
+    },
+    "Podcast": {
+      "eq_bass_db": 2.0,
+      "eq_mid_db": 1.0,
+      "eq_treble_db": 1.5,
+      "compressor": {
+        "enabled": true,
+        "threshold_db": -20.0,
+        "ratio": 3.5,
+        "attack_ms": 8.0,
+        "release_ms": 150.0
+      },
+      "effects": [],
+      "loudness_target_lufs": -16.0
+    }
+  }
+}
