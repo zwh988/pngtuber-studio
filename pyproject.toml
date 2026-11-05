@@ -7,6 +7,7 @@ dependencies = [
     "fastapi>=0.143.0",
     "pedalboard>=0.9.26",
     "pydantic>=2.14.0",
+    "pyloudnorm>=0.2.0",
     "pywebview>=6.2.1",
     "setuptools<81",
     "torch==2.6.0",

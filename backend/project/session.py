@@ -8,6 +8,7 @@ Pass ``recent_path`` to record opened projects; ``None`` records nothing.
 
 import re
 import threading
+import time
 from collections.abc import Callable, Sequence
 from datetime import UTC, datetime
 from pathlib import Path
@@ -15,6 +16,14 @@ from typing import Any
 
 import numpy as np
 
+from backend.audio.chainspec import FxChainError, processing_spec
+from backend.audio.cleanup import run_cleanup
+from backend.audio.fxpresets import load_fx_presets_file
+from backend.audio.fxstate import FxProcessing, FxState, build_fx_state
+from backend.audio.prefetch import Prefetcher, plan_jobs
+from backend.audio.processed import TrimCache, ensure_processed, trim_bounds_for
+from backend.audio.render import ProcessError
+from backend.audio.trim import TrimBounds
 from backend.edl.anchoring import check_references, check_voice_references
 from backend.project.clip_commands import AddClip
 from backend.project.commands import (
@@ -31,6 +40,7 @@ from backend.project.footage import (
     run_ffprobe,
     scan_footage,
 )
+from backend.project.fx_ops import FxEditOp, build_fx_command
 from backend.project.line_commands import NoChange
 from backend.project.line_ops import LineEditOp, build_line_command
 from backend.project.recent import (
@@ -41,7 +51,7 @@ from backend.project.recent import (
     save_recent,
 )
 from backend.project.relink import relink_mismatches, to_footage_relpath
-from backend.project.schema import Line, Project, Source, Take, new_id
+from backend.project.schema import FxChain, Line, Project, Source, Take, new_id
 from backend.project.store import (
     ProjectError,
     create_project,
@@ -74,7 +84,9 @@ from backend.voice.reference import (
     import_reference,
     read_audio_info,
 )
+from backend.voice.stretchrender import FX_DIR_NAME
 from backend.voice.takes import (
+    RAW_DIR,
     AddTakeResult,
     NewTake,
     StorageReport,
@@ -94,6 +106,9 @@ from backend.voice.takes import (
 from backend.voice.takestore import TakeStore
 
 Probe = Callable[[Path], dict[str, Any]]
+
+# Clean-up of takes_fx runs when the prefetcher is idle, but not more often.
+CLEANUP_EVERY_S = 30.0
 
 _BAD_CHARS = re.compile(r'[<>:"/\\|?*\x00-\x1f]')
 _RESERVED = {
@@ -133,6 +148,7 @@ class Session:
         recent_path: Path | None = None,
         audio_info: AudioInfoFn | None = None,
         presets: dict[str, EmotionPreset] | None = None,
+        fx_presets: dict[str, FxChain] | None = None,
     ) -> None:
         # Re-entrant: the stack's on_change callback runs while a command
         # method already holds the lock.
@@ -144,12 +160,18 @@ class Session:
             audio_info if audio_info is not None else read_audio_info
         )
         self._hashes = FileHashCache()
+        self._trims = TrimCache()
         # Loaded from templates/emotion_presets.json on first use when not given.
         self._presets: dict[str, EmotionPreset] | None = presets
+        # Loaded from templates/fx_presets.json on first use when not given.
+        self._fx_presets: dict[str, FxChain] | None = fx_presets
         self._folder: Path | None = None
         self._stack: CommandStack | None = None
         self._save_error: str | None = None
         self._scan_errors: list[str] = []
+        # Off until ``enable_prefetch``: a plain Session starts no thread.
+        self._prefetch: Prefetcher | None = None
+        self._last_cleanup = float("-inf")
 
     # ---- project lifecycle -------------------------------------------------
 
@@ -272,6 +294,53 @@ class Session:
             except (CommandError, ValueError) as exc:
                 raise SessionError(str(exc)) from exc
             return self._line_bank_state()
+
+    # ---- voice chain -------------------------------------------------------
+
+    def fx(self) -> FxState:
+        with self._lock:
+            return self._fx_state()
+
+    def edit_fx(self, ops: Sequence[FxEditOp], label: str | None = None) -> FxState:
+        """Apply voice chain edits (the chain, the game audio level). One op without
+        a label is a plain undo step; several ops (or a label) run as one group, so
+        they undo together and either all apply or none do. An op that would change
+        nothing is skipped and makes no undo step."""
+        if not ops:
+            raise SessionError("no edits given")
+        with self._lock:
+            _, stack = self._require_open()
+            try:
+                commands = [build_fx_command(op) for op in ops]
+                if len(commands) == 1 and label is None:
+                    self._execute_unless_no_change(stack, commands[0])
+                else:
+                    with stack.group(label or "Edit voice chain"):
+                        for command in commands:
+                            self._execute_unless_no_change(stack, command)
+            except (CommandError, ValueError) as exc:
+                raise SessionError(str(exc)) from exc
+            return self._fx_state()
+
+    def enable_prefetch(self, prefetcher: Prefetcher | None = None) -> None:
+        """Render the processed takes the placed lines play in the background, now
+        and after every change, and clean ``takes_fx`` when idle. The app calls this
+        once; tests leave it off, so a plain ``Session()`` starts no thread."""
+        with self._lock:
+            if self._prefetch is not None:
+                return
+            self._prefetch = (
+                prefetcher
+                if prefetcher is not None
+                else Prefetcher(self._trims, on_idle=self._cleanup_fx)
+            )
+            self._schedule_prefetch()
+
+    def shutdown_prefetch(self) -> None:
+        with self._lock:
+            prefetch, self._prefetch = self._prefetch, None
+        if prefetch is not None:
+            prefetch.close()
 
     # ---- takes -------------------------------------------------------------
 
@@ -440,6 +509,37 @@ class Session:
                 return TakeStore(self._folder).path(take.raw_file)
             except TakeError:
                 return None
+
+    def processed_take_path(self, take_id: str, stretch: float = 1.0) -> Path | None:
+        """Disk path of a take run through the open project's voice chain (trim,
+        stretch, EQ, compressor, effects, loudness), rendered first when it does not
+        exist yet (rule 3: one file per key, never rendered twice). None when no
+        project is open, the id is not one of its takes or its raw file is gone.
+
+        The render runs outside the session lock, so editing is never blocked by it.
+        """
+        with self._lock:
+            if self._folder is None or self._stack is None:
+                return None
+            project = self._stack.project
+            take = next((t for t in project.takes if t.id == take_id), None)
+            if take is None:
+                return None
+            try:
+                raw_path = TakeStore(self._folder).path(take.raw_file)
+            except TakeError:
+                return None
+            try:
+                spec = processing_spec(project.fx_chain)
+            except FxChainError as exc:
+                raise SessionError(f"the voice chain cannot be used: {exc}") from exc
+            raw_key = take.raw_key
+        if not raw_path.is_file():
+            return None
+        try:
+            return ensure_processed(raw_path, raw_key, stretch, spec, cache=self._trims)
+        except ProcessError as exc:
+            raise SessionError(str(exc)) from exc
 
     def storage(self) -> StorageReport:
         """Disk use per line and take, plus files no take points at."""
@@ -623,8 +723,35 @@ class Session:
             undo_label=stack.undo_label,
             redo_label=stack.redo_label,
             missing_source_ids=missing,
+            trim_bounds=self._placed_trim_bounds(folder, stack.project),
         )
         return state.model_copy(update={"save_error": self._save_error})
+
+    def _placed_trim_bounds(
+        self, folder: Path, project: Project
+    ) -> dict[str, TrimBounds]:
+        """Trim bounds of the takes that placements may play, for the timeline's
+        lengths. A take whose file cannot be read is left out: the timeline then
+        uses its recorded length. Cached in memory and in sidecars, so after the
+        first look this is a stat per take."""
+        active = {line.id: line.active_take_id for line in project.lines}
+        wanted: set[str] = set()
+        for placement in project.placements:
+            wanted.add(placement.take_override_id or "")
+            wanted.add(active.get(placement.line_id) or "")
+        wanted.discard("")
+        takes = {take.id: take for take in project.takes}
+        store = TakeStore(folder)
+        found: dict[str, TrimBounds] = {}
+        for take_id in sorted(wanted):
+            take = takes.get(take_id)
+            if take is None:
+                continue
+            try:
+                found[take_id] = trim_bounds_for(store.path(take.raw_file), self._trims)
+            except (ProcessError, TakeError):
+                continue
+        return found
 
     @staticmethod
     def _line_or_error(project: Project, line_id: str) -> Line:
@@ -700,6 +827,67 @@ class Session:
                 raise SessionError(str(exc)) from exc
         return self._presets
 
+    def _fx_presets_or_raise(self) -> dict[str, FxChain]:
+        if self._fx_presets is None:
+            try:
+                self._fx_presets = load_fx_presets_file()
+            except (ValueError, OSError) as exc:
+                raise SessionError(f"cannot load the voice presets: {exc}") from exc
+        return self._fx_presets
+
+    def _fx_state(self) -> FxState:
+        folder, stack = self._require_open()
+        state = build_fx_state(
+            stack.project,
+            self._fx_presets_or_raise(),
+            processing=self._fx_processing(folder, stack.project),
+            can_undo=stack.can_undo,
+            can_redo=stack.can_redo,
+            undo_label=stack.undo_label,
+            redo_label=stack.redo_label,
+        )
+        return state.model_copy(update={"save_error": self._save_error})
+
+    def _fx_processing(self, folder: Path, project: Project) -> FxProcessing:
+        """How many of the processed files the placed lines play already exist.
+        A take whose raw file is gone can never be rendered and is not counted."""
+        total = ready = 0
+        for job in plan_jobs(folder, project):
+            if not job.raw_path.is_file():
+                continue
+            total += 1
+            if job.dest.is_file():
+                ready += 1
+        error = self._prefetch.error() if self._prefetch is not None else None
+        return FxProcessing(total=total, ready=ready, error=error)
+
+    def _schedule_prefetch(self) -> None:
+        if self._prefetch is None:
+            return
+        if self._folder is None or self._stack is None:
+            self._prefetch.request([])  # nothing to render yet; this warms the worker
+            return
+        self._prefetch.request(plan_jobs(self._folder, self._stack.project))
+
+    def _cleanup_fx(self) -> None:
+        """Delete processed files nothing wants any more (``run_cleanup`` keeps the
+        ones used in the last ten minutes, so undo stays quick). Runs on the
+        prefetch thread, at most every ``CLEANUP_EVERY_S`` seconds."""
+        now = time.monotonic()
+        with self._lock:
+            if self._folder is None or self._stack is None:
+                return
+            if now - self._last_cleanup < CLEANUP_EVERY_S:
+                return
+            folder, project = self._folder, self._stack.project
+            try:
+                processing_spec(project.fx_chain)
+            except FxChainError:
+                return  # an unusable chain wants nothing: delete nothing
+            self._last_cleanup = now
+            wanted = {job.dest.name for job in plan_jobs(folder, project)}
+        run_cleanup(folder / "media" / FX_DIR_NAME, folder / RAW_DIR, wanted)
+
     def _line_bank_state(self) -> LineBankState:
         _, stack = self._require_open()
         state = build_line_bank(
@@ -757,6 +945,7 @@ class Session:
             self._scan_errors = [str(exc)]
         # Footage found on open is not an edit the user should be able to undo.
         self._stack.clear()
+        self._schedule_prefetch()
         return self._summary()
 
     def _on_change(self, *_args: object) -> None:
@@ -769,6 +958,7 @@ class Session:
             self._save_error = str(exc)
         else:
             self._save_error = None
+        self._schedule_prefetch()
 
     def _scan(self, folder: Path, stack: CommandStack) -> int:
         result = scan_footage(folder, list(stack.project.sources), probe=self._probe)

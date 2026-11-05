@@ -19,7 +19,7 @@ The user works in a plain chat. You cannot see the repository, run code, install
 1. Read `PROJECT_STATE.md` (always). It says what exists and where it lives.
 2. Read the task you were given (`docs/tasks/<task>.md`) or the matching milestone in `IMPLEMENTATION_PLAN.md`.
 3. Read only the `docs/DESIGN_SPEC.md` sections the task references. If the spec was not pasted, ask for those sections by number.
-4. Work only from the source files the user pasted. If you need another, ask for it by exact path, and for just the function or section when possible.
+4. Work only from the source files the user pasted. If you need more code, give the user a PowerShell command that prints just the part you need (see "Asking to see code"); do not ask for whole files to read.
 
 ## Efficiency rules
 
@@ -30,6 +30,18 @@ The user works in a plain chat. You cannot see the repository, run code, install
 - For changes touching more than two files, state a plan in 5 lines or fewer, then implement.
 - Keep replies short: what changed, how to verify, what is next.
 - If a design-changing ambiguity blocks you, ask one specific question. Otherwise state your assumption in one line and proceed.
+
+## Asking to see code
+
+The user pastes text into the chat, so ask for the smallest slice that answers your question, as a ready-to-run PowerShell command (from the repo root). Pick the narrowest form:
+
+- A function or class: `Select-String -Path backend\x.py -Pattern 'def name' -Context 0,30`
+- A line range: `Get-Content backend\x.py | Select-Object -Skip 119 -First 60` (skip = first line wanted minus 1)
+- Imports and signatures only: `Select-String -Path backend\x.py -Pattern '^\s*(import|from|class|def) '`
+- Where a name is used: `Get-ChildItem backend,tests -Recurse -Filter *.py | Select-String -Pattern 'name'`
+- Whole file: `Get-Content backend\x.py -Raw`
+
+Ask for a **whole** file only when you will ship it whole (a zip contains complete files, see below), and then say so. For code you only need to read, never ask for the whole file. If the user attached files to the chat, read the part you need from the attachment instead of asking for a paste.
 
 ## Delivering changes
 

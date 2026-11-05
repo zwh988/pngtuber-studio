@@ -6,13 +6,16 @@ orphan count and undo/redo status. No file or network access: whether a source
 file is missing on disk is passed in by the caller.
 """
 
-from collections.abc import Collection, Sequence
+from collections.abc import Collection, Mapping, Sequence
 
 from pydantic import BaseModel, Field
 
+from backend.audio.chainspec import FxChainError, processing_spec
+from backend.audio.trim import TrimBounds, processed_duration_ms, trimmed_duration_ms
 from backend.edl.anchoring import check_references, find_orphans
 from backend.edl.timemap import ClipSpan, clip_spans, timeline_duration, to_timeline
-from backend.project.schema import Project
+from backend.project.schema import Project, Take
+from backend.voice.keys import fx_version as chain_version
 from backend.voice.overflow import PlacedLine, available_slack_ms, find_overflows
 from backend.voice.stretch import fit_stretch, stretched_duration_ms
 
@@ -79,8 +82,10 @@ class TimelinePlacement(BaseModel):
     # How far earlier this line could start before it touches the previous playing
     # line (or the timeline start). Only filled in when ``overflow_ms`` is above 0.
     slack_ms: int = 0
-    # Tighten (schema v2). ``duration_ms`` above is the length that PLAYS (the take's
-    # length divided by ``stretch``); ``raw_duration_ms`` is the take as recorded.
+    # Tighten (schema v2). ``duration_ms`` above is the length that PLAYS (the trimmed
+    # take divided by ``stretch``); ``raw_duration_ms`` is the take after silence
+    # trimming and before the stretch (M4). Without trim information (the file cannot
+    # be read) both fall back to the take as recorded.
     stretch: float = 1.0
     raw_duration_ms: int | None = None
     # The stretch that would remove this line's overflow exactly; None when it does
@@ -103,6 +108,11 @@ class TimelineState(BaseModel):
     redo_label: str | None = None
     # Set by the session when the last automatic save failed.
     save_error: str | None = None
+    # Voice chain (M4). ``fx_version`` is a short hash of the processing spec: it
+    # changes exactly when the processed audio changes ("invalid" when the chain
+    # cannot be used), so the browser drops decoded audio then and not before.
+    fx_version: str = ""
+    game_audio_db: float = 0.0
 
 
 class EditResult(BaseModel):
@@ -121,7 +131,10 @@ def build_timeline(
     undo_label: str | None = None,
     redo_label: str | None = None,
     missing_source_ids: Collection[str] = (),
+    trim_bounds: Mapping[str, TrimBounds] | None = None,
 ) -> TimelineState:
+    """``trim_bounds`` maps a take id to its speech bounds (M4). A placed take with
+    bounds plays for its trimmed, stretched length; one without keeps the M3 length."""
     missing = set(missing_source_ids)
     sources = {
         source.id: TimelineSource(
@@ -161,7 +174,7 @@ def build_timeline(
         )
     return TimelineState(
         clips=clips,
-        placements=_build_placements(project, spans),
+        placements=_build_placements(project, spans, trim_bounds or {}),
         duration_ms=timeline_duration(project.clips),
         other_track_clips=sum(1 for clip in project.clips if clip.track != 0),
         orphan_count=len(find_orphans(project)),
@@ -178,11 +191,39 @@ def build_timeline(
         can_redo=can_redo,
         undo_label=undo_label,
         redo_label=redo_label,
+        fx_version=_chain_version(project),
+        game_audio_db=project.game_audio_db,
     )
 
 
+def _chain_version(project: Project) -> str:
+    try:
+        return chain_version(processing_spec(project.fx_chain))
+    except FxChainError:
+        return "invalid"
+
+
+def _playing_lengths(
+    take: Take | None, stretch: float, trim_bounds: Mapping[str, TrimBounds]
+) -> tuple[int | None, int | None]:
+    """(trimmed length, length that plays) of a placed take, in ms.
+
+    With bounds both come from the sample counts of the processed audio, the same
+    arithmetic the renderer uses, so blocks and audio always agree. Without bounds
+    the whole recorded take is used, as in M3.
+    """
+    if take is None:
+        return None, None
+    bounds = trim_bounds.get(take.id)
+    if bounds is None:
+        return take.duration_ms, stretched_duration_ms(take.duration_ms, stretch)
+    return trimmed_duration_ms(bounds), processed_duration_ms(bounds, stretch)
+
+
 def _build_placements(
-    project: Project, spans: Sequence[ClipSpan]
+    project: Project,
+    spans: Sequence[ClipSpan],
+    trim_bounds: Mapping[str, TrimBounds],
 ) -> list[TimelinePlacement]:
     lines = {line.id: line for line in project.lines}
     takes = {take.id: take for take in project.takes}
@@ -195,11 +236,8 @@ def _build_placements(
         if take is None and line is not None and line.active_take_id is not None:
             take = takes.get(line.active_take_id)
         start = to_timeline(project.clips, placement.anchor, spans=spans)
-        raw_duration = None if take is None else take.duration_ms
-        duration = (
-            None
-            if raw_duration is None
-            else stretched_duration_ms(raw_duration, placement.stretch)
+        raw_duration, duration = _playing_lengths(
+            take, placement.stretch, trim_bounds
         )
         end = None if start is None or duration is None else start + duration
         shown.append(

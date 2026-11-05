@@ -65,6 +65,8 @@ def _free_port() -> int:
 def main() -> None:
     port = _free_port()
     session = Session(recent_path=default_recent_path())
+    # Renders the processed takes in the background (CPU only) after every change.
+    session.enable_prefetch()
     jobs = JobQueue(
         session,
         SubprocessWorker(log_path=default_worker_log_path()),
@@ -97,6 +99,7 @@ def main() -> None:
 
     server.should_exit = True
     jobs.close()  # cancels a running job and stops the GPU worker
+    session.shutdown_prefetch()
     thread.join(timeout=5.0)
 
 

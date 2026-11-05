@@ -8,6 +8,7 @@ from fastapi.responses import HTMLResponse, Response
 from fastapi.staticfiles import StaticFiles
 from pydantic import BaseModel
 
+from backend.audio.fxstate import FxState
 from backend.media.serve import range_response
 from backend.project.edit_ops import (
     AddPlacementOp,
@@ -24,6 +25,7 @@ from backend.project.edit_ops import (
     TrimClipOp,
 )
 from backend.project.footage import FootageError
+from backend.project.fx_ops import FxEditBatch
 from backend.project.line_ops import LineEditBatch
 from backend.project.recent import RecentItem
 from backend.project.schema import SCHEMA_VERSION
@@ -208,6 +210,20 @@ def create_app(
         except _API_ERRORS as exc:
             raise HTTPException(status_code=400, detail=str(exc)) from exc
 
+    @app.get("/api/fx")
+    def get_fx() -> FxState:
+        try:
+            return active.fx()
+        except _API_ERRORS as exc:
+            raise HTTPException(status_code=400, detail=str(exc)) from exc
+
+    @app.post("/api/fx/edit")
+    def edit_fx(batch: FxEditBatch) -> FxState:
+        try:
+            return active.edit_fx(batch.ops, batch.label)
+        except _API_ERRORS as exc:
+            raise HTTPException(status_code=400, detail=str(exc)) from exc
+
     @app.get("/api/lines")
     def get_lines() -> LineBankState:
         try:
@@ -304,10 +320,25 @@ def create_app(
 
     @app.get("/media/take/{take_id}")
     def get_take_media(
-        take_id: str, request: Request, stretch: float = 1.0
+        take_id: str,
+        request: Request,
+        stretch: float = 1.0,
+        processed: bool = False,
     ) -> Response:
         # The file comes from the open project's take list, never from the URL.
-        # ``stretch`` only picks a number; a stretched copy is rendered once and kept.
+        # ``stretch`` only picks a number. With ``processed=1`` the take is served
+        # through the voice chain (trim, stretch, EQ, ..., loudness), rendered once
+        # per key and kept. Clients add ``&v=<fx_version>`` so a chain change never
+        # hits a cached copy; the server ignores it. Without ``processed`` the old
+        # stretch-only copy (M3) is served, and ``stretch=1`` is the raw take.
+        if processed:
+            try:
+                ready = active.processed_take_path(take_id, stretch)
+            except _API_ERRORS as exc:
+                raise HTTPException(status_code=400, detail=str(exc)) from exc
+            if ready is None or not ready.is_file():
+                raise HTTPException(status_code=404, detail="take file not found")
+            return range_response(ready, request.headers.get("range"))
         path = active.take_path(take_id)
         if path is None or not path.is_file():
             raise HTTPException(status_code=404, detail="take file not found")
