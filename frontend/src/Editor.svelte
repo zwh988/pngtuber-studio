@@ -34,6 +34,7 @@
   import { clock } from "./format";
   import LineBank from "./LineBank.svelte";
   import StorageList from "./StorageList.svelte";
+  import VoiceFx from "./VoiceFx.svelte";
   import Player from "./Player.svelte";
   import Timeline from "./Timeline.svelte";
   import { STRETCH_MAX, STRETCH_MIN, STRETCH_WARN, stretchText, tightenTarget } from "./stretch";
@@ -68,7 +69,7 @@
   let voiceArmed = false;
   let voiceArmedMs = 0;
   /** Which tab of the footage / line bank panel is showing. */
-  let tab = $state<"footage" | "lines" | "storage">("footage");
+  let tab = $state<"footage" | "lines" | "storage" | "fx">("footage");
   /** Bumped after an undo or redo so the line bank reloads. */
   let lineReload = $state(0);
   let lineBank = $state<ReturnType<typeof LineBank> | null>(null);
@@ -697,6 +698,15 @@
             >
               Storage
             </button>
+            <button
+              type="button"
+              role="tab"
+              aria-selected={tab === "fx"}
+              class:on={tab === "fx"}
+              onclick={() => (tab = "fx")}
+            >
+              Voice FX
+            </button>
           </div>
           <div class="pane">
             <div hidden={tab !== "footage"}>
@@ -731,6 +741,15 @@
             </div>
             <div hidden={tab !== "storage"}>
               <StorageList report={storage} onchanged={takesDeleted} />
+            </div>
+            <div hidden={tab !== "fx"}>
+              <VoiceFx
+                active={tab === "fx"}
+                reloadToken={lineReload}
+                placements={timeline?.placements ?? []}
+                {selectedPlacementId}
+                onedited={() => void syncHistory()}
+              />
             </div>
           </div>
         </div>
@@ -1139,10 +1158,12 @@
     gap: 0.25rem;
     padding: 0.35rem 0.5rem 0;
     border-bottom: 1px solid var(--line);
+    overflow-x: auto;
   }
   .tabs button {
     margin: 0 0 -1px;
-    padding: 0.35rem 0.9rem;
+    padding: 0.35rem 0.7rem;
+    white-space: nowrap;
     border: 1px solid transparent;
     border-bottom: none;
     border-radius: 6px 6px 0 0;
