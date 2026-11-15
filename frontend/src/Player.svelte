@@ -1,6 +1,7 @@
 <script lang="ts">
   import { onDestroy, untrack } from "svelte";
   import { sourceMediaUrl, type TimelineClip } from "./api";
+  import type { AudioGraph } from "./audioGraph";
   import { clock } from "./format";
   import { clipIndexAt, toSource } from "./timeline";
 
@@ -9,12 +10,15 @@
     durationMs,
     playheadMs = $bindable(0),
     playing = $bindable(false),
+    graph = null,
   }: {
     clips: TimelineClip[];
     durationMs: number;
     playheadMs?: number;
     /** True while the video is playing; the editor reads it to start and stop the voice. */
     playing?: boolean;
+    /** The shared audio graph: the video's sound goes through its game bus (mix, limiter, meter). */
+    graph?: AudioGraph | null;
   } = $props();
 
   let video = $state<HTMLVideoElement | null>(null);
@@ -133,11 +137,30 @@
     setPlayhead(clip.start_ms + (ms - clip.in_ms) / clip.speed);
   }
 
+  /**
+   * Send the video's sound through the shared audio graph (game bus, limiter, meter) and make
+   * sure the audio context runs. Done on the first play, from the user's click. If the browser
+   * refuses, the video keeps playing straight to the speakers, without the mix.
+   */
+  function routeAudio(): void {
+    if (graph === null || video === null) {
+      return;
+    }
+    try {
+      graph.attachVideo(video);
+      graph.resume();
+    } catch (err) {
+      const reason = err instanceof Error ? err.message : String(err);
+      error = `The footage sound could not be routed through the mixer (${reason}).`;
+    }
+  }
+
   function play(): void {
     if (clips.length === 0) {
       return;
     }
     error = null;
+    routeAudio();
     const t = playheadMs >= durationMs - 1 ? 0 : Math.max(0, playheadMs);
     const i = clipIndexAt(clips, t);
     const clip = clips[i];

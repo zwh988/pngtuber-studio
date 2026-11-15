@@ -167,6 +167,10 @@ export type TimelineState = {
   undo_label: string | null;
   redo_label: string | null;
   save_error: string | null;
+  /** Short hash of the voice chain ("invalid" when it cannot be used). A change means decoded voice audio is stale. */
+  fx_version: string;
+  /** Level of the footage's own sound in the preview mix, in dB (set in the Voice FX tab). */
+  game_audio_db: number;
 };
 
 export type EditResult = {
@@ -542,4 +546,16 @@ export function deleteLine(lineId: string): Promise<TakeDeleteReport> {
 export function takeMediaUrl(takeId: string, stretch = 1): string {
   const base = `/media/take/${encodeURIComponent(takeId)}`;
   return stretch === 1 ? base : `${base}?stretch=${stretch}`;
+}
+
+/**
+ * Processed audio of a take (the voice chain applied, with the placement's stretch): what the
+ * editor plays and export writes. `fxVersion` is `TimelineState.fx_version`; it only makes the
+ * URL change with the chain (the backend uses the open project's chain, never one from the URL).
+ */
+export function processedTakeUrl(takeId: string, stretch: number, fxVersion: string): string {
+  return (
+    `/media/take/${encodeURIComponent(takeId)}?processed=1` +
+    `&stretch=${stretch}&v=${encodeURIComponent(fxVersion)}`
+  );
 }

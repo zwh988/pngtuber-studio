@@ -32,9 +32,11 @@
     type TimelineState,
   } from "./api";
   import { clock } from "./format";
+  import { lufsText } from "./loudness";
   import LineBank from "./LineBank.svelte";
   import StorageList from "./StorageList.svelte";
   import VoiceFx from "./VoiceFx.svelte";
+  import { AudioGraph } from "./audioGraph";
   import Player from "./Player.svelte";
   import Timeline from "./Timeline.svelte";
   import { STRETCH_MAX, STRETCH_MIN, STRETCH_WARN, stretchText, tightenTarget } from "./stretch";
@@ -61,10 +63,14 @@
   let player = $state<ReturnType<typeof Player> | null>(null);
   /** True while the player plays (bound from `Player`). */
   let playing = $state(false);
-  /** Plays the placed takes in time with the video (Web Audio). */
+  /** The shared Web Audio graph: game bus (the video), voice bus, master limiter, loudness meter. */
+  const graph = new AudioGraph();
+  /** Plays the processed placed takes in time with the video, on the graph's voice bus. */
   const voice = new VoicePlayback((text) => {
     error = text;
-  });
+  }, graph);
+  /** Momentary loudness of the master bus, as status bar text. */
+  let meterText = $state("silent");
   /** Playback began but the playhead has not moved yet; the voice starts on the first real advance. */
   let voiceArmed = false;
   let voiceArmedMs = 0;
@@ -185,6 +191,11 @@
         // Line edits and finished jobs change what a placement plays (active take, length,
         // allow overlap), so refresh the placements too.
         timeline.placements = state.placements;
+        // Voice FX edits change the chain version and the game level: refresh both so the voice
+        // drops its decoded audio and the game bus follows (undo and redo replace the whole
+        // timeline, which carries them too).
+        timeline.fx_version = state.fx_version;
+        timeline.game_audio_db = state.game_audio_db;
       }
     } catch (err) {
       error = message(err);
@@ -257,12 +268,34 @@
   onDestroy(() => {
     window.clearTimeout(pollTimer);
     voice.dispose();
+    graph.dispose();
   });
 
   /** Keep the voice engine's placement list current (it loads new takes and re-plans while playing). */
   $effect(() => {
     const list = timeline?.placements ?? [];
     untrack(() => voice.setPlacements(list));
+  });
+
+  /** A voice chain change (or undo of one) drops the decoded voice audio and loads the new files. */
+  $effect(() => {
+    const version = timeline?.fx_version ?? "";
+    untrack(() => voice.setFxVersion(version));
+  });
+
+  /** The footage level of the mix. */
+  $effect(() => {
+    const db = timeline?.game_audio_db ?? 0;
+    untrack(() => graph.setGameDb(db));
+  });
+
+  /** Read the loudness meter ten times a second. */
+  $effect(() => {
+    const timer = window.setInterval(() => {
+      const lufs = graph.momentaryLufs();
+      meterText = lufs === null ? "silent" : lufsText(lufs);
+    }, 100);
+    return () => window.clearInterval(timer);
   });
 
   /**
@@ -649,6 +682,7 @@
               durationMs={timeline.duration_ms}
               bind:playheadMs
               bind:playing
+              {graph}
             />
           {:else}
             <p class="hint">The timeline is empty. Add a recording from the Footage tab.</p>
@@ -948,6 +982,12 @@
           <span class="missing">{storage.missing_file_count} take file(s) missing</span>
         {/if}
       {/if}
+      <span
+        class="meter"
+        title="Momentary loudness (400 ms, K-weighted) of the preview mix. An approximation; the export is measured with pyloudnorm."
+      >
+        Mix loudness: {meterText}
+      </span>
     </footer>
   {/if}
 </div>
@@ -1151,6 +1191,10 @@
     background: var(--panel);
     font-size: 0.85rem;
     color: var(--muted);
+  }
+  .meter {
+    margin-left: auto;
+    font-variant-numeric: tabular-nums;
   }
   .tabs {
     flex: none;
