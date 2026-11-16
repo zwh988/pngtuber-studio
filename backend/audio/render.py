@@ -164,6 +164,37 @@ def render_processed(
     )
 
 
+def render_aligned_raw(
+    raw_path: Path,
+    spec: Mapping[str, Any],
+    stretch: float,
+    bounds: TrimBounds,
+) -> tuple[np.ndarray, int]:
+    """The raw take cut, faded and stretched exactly like its processed take, but with
+    no stages, no loudness gain and no limiter (M6-2 ``voice_raw.wav``). Same length
+    as the processed take, so the raw and processed voice tracks line up. In memory."""
+    if not STRETCH_MIN <= stretch <= STRETCH_MAX:  # also false for NaN
+        raise ProcessError(f"stretch must be between {STRETCH_MIN} and {STRETCH_MAX}")
+    mono, rate = read_mono(raw_path)
+    if bounds.total != mono.size or bounds.sample_rate != rate:
+        raise ProcessError("the trim bounds do not match the take file")
+    kept = mono[bounds.start : bounds.end]
+    if kept.size == 0:
+        raise ProcessError("the take has no audio")
+    try:
+        cut_start, cut_end = manual_cuts_from_spec(spec)
+        fade_in, fade_out = edge_fades(bounds, cut_start, cut_end)
+    except ValueError as exc:
+        raise ProcessError(f"the manual trim cannot be used: {exc}") from exc
+    expected = processed_samples(int(kept.size), stretch)
+    samples = np.array(kept, dtype=np.float32)
+    if fade_in or fade_out:
+        samples = apply_edge_fades(samples, fade_in, fade_out).astype(np.float32)
+    if stretch > 1.0:
+        samples = _time_stretch(_pedalboard(), samples, rate, stretch, expected)
+    return _fit(np.asarray(samples, dtype=np.float32), expected), rate
+
+
 # --- steps ----------------------------------------------------------------------
 
 

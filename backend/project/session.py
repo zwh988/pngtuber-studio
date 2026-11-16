@@ -27,7 +27,7 @@ from backend.audio.processed import (
     measure_bounds,
     trim_bounds_for,
 )
-from backend.audio.render import ProcessError
+from backend.audio.render import ProcessError, render_aligned_raw
 from backend.audio.trim import (
     ManualTrimError,
     TrimBounds,
@@ -56,6 +56,7 @@ from backend.avatar.track import (
     sprite_path_for_key,
 )
 from backend.edl.anchoring import check_references, check_voice_references
+from backend.export.preflight import PreflightReport, preflight
 from backend.project.avatar_commands import SetAvatarArtFolder
 from backend.project.clip_commands import AddClip
 from backend.project.commands import (
@@ -626,6 +627,66 @@ class Session:
             return ensure_processed(raw_path, raw_key, stretch, spec, cache=self._trims)
         except ProcessError as exc:
             raise SessionError(str(exc)) from exc
+
+    def aligned_raw_take(self, take_id: str, stretch: float = 1.0) -> tuple[np.ndarray, int] | None:
+        """A raw take cut, faded and stretched like its processed take, without the
+        voice chain (M6-2 ``voice_raw.wav``). None when no project is open, the id is
+        not one of its takes or its raw file is gone. Outside the lock, like renders."""
+        with self._lock:
+            if self._folder is None or self._stack is None:
+                return None
+            project = self._stack.project
+            take = next((t for t in project.takes if t.id == take_id), None)
+            if take is None:
+                return None
+            try:
+                raw_path = TakeStore(self._folder).path(take.raw_file)
+            except TakeError:
+                return None
+            try:
+                spec = processing_spec(project.fx_chain)
+            except FxChainError as exc:
+                raise SessionError(f"the voice chain cannot be used: {exc}") from exc
+            spec = spec_with_manual_trim(spec, take.trim_start_ms, take.trim_end_ms)
+            cuts = (take.trim_start_ms, take.trim_end_ms)
+        if not raw_path.is_file():
+            return None
+        try:
+            bounds = trim_bounds_for(
+                raw_path, self._trims, manual_start_ms=cuts[0], manual_end_ms=cuts[1]
+            )
+            return render_aligned_raw(raw_path, spec, stretch, bounds)
+        except ProcessError as exc:
+            raise SessionError(str(exc)) from exc
+
+    def export_preflight(self, tools_problem: str | None = None) -> PreflightReport:
+        """What blocks or needs confirming before an export (M6-1). ``tools_problem``
+        is the ffmpeg / NVENC check, run by the caller (it starts a process)."""
+        with self._lock:
+            folder, stack = self._require_open()
+            project = stack.project
+            timeline = self._timeline_state()
+            store = TakeStore(folder)
+            placed = {p.take_id for p in timeline.placements if p.take_id is not None}
+            missing: set[str] = set()
+            for take in project.takes:
+                if take.id not in placed:
+                    continue
+                try:
+                    if not store.path(take.raw_file).is_file():
+                        missing.add(take.id)
+                except TakeError:
+                    missing.add(take.id)
+            art = self._avatar_state(folder, stack)
+        return preflight(
+            project,
+            timeline,
+            missing_take_ids=missing,
+            art_status=art.status,
+            art_problem=art.problem,
+            art_warnings=art.warnings,
+            tools_problem=tools_problem,
+        )
 
     def envelope(self, take_id: str, stretch: float = 1.0) -> EnvelopeReport | None:
         """Loudness envelope (M5-2) of a take as it plays: the processed file for this

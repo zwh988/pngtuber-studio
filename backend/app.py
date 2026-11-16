@@ -1,6 +1,6 @@
 """FastAPI application: JSON API under ``/api`` plus the built frontend (M1-6)."""
 
-from collections.abc import Sequence
+from collections.abc import Callable, Sequence
 from pathlib import Path
 
 from fastapi import FastAPI, HTTPException, Request
@@ -12,6 +12,8 @@ from backend.audio.fxstate import FxState
 from backend.avatar.envelope import EnvelopeReport
 from backend.avatar.scan import AvatarState
 from backend.avatar.track import FrameTrack
+from backend.export.preflight import PreflightReport
+from backend.export.tools import encoder_problem
 from backend.media.serve import range_response
 from backend.project.edit_ops import (
     AddPlacementOp,
@@ -112,6 +114,7 @@ def create_app(
     static_dir: Path | None = None,
     session: Session | None = None,
     jobs: JobQueue | None = None,
+    export_tools: Callable[[], str | None] | None = None,
 ) -> FastAPI:
     """``jobs`` is the voice generation queue. By default one is built around the
     real GPU worker; nothing starts until the first job is submitted. The caller
@@ -214,6 +217,16 @@ def create_app(
     def set_voice_reference(request: VoiceReferenceRequest) -> VoiceState:
         try:
             return active.set_voice_reference(request.path)
+        except _API_ERRORS as exc:
+            raise HTTPException(status_code=400, detail=str(exc)) from exc
+
+    check_tools = export_tools if export_tools is not None else encoder_problem
+
+    @app.get("/api/export/preflight")
+    def get_export_preflight() -> PreflightReport:
+        # M6-1: what blocks or needs confirming before an export (probes ffmpeg once).
+        try:
+            return active.export_preflight(tools_problem=check_tools())
         except _API_ERRORS as exc:
             raise HTTPException(status_code=400, detail=str(exc)) from exc
 
