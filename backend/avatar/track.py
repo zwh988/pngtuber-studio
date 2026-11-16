@@ -106,6 +106,7 @@ def build_input(
         default_expression=None if art is None else art.default_expression,
         voices=voices,
         reactions=reactions,
+        hidden=[(c.start_ms, c.end_ms) for c in timeline.clips if not c.overlay],
     )
 
 
@@ -123,6 +124,7 @@ def input_version(inp: SolverInput, art: AvatarArt | None) -> str:
     feed({lane: [asdict(k) for k in keys] for lane, keys in sorted(inp.lanes.items())})
     feed([asdict(k) for k in inp.expression_keys])
     feed([asdict(r) for r in inp.reactions])
+    feed([list(span) for span in inp.hidden])
     for voice in inp.voices:
         feed([voice.start_ms, voice.envelope.hop_ms])
         sha.update(json.dumps(voice.envelope.values).encode())
@@ -166,6 +168,19 @@ def frame_time(k: int, fps: int = TRACK_FPS) -> float:
     return k * 1000.0 / fps
 
 
+FRAME_EPSILON = 1e-6  # same as avatarTrack.ts: 100 ms at 30 fps is frame 3, not 2.9999
+
+
+def track_frame_at(ms: float, frame_count: int, fps: int = TRACK_FPS) -> int:
+    """The track frame shown at a timeline time: the last one that started (floor),
+    clamped to the track. Same rule as ``frameIndex`` in ``avatarTrack.ts`` (M6
+    decision 2), used by the export for every output frame."""
+    if frame_count <= 0:
+        return 0
+    k = math.floor(ms * fps / 1000 + FRAME_EPSILON)
+    return min(max(k, 0), frame_count - 1)
+
+
 def build_frame_track(
     solver: Solver, art: AvatarArt | None, version: str, *, fps: int = TRACK_FPS
 ) -> FrameTrack:
@@ -192,7 +207,7 @@ def build_frame_track(
     for k in range(count):
         frame = solver.query(frame_time(k, fps))
         current = -1
-        if art is not None:
+        if art is not None and frame.visible:
             path = sprite_for(art, frame.expression, (frame.eyes_open, frame.mouth_open))
             if path is not None:
                 key = keys_by_path[path]

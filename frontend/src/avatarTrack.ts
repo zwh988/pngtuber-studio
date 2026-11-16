@@ -10,6 +10,9 @@ import type { FrameTrack } from "./api";
 /** The output frame's shape (1080p export). The preview letterboxes the video to it. */
 export const FRAME_ASPECT = 16 / 9;
 
+/** Added before flooring a frame position, so 100 ms at 30 fps is frame 3, not 2.9999. */
+export const FRAME_EPSILON = 1e-6;
+
 export interface Pose {
   sprite: string | null;
   x: number;
@@ -37,12 +40,17 @@ export interface Layout {
   sy: number;
 }
 
-/** Nearest sampled frame for a timeline time, clamped to the track. */
+/**
+ * The sampled frame shown at a timeline time: the last one that started (floor), clamped to
+ * the track. The export uses the same rule (M6 decision 2: how ffmpeg holds a slower overlay
+ * and how an editor shows a 30 fps PNG sequence). The tiny epsilon absorbs float error at an
+ * exact frame time. Same as `track_frame_at` in `backend/avatar/track.py`.
+ */
 export function frameIndex(track: FrameTrack, ms: number): number {
   if (track.frame_count <= 0) {
     return 0;
   }
-  const k = Math.round((ms * track.fps) / 1000);
+  const k = Math.floor((ms * track.fps) / 1000 + FRAME_EPSILON);
   return Math.min(Math.max(k, 0), track.frame_count - 1);
 }
 

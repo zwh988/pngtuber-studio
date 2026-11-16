@@ -76,6 +76,8 @@ class SolverInput:
     default_expression: str | None = None
     voices: Sequence[PlacedVoice] = ()
     reactions: Sequence[ReactionCue] = ()
+    # Timeline spans [start, end) in ms where no avatar is drawn (clips with overlay off).
+    hidden: Sequence[tuple[int, int]] = ()
 
 
 @dataclass(frozen=True)
@@ -89,6 +91,7 @@ class Frame:
     scale: float
     rotation_deg: float
     squash: float  # width times (1 + squash), height times (1 - squash)
+    visible: bool = True  # false over a clip with overlay off (M6)
 
 
 # --- reactions: a registry, like clip effects (rule 13) --------------------------------
@@ -310,6 +313,7 @@ class Solver:
             scale=max(0.0, lanes["scale"].value_at(t) * react.scale_mul),
             rotation_deg=lanes["rotation"].value_at(t) + react.rotation_deg,
             squash=react.squash,
+            visible=not any(start <= t < end for start, end in self.input.hidden),
         )
 
     @property

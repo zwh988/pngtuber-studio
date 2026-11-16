@@ -1,5 +1,6 @@
 import { describe, expect, it } from "vitest";
 import type { FrameTrack } from "./api";
+import fixture from "./avatarLayout.fixture.json";
 import { frameIndex, frameRect, hitTest, layout, poseAt, resizeFactor, spriteAt, toLocal } from "./avatarTrack";
 
 function track(): FrameTrack {
@@ -25,11 +26,14 @@ function track(): FrameTrack {
 }
 
 describe("frameIndex / spriteAt / poseAt", () => {
-  it("rounds to the nearest frame and clamps", () => {
+  it("shows the frame that started last and clamps", () => {
     const t = track();
     expect(frameIndex(t, 0)).toBe(0);
+    expect(frameIndex(t, 33)).toBe(0);
     expect(frameIndex(t, 49)).toBe(1);
-    expect(frameIndex(t, 51)).toBe(2);
+    expect(frameIndex(t, 51)).toBe(1);
+    expect(frameIndex(t, 100)).toBe(3); // exactly on a frame
+    expect(frameIndex(t, 1000 / 30)).toBe(1);
     expect(frameIndex(t, -10)).toBe(0);
     expect(frameIndex(t, 99_999)).toBe(30);
   });
@@ -49,6 +53,17 @@ describe("frameRect", () => {
     expect(frameRect(1600, 1200)).toEqual({ left: 0, top: 150, width: 1600, height: 900 });
     expect(frameRect(2000, 900)).toEqual({ left: 200, top: 0, width: 1600, height: 900 });
   });
+});
+
+describe("layout matches the export compositor (shared fixture)", () => {
+  for (const [i, c] of fixture.cases.entries()) {
+    it(`case ${i}`, () => {
+      const l = layout({ sprite: "s", ...c.pose }, c.frame, c.imageAspect, c.heightFraction);
+      for (const name of ["ax", "ay", "w", "h", "rot", "sx", "sy"] as const) {
+        expect(l[name]).toBeCloseTo(c.expected[name], 6);
+      }
+    });
+  }
 });
 
 describe("layout, hitTest, resizeFactor", () => {
