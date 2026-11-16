@@ -33,3 +33,6 @@ scripts/spike/out/
 Thumbs.db
 .vscode/
 .idea/
+
+# Avatar art (large PNGs, rule 9)
+avatars/
