@@ -85,7 +85,7 @@ The user commits and merges themselves. The assistant reminds them at the right 
 
 1. **Takes are never auto-deleted.** Only the user deletes them (storage manager). Every generation creates a take.
 2. **Footage is never copied or modified.** The user places recordings in the project's `footage/` folder. The app references them by path relative to the project folder.
-3. **Cache keys decide regeneration.** Raw take key = hash(text, voice profile id + reference clip hash, exaggeration, cfg_weight, seed, model version). Processed take key = hash(raw key, FX chain). Same key means reuse. Never spend GPU time on an existing key.
+3. **Cache keys decide regeneration.** Raw take key = hash(text, voice profile id + reference clip hash, exaggeration, cfg_weight, seed, model version). Processed take key = hash(raw key, stretch, processing spec), where the processing spec is what the FX chain actually does (manual cut, silence trim, active stages, loudness), so a setting that does nothing never changes it. Same key means reuse. Never spend GPU time on an existing key.
 4. **Footage anchoring.** Every timed item (placements, keyframes, reactions) is anchored to (clip_id, source_time). Timeline time is computed by mapping through the clip list. Items whose anchor is cut away are flagged as orphans, never silently dropped.
 5. **Preview equals export.** The Python avatar solver is the single source of truth. Renderers (browser canvas, Python compositor) only draw solver output. The solver is a pure function of (project state, time); all randomness is seeded.
 6. **`project.json` is the single source of truth.** Atomic writes (temp file, then replace), autosave, rotating `.bak`, and a `schema_version` with a migration for every schema change.

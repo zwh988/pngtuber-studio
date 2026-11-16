@@ -94,9 +94,9 @@ Done when: moving a slider changes the audible result within about a second and 
 - [x] M5-2 Envelope extraction per take (about 100 Hz), cached
 - [x] M5-3 Solver core: expression, mouth (hysteresis, min hold), seeded blink
 - [x] M5-4 Solver: bounce, idle float, reactions (shake, hop, pop-in, squish), transform lanes
-- [ ] M5-5 Generic lane system (keyframes, hold/smooth interpolation) shared with the timeline UI
-- [ ] M5-6 Canvas renderer in the preview with drag/resize writing keyframes
-- [ ] M5-7 Expression, parameter, and reaction lane UI; optional auto-key from line emotion
+- [x] M5-5 Generic lane system (keyframes, hold/smooth interpolation) shared with the timeline UI
+- [x] M5-6 Canvas renderer in the preview with drag/resize writing keyframes
+- [x] M5-7 Expression, parameter, and reaction lane UI; optional auto-key from line emotion
 - [x] M5-8 Solver tests: determinism, seek accuracy, hysteresis
 
 Done when: the live preview looks right and scrubbing to any frame always shows the same state.

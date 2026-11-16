@@ -60,14 +60,14 @@ A one-stop local desktop app that turns a recorded pool rack into a finished PNG
 
 ### 4.2 Editor (95% of the user's time)
 
-- **Top left:** video player with the avatar drawn on a canvas over it. Drag and resize the avatar directly in the preview.
-- **Top right:** tabs for **Line bank**, **Inspector** (selected line, clip, or keyframe), and **Voice FX**.
+- **Top left:** video player with the avatar drawn on a canvas over it (the preview frame is 16:9, fitted inside the player). While paused, drag the avatar to move it (keys x and y at the playhead) and drag its corner handle to resize it (keys scale); each gesture is one undo step.
+- **Top right:** tabs for **Line bank**, **Inspector** (selected line or clip), **Voice FX**, and **Avatar** (the base motion and placement used wherever a lane has no keys, the expression and reaction tools behind `E` and `R`, and an inspector for the selected keyframe or reaction).
 - **Bottom:** timeline with a ruler and these lanes:
   - Video strip (clips, cut markers, speed badges)
   - Voice lane (placed lines as blocks with waveform; red edge on overflow)
-  - Expression lane
-  - Parameter lanes (collapsible): bounce, float amplitude, float speed, blink rate, mouth sensitivity, scale, x, y, rotation
-  - Reaction lane (one-shot events)
+  - Expression lane (keys as diamonds)
+  - Reaction lane (one-shot events as bars)
+  - Parameter lanes: one collapsed "Motion keys" row by default; "Lanes" opens one row per lane: bounce, float amplitude, float speed, blink rate, mouth sensitivity, scale, x, y, rotation. Keys and reactions are selected and dragged in time here; values are edited in the Avatar tab
   - Game audio level
 - **Status bar:** GPU queue, loudness meter, disk usage of takes.
 
@@ -108,21 +108,23 @@ MyRack/
   media/
     takes_raw/          raw voice takes (kept until the user deletes them)
     takes_fx/           processed takes (re-creatable)
-    envelopes/          mouth envelopes per take
+    envelopes/          mouth envelopes per processed take
+    avatar_preview/     downscaled avatar sprites for the preview (re-creatable)
   exports/
 ```
 
-**Conventions:** all times are integer milliseconds (anchor times are source time). Ids are 12-character lowercase hex strings. Paths in `project.json` are relative POSIX strings, except `external` sources (template bookend clips that live outside the project folder), which use absolute POSIX paths.
+**Conventions:** all times are integer milliseconds (anchor times are source time). Ids are 12-character lowercase hex strings. Paths in `project.json` are relative POSIX strings, except `external` sources (template bookend clips that live outside the project folder), which use absolute POSIX paths, and the avatar art folder, which may be absolute (the art usually lives outside the project; the project summary warns that an absolute path breaks when the project moves to another machine).
 
 **Entities**
 
 | Entity | Key fields |
 |---|---|
 | Source | id, path, external flag, duration_ms, fps (stored as fps_num / fps_den), width, height, audio track count. Project footage uses a relative path; `external` sources (template bookends) use an absolute path |
-| Take | id, line id, seed, text snapshot, params used (exaggeration, cfg_weight), voice profile id, model version, raw cache key, raw file, duration_ms, starred, created |
+| Take | id, line id, seed, text snapshot, params used (exaggeration, cfg_weight), voice profile id, model version, raw cache key, raw file, duration_ms, starred, created, manual trim (trim_start_ms, trim_end_ms: cut points in raw take time, null for no cut on that side; the raw file is never changed) |
 | Placement | id, line id, anchor (clip id, source_ms), take override, orphaned flag |
 | Keyframe | id, lane id, anchor (clip id, source_ms), value (number, or expression name), interpolation (hold or smooth), orphaned flag |
 | Reaction | id, type, anchor, intensity, duration_ms, orphaned flag |
+| AvatarSettings | art folder (relative or absolute), base placement (x, y as fractions of the frame, scale, rotation_deg), base motion (bounce, float_amp, float_speed, float_angle_deg, blink_rate, mouth_sensitivity), auto-key expression toggle. Each base value is used wherever its lane has no keys |
 | Clip | id, source id, in, out, speed, track, overlay on/off, effects list |
 | Line | id, text, emotion, exaggeration override, cfg_weight override, active take id, allow-overlap flag |
 | VoiceProfile | id, name, reference clip(s), optional per-emotion reference clips (reserved) |
@@ -168,13 +170,16 @@ The per-line **allow overlap** toggle clears the warning when overlap is intende
 
 **Voice processing (CPU, fast, derived from the raw take):**
 
-1. Trim leading and trailing silence
-2. 3-band EQ (bass, mids, treble)
-3. Compressor (optional)
-4. Effects slot (reverb, pitch shift, chorus, and similar)
-5. Loudness normalize to a target (default around -16 LUFS)
+1. Manual cut (optional, per take): only the region between the take's start and end cut points is kept
+2. Trim leading and trailing silence, measured inside that region
+3. Short fade (8 ms raised cosine) where the kept audio starts or ends exactly on a manual cut, so the cut does not click
+4. Time stretch (the placement's stretch factor)
+5. 3-band EQ (bass, mids, treble)
+6. Compressor (optional)
+7. Effects slot (reverb, pitch shift, chorus, and similar)
+8. Loudness normalize to a target (default around -16 LUFS), then a limiter
 
-The result is the **processed take**, cached by raw key plus FX chain. Slider changes re-run only this stage. The editor and the export both play the processed files, so what is heard is what is exported.
+The result is the **processed take**, cached by hash(raw key, stretch, processing spec). The processing spec is what the chain actually does (manual cut points, silence trim settings, the active stages, loudness settings), so a setting that does nothing never changes the key, and only a trimmed take gets a new key when its cut changes. Slider changes re-run only this stage. The editor and the export both play the processed files, so what is heard is what is exported.
 
 **Mix:** game audio at a fixed dB level plus the voice bus, summed with a master limiter to prevent clipping. The status bar meter shows live loudness of the mix.
 
@@ -182,29 +187,35 @@ The result is the **processed take**, cached by raw key plus FX chain. Slider ch
 
 ## 8. Avatar system
 
-**Art convention.** One image per state, named `expression_eyes_mouth.png`, for example `happy_open_closed.png` (eyes open, mouth closed). The loader validates the full matrix per expression and falls back to the neutral expression with a warning if a combination is missing.
+**Art convention.** The art folder holds one folder per expression named `NN_name` (for example `01_neutral`; `NN` orders them). Each holds four PNGs named `NNx_name_EEMM.png`, where `x` is one letter, `EE` is `oi` (eyes open) or `ci` (eyes closed) and `MM` is `om` (mouth open) or `cm` (mouth closed), for example `01a_neutral_oicm.png`. Other files (such as preview videos) are ignored; a PNG that breaks the rule, belongs to another folder or repeats a state is skipped with a warning. A missing state falls back to the nearest state of the same expression (closed eyes to open eyes, open mouth to closed mouth), then to the default expression, with a warning.
+
+An optional `avatar.json` in the art folder sets `default_expression` (otherwise the first by number) and `emotion_map` (emotion preset name to expression id). It lives with the art so it follows the avatar to other projects. An expression named by a key or a preset that the art lacks falls back to the default expression; `neutral` means the default expression without a warning.
+
+**Placement.** The sprite's bottom centre sits at (x times the frame width, y times the frame height); at scale 1 the sprite is 0.6 of the frame height; rotation turns about the bottom centre. The preview draws downscaled copies (about 1000 px high, `media/avatar_preview/`); the export uses the full-size files.
 
 **Solver and drawing are separate.** A Python **avatar solver** is the single source of truth. It takes the project (lanes, reactions, envelopes, seed) and outputs a compact per-frame state: which sprite, plus position, scale, and rotation. Two thin renderers draw that state:
 - The browser canvas for live preview.
 - A Python compositor for export.
 
-The solver is a pure function of time, so scrubbing is frame-accurate and the preview matches the export.
+The solver is a pure function of time, so scrubbing is frame-accurate and the preview matches the export. The preview receives the solver's output sampled at 30 fps for the whole timeline (a frame track, rebuilt after each edit) and draws the nearest frame.
 
 **Solver behavior**
 
 | Element | How it works |
 |---|---|
 | Expression | Step value from the expression lane (hold interpolation) |
-| Mouth | Per-take loudness envelope (about 100 Hz). Open above the open threshold, close below a lower threshold (hysteresis), minimum hold of 60 to 80 ms to avoid flutter. The sensitivity lane scales the threshold |
+| Mouth | Loudness envelope of each processed take (20 ms RMS every 10 ms, dBFS), the loudest placed line at each step. Opens at -32 dBFS, closes below -38 dBFS (hysteresis), minimum hold of 70 ms for both states. Mouth sensitivity s lowers both thresholds by 20 log10(s) dB |
 | Blink | Seeded random intervals between a minimum and maximum, scaled by the blink-rate lane. About 120 ms closed |
-| Bounce | While speaking, a spring-driven vertical offset scaled by the bounce lane and the envelope |
-| Idle float | Slow sinusoidal drift; amplitude and speed lanes |
+| Bounce | While speaking, a damped spring chasing the voice level times the bounce lane lifts the avatar (up to 3% of the frame height at bounce 1) |
+| Idle float | Slow sinusoidal drift; amplitude and speed lanes; drifts along the float direction setting (0 degrees up and down, 90 side to side) |
 | Reactions | One-shots: shake (damped oscillation), hop, pop-in (scale with overshoot), squish. Each has intensity and duration |
 | Transform | Position, scale, rotation lanes. Dragging the avatar in the preview writes keyframes |
 
+**Lanes.** Every parameter lane has a base value in the avatar settings, used wherever the lane has no keys. A key's interpolation (hold, or smooth with an ease) describes the segment after it; before the first key and after the last the value holds. New transform keys are smooth; expression keys always hold. Tuning constants live in `backend/avatar/tuning.py`.
+
 All randomness comes from a seeded generator keyed to the project seed and event index.
 
-**Expression defaults:** a line's emotion can optionally auto-key its suggested expression at the line's start. Manual keys always win. Auto-keying is a toggle.
+**Expression defaults:** a line's emotion can optionally auto-key its suggested expression at the line's start. Manual keys always win. Auto-keying is a toggle. It adds a key only where the emotion leads to an expression the art has (through `emotion_map`, or a preset expression of that name), so presets that mean neutral add nothing.
 
 ## 9. Editing (cut and splice)
 
@@ -253,6 +264,8 @@ Progress streams to the UI over a WebSocket, with cancel support. Export unloads
 
 - Voice source: own voice or acted character.
 - Effects slot contents: which effects first (reverb, pitch shift, chorus, others).
-- Avatar art naming: confirm the convention against real files.
+- Avatar art naming: resolved in M5 (section 8).
+- Avatar tuning is by eye: mouth thresholds, blink gaps, bounce spring, reaction curves, the default position (x 0.85, y 0.75) and size (0.6 of the frame height).
+- Mouth timing against the sound: if the mouth looks early or late in the preview (Web Audio output latency), add a fixed offset setting.
 - Recording frame rate: resolved in M0. OBS recordings are 2560x1440 at 60 fps (H.264, one mixed stereo AAC track).
 - Emotion preset numbers are guesses to tune in M3.
