@@ -309,3 +309,26 @@ def test_auto_key_uses_the_emotion_map_and_can_be_off() -> None:
     ]
     assert auto_expression_keys([placed("l1", 0)], lines, PRESETS, with_map, enabled=False) == []
     assert auto_expression_keys([placed("l1", 0)], lines, PRESETS, None) == []
+
+
+def test_key_lane_by_adds_to_the_lane_value_there() -> None:
+    from backend.project.avatar_commands import KeyLaneBy, lane_value_at
+
+    project = make_project()
+    stack = CommandStack(project)
+    assert lane_value_at(project, "x", 3000) == 0.85  # no keys: the base
+    stack.execute(KeyLaneBy("x", 3000, delta=-0.1))
+    assert project.keyframes[0].value == pytest.approx(0.75)
+    stack.execute(KeyLaneBy("scale", 3000, factor=1.5))
+    stack.execute(KeyLaneBy("scale", 3000, factor=2.0))  # same spot: changes that key
+    scales = [k.value for k in project.keyframes if k.lane_id == "scale"]
+    assert scales == [3.0]
+    stack.execute(KeyLaneBy("scale", 3000, factor=100.0))
+    assert [k.value for k in project.keyframes if k.lane_id == "scale"] == [5.0]  # clamped
+    stack.undo()
+    stack.undo()
+    assert [k.value for k in project.keyframes if k.lane_id == "scale"] == [1.5]
+    with pytest.raises(CommandError):
+        KeyLaneBy("expression", 0, delta=1).apply(project)
+    with pytest.raises(CommandError):
+        KeyLaneBy("x", 0, factor=0)

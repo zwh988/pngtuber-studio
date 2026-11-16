@@ -144,6 +144,7 @@ Avatar ops are timeline `EditOp`s: send them through `POST /api/timeline/batch` 
 |---|---|
 | `add_keyframe` | `lane_id`, `timeline_ms`, `value` (number, or an expression name on `expression`), `interpolation?` (`hold` / `smooth`; default smooth for x, y, scale, rotation, else hold), `keyframe_id?` |
 | `key_lane` | `lane_id`, `timeline_ms`, `value`, `keyframe_id?`: changes the key already at that spot on that lane, else adds one (E hotkey, avatar drag) |
+| `key_lane_by` | `lane_id` (numeric), `timeline_ms`, `delta=0`, `factor=1`: keys the lane to (its own value there) x factor + delta, clamped; used by the avatar drag (x, y) and resize (scale) |
 | `move_keyframe` | `keyframe_id`, `timeline_ms` (an orphan is settled) |
 | `set_keyframe_value` | `keyframe_id`, `value` |
 | `set_keyframe_interpolation` | `keyframe_id`, `interpolation` (expression keys: hold only) |
@@ -157,6 +158,12 @@ Avatar ops are timeline `EditOp`s: send them through `POST /api/timeline/batch` 
 Lanes (`backend/avatar/lanes.py`): `expression` (name), `bounce` 0-3 (1), `float_amp` 0-3 (1), `float_speed` 0-4 (1), `blink_rate` 0-4 (1), `mouth_sensitivity` 0.25-4 (1), `scale` 0.05-5, `x` -0.5-1.5, `y` -0.5-1.5, `rotation` -180-180 (the last four default to `AvatarSettings`). A value outside the range is HTTP 400. Labels: "Add key", "Add expression key", "Set key", "Move key", "Change key", "Change key easing", "Remove key", "Add reaction", "Move reaction", "Change reaction", "Remove reaction", "Change avatar settings".
 
 `TimelineState` gains `keyframes: TimelineKeyframe[]` (`id, lane_id, value, interpolation, t_ms|null, anchor_clip_id, anchor_source_ms, orphaned`), `reactions: TimelineReaction[]` (`id, type, intensity, duration_ms, t_ms|null, anchor_clip_id, anchor_source_ms, orphaned`), both ordered by time, and `avatar: AvatarSettings`. A cut that removes the footage under a key or reaction flags it orphaned (parked at the nearest edge), never deletes it.
+
+# Avatar preview (M5 S10a: `backend/avatar/track.py`)
+
+`GET /api/avatar/track` : `FrameTrack`: `version` (16 hex; changes exactly when the picture can change), `fps` (30), `duration_ms`, `frame_count` (frame k at k * 1000 / fps ms), `height_fraction` (0.6), `sprites` (table of `"<expression>/<state>"`, state `oicm`/`oiom`/`cicm`/`ciom`), `sprite_runs` (`[first frame, sprite index]`, each run lasts until the next; -1 = nothing to draw), and per-frame arrays `x`, `y` (frame fractions of the sprite's bottom centre), `scale`, `rotation` (degrees about the bottom centre), `squash` (width x (1 + squash), height x (1 - squash)). At scale 1 the sprite is `height_fraction` of the frame height. Takes about a second to build for a 20-minute timeline, then is cached until `version` changes. HTTP 400 when no project is open.
+
+`GET /media/avatar/{expression}/{state}` : a PNG about 1000 px high of that sprite of the project's art (made on first request, cached in `media/avatar_preview/`); 404 when the art has no such sprite. Draw it scaled; never assume its pixel size.
 
 # Voice chain (M4 chat B, S3: `backend/audio/fxstate.py`, `backend/project/fx_ops.py`)
 

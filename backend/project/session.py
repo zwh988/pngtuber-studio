@@ -34,12 +34,26 @@ from backend.audio.trim import (
     spec_with_manual_trim,
     validate_manual_trim,
 )
-from backend.avatar.envelope import EnvelopeReport, envelope_for
+from backend.avatar.art import AvatarArt
+from backend.avatar.envelope import Envelope, EnvelopeReport, envelope_for
+from backend.avatar.preview import PREVIEW_DIR_NAME, PreviewError, ensure_preview
 from backend.avatar.scan import (
+    ArtFolderError,
     AvatarState,
     avatar_status_text,
     build_avatar_state,
+    resolve_art_folder,
+    scan_art_folder,
     to_stored_path,
+)
+from backend.avatar.solver import build_solver
+from backend.avatar.track import (
+    FrameTrack,
+    build_frame_track,
+    build_input,
+    input_version,
+    placement_ids_needing_envelopes,
+    sprite_path_for_key,
 )
 from backend.edl.anchoring import check_references, check_voice_references
 from backend.project.avatar_commands import SetAvatarArtFolder
@@ -180,6 +194,7 @@ class Session:
         )
         self._hashes = FileHashCache()
         self._trims = TrimCache()
+        self._avatar_track: FrameTrack | None = None  # last frame track built (M5-6)
         # Loaded from templates/emotion_presets.json on first use when not given.
         self._presets: dict[str, EmotionPreset] | None = presets
         # Loaded from templates/fx_presets.json on first use when not given.
@@ -724,6 +739,69 @@ class Session:
             except CommandError as exc:
                 raise SessionError(str(exc)) from exc
             return self._avatar_state(folder, stack)
+
+    def avatar_track(self) -> FrameTrack:
+        """The sampled frame track the preview draws (decision 13). Built from the
+        current project; reused while ``version`` is unchanged. Envelopes of placed
+        takes are made on the way (processed files rendered first when missing)."""
+        with self._lock:
+            folder, stack = self._require_open()
+            project = stack.project.model_copy(deep=True)
+            timeline = self._timeline_state()
+            art = self._art_or_none(folder, project)
+            presets = self._preset_expressions()
+        envelopes: dict[str, Envelope] = {}
+        for placement_id, take_id, stretch in placement_ids_needing_envelopes(timeline):
+            try:
+                report = self.envelope(take_id, stretch)
+            except SessionError:
+                continue  # a take that cannot be measured keeps its mouth closed
+            if report is not None:
+                envelopes[placement_id] = Envelope(report.hop_ms, tuple(report.values))
+        inp = build_input(project, timeline, envelopes, art, presets)
+        version = input_version(inp, art)
+        cached = self._avatar_track
+        if cached is not None and cached.version == version:
+            return cached
+        track = build_frame_track(build_solver(inp), art, version)
+        self._avatar_track = track
+        return track
+
+    def avatar_sprite_path(self, expression: str, state: str) -> Path | None:
+        """Downscaled preview copy of one sprite of the project's art, made on first
+        request (``media/avatar_preview/``). Only sprites the loader found are served:
+        the URL names an expression and a state, never a path."""
+        with self._lock:
+            folder, stack = self._require_open()
+            art_folder = stack.project.avatar.art_folder
+        if art_folder is None:
+            return None
+        root = resolve_art_folder(art_folder, folder)
+        try:
+            art = scan_art_folder(root)
+        except ArtFolderError:
+            return None
+        rel = sprite_path_for_key(art, expression, state)
+        if rel is None:
+            return None
+        try:
+            return ensure_preview(root / Path(*rel.split("/")), folder / "media" / PREVIEW_DIR_NAME)
+        except PreviewError as exc:
+            raise SessionError(str(exc)) from exc
+
+    def _art_or_none(self, folder: Path, project: Project) -> AvatarArt | None:
+        if project.avatar.art_folder is None:
+            return None
+        try:
+            return scan_art_folder(resolve_art_folder(project.avatar.art_folder, folder))
+        except ArtFolderError:
+            return None
+
+    def _preset_expressions(self) -> dict[str, str]:
+        try:
+            return {name: preset.expression for name, preset in self._presets_or_raise().items()}
+        except SessionError:
+            return {}
 
     def _avatar_state(self, folder: Path, stack: CommandStack) -> AvatarState:
         state = build_avatar_state(stack.project.avatar.art_folder, folder)

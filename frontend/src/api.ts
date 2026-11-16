@@ -246,7 +246,41 @@ export type EditOp =
   | { op: "ripple_delete"; start_ms: number; end_ms: number; right_clip_id?: string | null }
   | { op: "add_placement"; line_id: string; timeline_ms: number; placement_id?: string | null }
   | { op: "move_placement"; placement_id: string; timeline_ms: number }
-  | { op: "remove_placement"; placement_id: string };
+  | { op: "remove_placement"; placement_id: string }
+  // Avatar (M5-5). Times are timeline ms; the backend stores footage anchors.
+  | {
+      op: "add_keyframe";
+      lane_id: string;
+      timeline_ms: number;
+      value: number | string;
+      interpolation?: "hold" | "smooth" | null;
+      keyframe_id?: string | null;
+    }
+  | { op: "key_lane"; lane_id: string; timeline_ms: number; value: number | string; keyframe_id?: string | null }
+  | { op: "key_lane_by"; lane_id: string; timeline_ms: number; delta?: number; factor?: number }
+  | { op: "move_keyframe"; keyframe_id: string; timeline_ms: number }
+  | { op: "set_keyframe_value"; keyframe_id: string; value: number | string }
+  | { op: "set_keyframe_interpolation"; keyframe_id: string; interpolation: "hold" | "smooth" }
+  | { op: "remove_keyframe"; keyframe_id: string }
+  | {
+      op: "add_reaction";
+      type: string;
+      timeline_ms: number;
+      intensity?: number;
+      duration_ms?: number;
+      reaction_id?: string | null;
+    }
+  | { op: "move_reaction"; reaction_id: string; timeline_ms: number }
+  | { op: "set_reaction"; reaction_id: string; type?: string; intensity?: number; duration_ms?: number }
+  | { op: "remove_reaction"; reaction_id: string }
+  | {
+      op: "set_avatar_settings";
+      x?: number;
+      y?: number;
+      scale?: number;
+      rotation_deg?: number;
+      auto_key_expression?: boolean;
+    };
 
 export function splitClip(timelineMs: number): Promise<TimelineState> {
   return post<TimelineState>("/api/timeline/split", { timeline_ms: timelineMs });
@@ -327,6 +361,40 @@ export type PeaksReport = {
 
 export function getTakePeaks(takeId: string, buckets = 400): Promise<PeaksReport> {
   return request<PeaksReport>(`/api/takes/${encodeURIComponent(takeId)}/peaks?buckets=${buckets}`);
+}
+
+/**
+ * `GET /api/avatar/track`: the avatar drawn by the Python solver, sampled at `fps` (M5-6).
+ * Frame k is at k * 1000 / fps ms. See docs/API_MODELS.md "Avatar preview".
+ */
+export type FrameTrack = {
+  version: string;
+  fps: number;
+  duration_ms: number;
+  frame_count: number;
+  /** Sprite height at scale 1, as a fraction of the frame height. */
+  height_fraction: number;
+  /** "expression/state" keys, state like "oicm". */
+  sprites: string[];
+  /** [first frame, index into sprites or -1], each run lasting until the next. */
+  sprite_runs: [number, number][];
+  x: number[];
+  y: number[];
+  scale: number[];
+  rotation: number[];
+  squash: number[];
+};
+
+export function getAvatarTrack(): Promise<FrameTrack> {
+  return request<FrameTrack>("/api/avatar/track");
+}
+
+/** A downscaled sprite of the project's art for a track key "expression/state". */
+export function avatarSpriteUrl(key: string): string {
+  const cut = key.lastIndexOf("/");
+  const expression = key.slice(0, cut);
+  const state = key.slice(cut + 1);
+  return `/media/avatar/${encodeURIComponent(expression)}/${encodeURIComponent(state)}`;
 }
 
 /** Several edits as ONE undo step; all apply or none do. */

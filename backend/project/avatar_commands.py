@@ -14,9 +14,9 @@ is resolved against the art only when drawn (so a key survives a change of art).
 import math
 from typing import Literal
 
-from backend.avatar.lanes import EXPRESSION, LANES_BY_ID
+from backend.avatar.lanes import EXPRESSION, LANES_BY_ID, Lane, LaneKey
 from backend.avatar.solver import REACTIONS
-from backend.edl.timemap import to_source
+from backend.edl.timemap import to_source, to_timeline
 from backend.project.commands import Command, CommandError
 from backend.project.line_commands import NoChange
 from backend.project.schema import (
@@ -334,6 +334,63 @@ class KeyLane(Command):
                 )
                 add._anchor = anchor
                 self._inner = add
+        self._inner.apply(project)
+
+    def revert(self, project: Project) -> None:
+        if self._inner is None:
+            raise CommandError("nothing to restore: command was not applied")
+        self._inner.revert(project)
+
+
+def lane_value_at(project: Project, lane_id: str, timeline_ms: int) -> float:
+    """A numeric lane's own value at a timeline time (keys mapped through the clip
+    list, orphans left out), without motion or reactions: what a key would hold."""
+    spec = LANES_BY_ID.get(lane_id)
+    if spec is None or spec.kind != "number":
+        raise CommandError(f"{lane_id!r} is not a numeric lane")
+    base = {
+        "x": project.avatar.x,
+        "y": project.avatar.y,
+        "scale": project.avatar.scale,
+        "rotation": project.avatar.rotation_deg,
+    }.get(lane_id, spec.default)
+    keys = []
+    for key in project.keyframes:
+        if key.lane_id != lane_id or key.orphaned or isinstance(key.value, str):
+            continue
+        t = to_timeline(project.clips, key.anchor)
+        if t is not None:
+            keys.append(LaneKey(t, float(key.value), key.interpolation))
+    return Lane(keys, base).value_at(timeline_ms)
+
+
+class KeyLaneBy(Command):
+    """Key a numeric lane at a time to (its value there) x ``factor`` + ``delta``,
+    clamped to the lane's range. The avatar drag (x, y) and resize (scale) use it, so
+    the browser never needs the lane maths (decision 14)."""
+
+    def __init__(
+        self, lane_id: str, timeline_ms: int, *, delta: float = 0.0, factor: float = 1.0
+    ) -> None:
+        if not (math.isfinite(delta) and math.isfinite(factor)) or factor <= 0:
+            raise CommandError("the change must be a finite number (factor above 0)")
+        self.lane_id = lane_id
+        self.timeline_ms = timeline_ms
+        self.delta = delta
+        self.factor = factor
+        self._inner: KeyLane | None = None
+
+    @property
+    def label(self) -> str:
+        return "Set key"
+
+    def apply(self, project: Project) -> None:
+        if self._inner is None:
+            spec = LANES_BY_ID.get(self.lane_id)
+            current = lane_value_at(project, self.lane_id, self.timeline_ms)
+            assert spec is not None
+            value = min(spec.maximum, max(spec.minimum, current * self.factor + self.delta))
+            self._inner = KeyLane(self.lane_id, self.timeline_ms, value)
         self._inner.apply(project)
 
     def revert(self, project: Project) -> None:

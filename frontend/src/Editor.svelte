@@ -8,6 +8,8 @@
   import {
     addClip,
     cancelJob,
+    editBatch,
+    getAvatarTrack,
     getFootage,
     getJobs,
     getStorage,
@@ -24,8 +26,10 @@
     splitClip,
     trimClip,
     undoEdit,
+    type EditOp,
     type EditResult,
     type FootageItem,
+    type FrameTrack,
     type JobStatus,
     type PeaksReport,
     type StorageReport,
@@ -33,6 +37,7 @@
   } from "./api";
   import { clock } from "./format";
   import { lufsText } from "./loudness";
+  import AvatarOverlay from "./AvatarOverlay.svelte";
   import LineBank from "./LineBank.svelte";
   import StorageList from "./StorageList.svelte";
   import VoiceFx from "./VoiceFx.svelte";
@@ -63,6 +68,11 @@
   let player = $state<ReturnType<typeof Player> | null>(null);
   /** True while the player plays (bound from `Player`). */
   let playing = $state(false);
+  /** The avatar frame track from the Python solver (M5-6); refetched after every change. */
+  let avatarTrack = $state<FrameTrack | null>(null);
+  let avatarError = $state<string | null>(null);
+  /** Bumped after anything that may change the avatar; the track is refetched shortly after. */
+  let avatarToken = $state(0);
   /** The shared Web Audio graph: game bus (the video), voice bus, master limiter, loudness meter. */
   const graph = new AudioGraph();
   /** Plays the processed placed takes in time with the video, on the graph's voice bus. */
@@ -120,6 +130,7 @@
       const [state, footage] = await Promise.all([getTimeline(), getFootage()]);
       timeline = state;
       sources = footage.items;
+      avatarToken += 1;
     } catch (err) {
       error = message(err);
     }
@@ -132,6 +143,7 @@
     notice = null;
     try {
       timeline = await action();
+      avatarToken += 1;
     } catch (err) {
       error = message(err);
     } finally {
@@ -151,6 +163,7 @@
       const result = await action();
       timeline = result.timeline;
       lineReload += 1;
+      avatarToken += 1;
       notice = result.label === null ? nothing : `${verb}: ${result.label}`;
     } catch (err) {
       error = message(err);
@@ -196,9 +209,48 @@
         // timeline, which carries them too).
         timeline.fx_version = state.fx_version;
         timeline.game_audio_db = state.game_audio_db;
+        timeline.keyframes = state.keyframes;
+        timeline.reactions = state.reactions;
+        timeline.avatar = state.avatar;
       }
+      avatarToken += 1;
     } catch (err) {
       error = message(err);
+    }
+  }
+
+  // Refetch the avatar track a moment after the last change (a burst of edits fetches once).
+  let avatarTimer: ReturnType<typeof setTimeout> | undefined;
+  $effect(() => {
+    void avatarToken;
+    clearTimeout(avatarTimer);
+    avatarTimer = setTimeout(() => {
+      void (async () => {
+        try {
+          const next = await getAvatarTrack();
+          if (avatarTrack === null || avatarTrack.version !== next.version) {
+            avatarTrack = next;
+          }
+          avatarError = null;
+        } catch (err) {
+          avatarError = `The avatar could not be computed: ${message(err)}`;
+        }
+      })();
+    }, 250);
+    return () => clearTimeout(avatarTimer);
+  });
+
+  /** An avatar drag or resize ended: one labelled batch, one undo step. */
+  async function commitAvatar(label: string, ops: EditOp[]): Promise<boolean> {
+    error = null;
+    try {
+      timeline = await editBatch(label, ops);
+      avatarToken += 1;
+      notice = label;
+      return true;
+    } catch (err) {
+      error = message(err);
+      return false;
     }
   }
 
@@ -683,7 +735,17 @@
               bind:playheadMs
               bind:playing
               {graph}
-            />
+            >
+              {#snippet overlay()}
+                <AvatarOverlay
+                  track={avatarTrack}
+                  {playheadMs}
+                  editable={!playing && !busy}
+                  oncommit={commitAvatar}
+                />
+              {/snippet}
+            </Player>
+            {#if avatarError !== null}<p class="error">{avatarError}</p>{/if}
           {:else}
             <p class="hint">The timeline is empty. Add a recording from the Footage tab.</p>
           {/if}

@@ -11,6 +11,7 @@ from pydantic import BaseModel
 from backend.audio.fxstate import FxState
 from backend.avatar.envelope import EnvelopeReport
 from backend.avatar.scan import AvatarState
+from backend.avatar.track import FrameTrack
 from backend.media.serve import range_response
 from backend.project.edit_ops import (
     AddPlacementOp,
@@ -216,6 +217,14 @@ def create_app(
         except _API_ERRORS as exc:
             raise HTTPException(status_code=400, detail=str(exc)) from exc
 
+    @app.get("/api/avatar/track")
+    def get_avatar_track() -> FrameTrack:
+        # M5-6: what the preview canvas draws, sampled by the Python solver (rule 5).
+        try:
+            return active.avatar_track()
+        except _API_ERRORS as exc:
+            raise HTTPException(status_code=400, detail=str(exc)) from exc
+
     @app.get("/api/avatar")
     def get_avatar() -> AvatarState:
         try:
@@ -337,6 +346,18 @@ def create_app(
         path = active.source_path(source_id)
         if path is None or not path.is_file():
             raise HTTPException(status_code=404, detail="footage file not found")
+        return range_response(path, request.headers.get("range"))
+
+    @app.get("/media/avatar/{expression}/{state}")
+    def get_avatar_sprite(expression: str, state: str, request: Request) -> Response:
+        # M5-6: a downscaled sprite of the project's art, looked up by expression and
+        # state ("oicm"...), never by a path from the URL.
+        try:
+            path = active.avatar_sprite_path(expression, state)
+        except _API_ERRORS as exc:
+            raise HTTPException(status_code=400, detail=str(exc)) from exc
+        if path is None:
+            raise HTTPException(status_code=404, detail="sprite not found")
         return range_response(path, request.headers.get("range"))
 
     @app.get("/media/take/{take_id}")

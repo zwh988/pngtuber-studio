@@ -17,6 +17,7 @@ from backend.project.avatar_commands import (
     AddKeyframe,
     AddReaction,
     KeyLane,
+    KeyLaneBy,
     MoveKeyframe,
     MoveReaction,
     RemoveKeyframe,
@@ -135,6 +136,16 @@ class KeyLaneOp(_Op):
     keyframe_id: str | None = None
 
 
+class KeyLaneByOp(_Op):
+    """Key a numeric lane at a time to (its value there) x factor + delta."""
+
+    op: Literal["key_lane_by"] = "key_lane_by"
+    lane_id: str
+    timeline_ms: int
+    delta: float = 0.0
+    factor: float = 1.0
+
+
 class MoveKeyframeOp(_Op):
     op: Literal["move_keyframe"] = "move_keyframe"
     keyframe_id: str
@@ -209,6 +220,7 @@ EditOp = Annotated[
     | SetPlacementStretchOp
     | AddKeyframeOp
     | KeyLaneOp
+    | KeyLaneByOp
     | MoveKeyframeOp
     | SetKeyframeValueOp
     | SetKeyframeInterpolationOp
@@ -262,6 +274,8 @@ def _build_avatar_command(op: EditOp) -> Command:
         )
     if isinstance(op, KeyLaneOp):
         return KeyLane(op.lane_id, op.timeline_ms, op.value, keyframe_id=op.keyframe_id)
+    if isinstance(op, KeyLaneByOp):
+        return KeyLaneBy(op.lane_id, op.timeline_ms, delta=op.delta, factor=op.factor)
     if isinstance(op, MoveKeyframeOp):
         return MoveKeyframe(op.keyframe_id, op.timeline_ms)
     if isinstance(op, SetKeyframeValueOp):

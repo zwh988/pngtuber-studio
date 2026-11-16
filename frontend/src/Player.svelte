@@ -1,5 +1,5 @@
 <script lang="ts">
-  import { onDestroy, untrack } from "svelte";
+  import { onDestroy, untrack, type Snippet } from "svelte";
   import { sourceMediaUrl, type TimelineClip } from "./api";
   import type { AudioGraph } from "./audioGraph";
   import { clock } from "./format";
@@ -11,6 +11,7 @@
     playheadMs = $bindable(0),
     playing = $bindable(false),
     graph = null,
+    overlay,
   }: {
     clips: TimelineClip[];
     durationMs: number;
@@ -19,6 +20,8 @@
     playing?: boolean;
     /** The shared audio graph: the video's sound goes through its game bus (mix, limiter, meter). */
     graph?: AudioGraph | null;
+    /** Drawn over the video, filling its box (the avatar, M5-6). */
+    overlay?: Snippet;
   } = $props();
 
   let video = $state<HTMLVideoElement | null>(null);
@@ -232,16 +235,19 @@
 </script>
 
 <div class="player">
-  <!-- svelte-ignore a11y_media_has_caption -->
-  <video
-    bind:this={video}
-    src={url}
-    preload="auto"
-    onloadedmetadata={apply}
-    onerror={() => {
-      error = video?.error?.message || "The video could not be loaded.";
-    }}
-  ></video>
+  <div class="stage">
+    <!-- svelte-ignore a11y_media_has_caption -->
+    <video
+      bind:this={video}
+      src={url}
+      preload="auto"
+      onloadedmetadata={apply}
+      onerror={() => {
+        error = video?.error?.message || "The video could not be loaded.";
+      }}
+    ></video>
+    {@render overlay?.()}
+  </div>
   <div class="controls">
     <button type="button" onclick={toggle} disabled={clips.length === 0}>
       {playing ? "Pause" : "Play"}
@@ -268,6 +274,9 @@
 <style>
   .player {
     max-width: 48rem;
+  }
+  .stage {
+    position: relative;
   }
   video {
     display: block;
