@@ -9,6 +9,7 @@ from fastapi.staticfiles import StaticFiles
 from pydantic import BaseModel
 
 from backend.audio.fxstate import FxState
+from backend.avatar.scan import AvatarState
 from backend.media.serve import range_response
 from backend.project.edit_ops import (
     AddPlacementOp,
@@ -55,6 +56,10 @@ _MISSING_FRONTEND_HTML = (
     "<p>Run <code>npm install</code> and <code>npm run build</code> "
     "in the <code>frontend</code> folder, then restart the app.</p></body>"
 )
+
+
+class AvatarFolderRequest(BaseModel):
+    path: str | None
 
 
 class NewProjectRequest(BaseModel):
@@ -207,6 +212,21 @@ def create_app(
     def set_voice_reference(request: VoiceReferenceRequest) -> VoiceState:
         try:
             return active.set_voice_reference(request.path)
+        except _API_ERRORS as exc:
+            raise HTTPException(status_code=400, detail=str(exc)) from exc
+
+    @app.get("/api/avatar")
+    def get_avatar() -> AvatarState:
+        try:
+            return active.avatar()
+        except _API_ERRORS as exc:
+            raise HTTPException(status_code=400, detail=str(exc)) from exc
+
+    @app.post("/api/avatar/folder")
+    def set_avatar_folder(request: AvatarFolderRequest) -> AvatarState:
+        # The path comes from the user's folder picker or typing; null clears it.
+        try:
+            return active.set_avatar_folder(request.path)
         except _API_ERRORS as exc:
             raise HTTPException(status_code=400, detail=str(exc)) from exc
 

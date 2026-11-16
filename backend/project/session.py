@@ -34,7 +34,14 @@ from backend.audio.trim import (
     spec_with_manual_trim,
     validate_manual_trim,
 )
+from backend.avatar.scan import (
+    AvatarState,
+    avatar_status_text,
+    build_avatar_state,
+    to_stored_path,
+)
 from backend.edl.anchoring import check_references, check_voice_references
+from backend.project.avatar_commands import SetAvatarArtFolder
 from backend.project.clip_commands import AddClip
 from backend.project.commands import (
     AddSource,
@@ -674,6 +681,46 @@ class Session:
                 raise SessionError(str(exc)) from exc
             return self._voice_state(folder, stack.project)
 
+    # ---- avatar art (M5-1) --------------------------------------------------
+
+    def avatar(self) -> AvatarState:
+        """The project's avatar art: folder, expressions, warnings (scanned now)."""
+        with self._lock:
+            folder, stack = self._require_open()
+            return self._avatar_state(folder, stack)
+
+    def set_avatar_folder(self, path: str | None) -> AvatarState:
+        """Point the project at an art folder on disk (None or "" clears it). The
+        folder must exist; it is stored relative when inside the project, otherwise
+        as an absolute POSIX path. Never copied. One undo step."""
+        with self._lock:
+            folder, stack = self._require_open()
+            stored: str | None = None
+            if path is not None and path.strip():
+                picked = Path(path.strip())
+                if not picked.is_dir():
+                    raise SessionError(f"folder not found: {picked}")
+                stored = to_stored_path(picked, folder)
+            try:
+                stack.execute(SetAvatarArtFolder(stored))
+            except NoChange:
+                pass
+            except CommandError as exc:
+                raise SessionError(str(exc)) from exc
+            return self._avatar_state(folder, stack)
+
+    def _avatar_state(self, folder: Path, stack: CommandStack) -> AvatarState:
+        state = build_avatar_state(stack.project.avatar.art_folder, folder)
+        return state.model_copy(
+            update={
+                "can_undo": stack.can_undo,
+                "can_redo": stack.can_redo,
+                "undo_label": stack.undo_label,
+                "redo_label": stack.redo_label,
+                "save_error": self._save_error,
+            }
+        )
+
     # ---- media -------------------------------------------------------------
 
     def source_path(self, source_id: str) -> Path | None:
@@ -991,8 +1038,10 @@ class Session:
     def _summary(self) -> ProjectSummary:
         folder, stack = self._require_open()
         summary = summarize(str(folder), stack.project)
+        avatar = build_avatar_state(stack.project.avatar.art_folder, folder)
         return summary.model_copy(
             update={
+                "avatar_status": avatar_status_text(avatar),
                 "save_error": self._save_error,
                 "problem_count": len(check_references(stack.project))
                 + len(check_voice_references(stack.project)),

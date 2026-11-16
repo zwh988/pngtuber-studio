@@ -73,6 +73,18 @@ def _check_absolute_posix(value: str) -> str:
 RelPath = Annotated[str, AfterValidator(_check_relative_posix)]
 
 
+def _check_any_posix(value: str) -> str:
+    """A relative POSIX path, or an absolute one (``/x`` or ``D:/x``)."""
+    if value.startswith("/") or (len(value) >= 3 and value[1:3] == ":/"):
+        return _check_absolute_posix(value)
+    return _check_relative_posix(value)
+
+
+# Relative to the project folder, or absolute POSIX for things kept outside it
+# (shared avatar art, M5-1).
+AnyPath = Annotated[str, AfterValidator(_check_any_posix)]
+
+
 def _utcnow() -> datetime:
     return datetime.now(UTC)
 
@@ -250,7 +262,9 @@ class FxChain(_Model):
 
 
 class AvatarSettings(_Model):
-    art_folder: RelPath | None = None
+    # Shared art lives outside the project (``avatars/<name>/``, M5-1): an absolute
+    # POSIX path, or a path relative to the project folder. Never copied (decision 2).
+    art_folder: AnyPath | None = None
     # Position as a fraction of the frame (0..1); rotation in degrees.
     x: float = 0.85
     y: float = 0.75

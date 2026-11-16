@@ -528,6 +528,46 @@ export function setVoiceReference(path: string): Promise<VoiceState> {
   return post<VoiceState>("/api/voice/reference", { path });
 }
 
+/** One expression of the avatar art (M5-1): folder `NN_name`, states present as codes. */
+export type AvatarExpression = {
+  id: string;
+  order: number;
+  folder: string;
+  /** "oicm", "oiom", "cicm", "ciom": eyes open/closed, mouth closed/open. */
+  states: string[];
+  complete: boolean;
+};
+
+/** `GET /api/avatar`, `POST /api/avatar/folder`. */
+export type AvatarState = {
+  status: "not_configured" | "folder_missing" | "no_art" | "ready";
+  /** As stored in the project: relative to it, or an absolute POSIX path. */
+  art_folder: string | null;
+  resolved_folder: string | null;
+  /** Stored as an absolute path: moving the project to another machine breaks it. */
+  external: boolean;
+  name: string | null;
+  expressions: AvatarExpression[];
+  default_expression: string | null;
+  emotion_map: Record<string, string>;
+  warnings: string[];
+  problem: string | null;
+  can_undo: boolean;
+  can_redo: boolean;
+  undo_label: string | null;
+  redo_label: string | null;
+  save_error: string | null;
+};
+
+export function getAvatar(): Promise<AvatarState> {
+  return request<AvatarState>("/api/avatar");
+}
+
+/** Point the project at an art folder on disk (never copied); null clears it. */
+export function setAvatarFolder(path: string | null): Promise<AvatarState> {
+  return post<AvatarState>("/api/avatar/folder", { path });
+}
+
 export function getLines(): Promise<LineBankState> {
   return request<LineBankState>("/api/lines");
 }

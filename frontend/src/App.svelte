@@ -1,5 +1,6 @@
 <script lang="ts">
   import {
+    getAvatar,
     getFootage,
     getProject,
     getRecent,
@@ -11,7 +12,9 @@
     relinkSource,
     removeRecent,
     rescanFootage,
+    setAvatarFolder,
     setVoiceReference,
+    type AvatarState,
     type FootageReport,
     type ProjectSummary,
     type RecentItem,
@@ -24,6 +27,8 @@
   let footage = $state<FootageReport | null>(null);
   let recent = $state<RecentItem[]>([]);
   let voice = $state<VoiceState | null>(null);
+  let avatar = $state<AvatarState | null>(null);
+  let artPath = $state("");
   let referencePath = $state("");
   let error = $state<string | null>(null);
   let busy = $state(false);
@@ -41,6 +46,7 @@
     current = await getProject();
     footage = current === null ? null : await getFootage();
     voice = current === null ? null : await getVoice();
+    avatar = current === null ? null : await getAvatar();
   }
 
   async function run(action: () => Promise<ProjectSummary>): Promise<void> {
@@ -51,6 +57,7 @@
       view = "project";
       footage = await getFootage();
       voice = await getVoice();
+      avatar = await getAvatar();
       recent = await getRecent();
     } catch (err) {
       error = message(err);
@@ -113,6 +120,46 @@
     const path = await pickFile();
     if (path !== null) {
       await useReference(path);
+    }
+  }
+
+  /** Point the project at an avatar art folder (null clears it). The art is not copied. */
+  async function useArtFolder(path: string | null): Promise<void> {
+    const cleaned = path === null ? null : cleanPathInput(path);
+    if (cleaned === "") {
+      error = "Enter or choose the avatar art folder first.";
+      return;
+    }
+    busy = true;
+    error = null;
+    try {
+      avatar = await setAvatarFolder(cleaned);
+      current = await getProject();
+      artPath = "";
+    } catch (err) {
+      error = message(err);
+    } finally {
+      busy = false;
+    }
+  }
+
+  async function chooseArtFolder(): Promise<void> {
+    const path = await pickFolder();
+    if (path !== null) {
+      await useArtFolder(path);
+    }
+  }
+
+  function avatarText(state: AvatarState): string {
+    switch (state.status) {
+      case "not_configured":
+        return "No avatar art chosen yet.";
+      case "folder_missing":
+        return "The avatar art folder cannot be found.";
+      case "no_art":
+        return "The folder holds no usable avatar sprites.";
+      default:
+        return `${state.name}: ${state.expressions.length} expressions, default ${state.default_expression}.`;
     }
   }
 
@@ -292,6 +339,65 @@
       <button type="button" onclick={() => useReference(referencePath)} disabled={busy}>
         Use this path
       </button>
+    </section>
+
+    <section>
+      <h2>Avatar</h2>
+      {#if avatar !== null}
+        <p class:error={avatar.status === "folder_missing" || avatar.status === "no_art"}>
+          {avatarText(avatar)}
+        </p>
+        {#if avatar.art_folder !== null}
+          <dl>
+            <dt>Art folder</dt>
+            <dd>{avatar.resolved_folder}</dd>
+            {#if avatar.expressions.length > 0}
+              <dt>Expressions</dt>
+              <dd>
+                {#each avatar.expressions as expr, i (expr.id)}
+                  <span class:warn={!expr.complete} title={expr.states.join(", ")}>
+                    {expr.id}{expr.complete ? "" : " (incomplete)"}</span
+                  >{i < avatar.expressions.length - 1 ? ", " : ""}
+                {/each}
+              </dd>
+            {/if}
+            {#if Object.keys(avatar.emotion_map).length > 0}
+              <dt>Emotion map</dt>
+              <dd>
+                {Object.entries(avatar.emotion_map)
+                  .map(([emotion, expr]) => `${emotion} → ${expr}`)
+                  .join(", ")}
+              </dd>
+            {/if}
+          </dl>
+          {#if avatar.external}
+            <p class="hint">
+              The art stays in its own folder (it is not copied). Moving this project to another
+              computer needs the art there too, then choose the folder again.
+            </p>
+          {/if}
+        {/if}
+        {#if avatar.problem !== null}<p class="error">{avatar.problem}</p>{/if}
+        {#each avatar.warnings as item}
+          <p class="warn">{item}</p>
+        {/each}
+      {/if}
+      <p class="hint">
+        One folder per expression named like <code>01_smile</code>, each with four PNGs such as
+        <code>01a_smile_oicm.png</code> (<code>oi</code>/<code>ci</code> eyes open or closed,
+        <code>om</code>/<code>cm</code> mouth open or closed).
+      </p>
+      <label>
+        Art folder path
+        <input bind:value={artPath} placeholder="D:\Avatars\my avatar" disabled={busy} />
+      </label>
+      <button type="button" onclick={chooseArtFolder} disabled={busy}>Choose folder...</button>
+      <button type="button" onclick={() => useArtFolder(artPath)} disabled={busy}>
+        Use this path
+      </button>
+      {#if avatar !== null && avatar.art_folder !== null}
+        <button type="button" onclick={() => useArtFolder(null)} disabled={busy}>Clear</button>
+      {/if}
     </section>
   {/if}
 

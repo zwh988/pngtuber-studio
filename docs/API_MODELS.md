@@ -7,6 +7,9 @@ Ids are 12-char hex strings; durations are integer ms; errors are HTTP 400 `{"de
 ## `GET /api/voice`, `POST /api/voice/reference` : `VoiceState` (`backend/voice/profile.py`)
 `status` (`no_profile` | `no_reference` | `file_missing` | `unreadable` | `invalid` | `ready`), `ready`, `profile_id`, `name`, `reference_path`, `duration_ms`, `sample_rate`, `hash`, `problems`, `warnings`. api.ts assumes the clip fields can be null and the two lists are string arrays (not yet checked against the Python).
 
+## `GET /api/avatar`, `POST /api/avatar/folder` : `AvatarState` (`backend/avatar/scan.py`, M5-1)
+`status` (`not_configured` | `folder_missing` | `no_art` | `ready`), `art_folder` (as stored: relative to the project, or absolute POSIX), `resolved_folder` (disk path looked at), `external` (stored absolute), `name` (the folder's own name), `expressions: {id, order, folder, states: string[] ("oicm", "oiom", "cicm", "ciom"), complete}[]` (by order), `default_expression`, `emotion_map` (from `avatar.json`), `warnings`, `problem`, `can_undo`, `can_redo`, `undo_label`, `redo_label`, `save_error`. Body of `POST /api/avatar/folder`: `{path: string | null}` (an existing folder; null or "" clears; one undo step, the same folder again adds none). HTTP 400 when the folder does not exist. The art is never copied.
+
 ## `GET /api/lines`, `POST /api/lines/edit` : `LineBankState` (`backend/voice/linebank.py`)
 `lines: LineItem[]`, `emotions: string[]` (preset names in file order), `can_undo`, `can_redo`, `undo_label`, `redo_label`, `save_error`.
 
