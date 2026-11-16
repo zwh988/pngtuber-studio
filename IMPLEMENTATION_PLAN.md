@@ -90,14 +90,14 @@ Done when: moving a slider changes the audible result within about a second and 
 ## M5. Avatar (L)
 
 - [x] M5-0 Manual take trim: per-take start and end cut points (raw take time), applied before the automatic silence trim, short fade at a cut edge, undoable, trimmer in the take picker (added 2026-11-16)
-- [ ] M5-1 Art loader and validator (folder per expression `NN_name`, files `NNx_name_EEMM.png` with `oi`/`ci` eyes and `om`/`cm` mouth), fallback with warning
-- [ ] M5-2 Envelope extraction per take (about 100 Hz), cached
-- [ ] M5-3 Solver core: expression, mouth (hysteresis, min hold), seeded blink
-- [ ] M5-4 Solver: bounce, idle float, reactions (shake, hop, pop-in, squish), transform lanes
+- [x] M5-1 Art loader and validator (folder per expression `NN_name`, files `NNx_name_EEMM.png` with `oi`/`ci` eyes and `om`/`cm` mouth), fallback with warning
+- [x] M5-2 Envelope extraction per take (about 100 Hz), cached
+- [x] M5-3 Solver core: expression, mouth (hysteresis, min hold), seeded blink
+- [x] M5-4 Solver: bounce, idle float, reactions (shake, hop, pop-in, squish), transform lanes
 - [ ] M5-5 Generic lane system (keyframes, hold/smooth interpolation) shared with the timeline UI
 - [ ] M5-6 Canvas renderer in the preview with drag/resize writing keyframes
 - [ ] M5-7 Expression, parameter, and reaction lane UI; optional auto-key from line emotion
-- [ ] M5-8 Solver tests: determinism, seek accuracy, hysteresis
+- [x] M5-8 Solver tests: determinism, seek accuracy, hysteresis
 
 Done when: the live preview looks right and scrubbing to any frame always shows the same state.
 

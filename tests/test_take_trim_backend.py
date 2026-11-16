@@ -435,3 +435,25 @@ def test_trim_endpoint(tmp_path: Path) -> None:
     assert body["trim_start_ms"] == 800
     assert client.get(f"/api/takes/{TAKE}/trim?preview=1&start_ms=9999").status_code == 400
     assert client.get(f"/api/takes/{'9' * 12}/trim").status_code == 400
+
+
+def test_envelope_endpoint_follows_the_trim(tmp_path: Path) -> None:
+    """M5-2: the envelope is of the processed take, so a trim shortens it."""
+    pytest.importorskip("pedalboard")
+    pytest.importorskip("pyloudnorm")
+    from fastapi.testclient import TestClient
+
+    from backend.app import create_app
+
+    session, folder, _ = open_with_take(tmp_path)
+    client = TestClient(create_app(session=session))
+    whole = client.get(f"/api/takes/{TAKE}/envelope").json()
+    assert whole["hop_ms"] == 10
+    played = session.timeline().placements[0].duration_ms
+    assert played is not None
+    assert abs(len(whole["values"]) * 10 - played) <= 10
+    assert list((folder / "media" / "envelopes").glob("*.env.json"))
+    session.edit_lines([SetTakeTrimOp(take_id=TAKE, start_ms=800)])
+    cut = client.get(f"/api/takes/{TAKE}/envelope").json()
+    assert len(cut["values"]) < len(whole["values"]) - 40
+    assert client.get(f"/api/takes/{'9' * 12}/envelope").status_code == 404

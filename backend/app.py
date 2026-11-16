@@ -9,6 +9,7 @@ from fastapi.staticfiles import StaticFiles
 from pydantic import BaseModel
 
 from backend.audio.fxstate import FxState
+from backend.avatar.envelope import EnvelopeReport
 from backend.avatar.scan import AvatarState
 from backend.media.serve import range_response
 from backend.project.edit_ops import (
@@ -379,6 +380,17 @@ def create_app(
             return read_take_peaks(path, take_id, buckets)
         except PeaksError as exc:
             raise HTTPException(status_code=400, detail=str(exc)) from exc
+
+    @app.get("/api/takes/{take_id}/envelope")
+    def get_take_envelope(take_id: str, stretch: float = 1.0) -> EnvelopeReport:
+        # M5-2: the mouth's input. Measured from the processed take (CPU), cached.
+        try:
+            report = active.envelope(take_id, stretch)
+        except _API_ERRORS as exc:
+            raise HTTPException(status_code=400, detail=str(exc)) from exc
+        if report is None:
+            raise HTTPException(status_code=404, detail="take file not found")
+        return report
 
     @app.get("/api/takes/{take_id}/trim")
     def get_take_trim(

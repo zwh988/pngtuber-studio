@@ -14,7 +14,7 @@ from backend.audio.chainspec import FxChainError, processing_spec
 from backend.audio.trim import TrimBounds, processed_duration_ms, trimmed_duration_ms
 from backend.edl.anchoring import check_references, find_orphans
 from backend.edl.timemap import ClipSpan, clip_spans, timeline_duration, to_timeline
-from backend.project.schema import Project, Take
+from backend.project.schema import AvatarSettings, Project, Take
 from backend.voice.keys import fx_version as chain_version
 from backend.voice.overflow import PlacedLine, available_slack_ms, find_overflows
 from backend.voice.stretch import fit_stretch, stretched_duration_ms
@@ -96,6 +96,33 @@ class TimelinePlacement(BaseModel):
     trim: str = ""
 
 
+class TimelineKeyframe(BaseModel):
+    """An avatar lane key (M5-5) as the lane UI draws it."""
+
+    id: str
+    lane_id: str
+    value: float | str
+    interpolation: str
+    # Timeline time of the anchor; None when it cannot be mapped (orphaned, parked).
+    t_ms: int | None
+    anchor_clip_id: str
+    anchor_source_ms: int
+    orphaned: bool
+
+
+class TimelineReaction(BaseModel):
+    """A reaction (M5-4) as the reaction lane draws it."""
+
+    id: str
+    type: str
+    intensity: float
+    duration_ms: int
+    t_ms: int | None
+    anchor_clip_id: str
+    anchor_source_ms: int
+    orphaned: bool
+
+
 class TimelineState(BaseModel):
     clips: list[TimelineClip] = Field(default_factory=list)
     # Placed lines, ordered by start time (unmappable ones last).
@@ -116,6 +143,11 @@ class TimelineState(BaseModel):
     # cannot be used), so the browser drops decoded audio then and not before.
     fx_version: str = ""
     game_audio_db: float = 0.0
+    # Avatar (M5-5): keys and reactions ordered by time (unmappable last), and the
+    # avatar settings, so undo and redo bring all of it back with the timeline.
+    keyframes: list[TimelineKeyframe] = Field(default_factory=list)
+    reactions: list[TimelineReaction] = Field(default_factory=list)
+    avatar: AvatarSettings = Field(default_factory=AvatarSettings)
 
 
 class EditResult(BaseModel):
@@ -196,7 +228,55 @@ def build_timeline(
         redo_label=redo_label,
         fx_version=_chain_version(project),
         game_audio_db=project.game_audio_db,
+        keyframes=_build_keyframes(project, spans),
+        reactions=_build_reactions(project, spans),
+        avatar=project.avatar.model_copy(deep=True),
     )
+
+
+def _mapped(project: Project, spans: list[ClipSpan], item: object) -> int | None:
+    anchor = item.anchor  # type: ignore[attr-defined]
+    return to_timeline(project.clips, anchor, spans=spans)
+
+
+def _by_time(t_ms: int | None, item_id: str) -> tuple[bool, int, str]:
+    return (t_ms is None, t_ms or 0, item_id)
+
+
+def _build_keyframes(project: Project, spans: list[ClipSpan]) -> list[TimelineKeyframe]:
+    found = [
+        TimelineKeyframe(
+            id=key.id,
+            lane_id=key.lane_id,
+            value=key.value,
+            interpolation=key.interpolation,
+            t_ms=_mapped(project, spans, key),
+            anchor_clip_id=key.anchor.clip_id,
+            anchor_source_ms=key.anchor.source_ms,
+            orphaned=key.orphaned,
+        )
+        for key in project.keyframes
+    ]
+    found.sort(key=lambda k: _by_time(k.t_ms, k.id))
+    return found
+
+
+def _build_reactions(project: Project, spans: list[ClipSpan]) -> list[TimelineReaction]:
+    found = [
+        TimelineReaction(
+            id=r.id,
+            type=r.type,
+            intensity=r.intensity,
+            duration_ms=r.duration_ms,
+            t_ms=_mapped(project, spans, r),
+            anchor_clip_id=r.anchor.clip_id,
+            anchor_source_ms=r.anchor.source_ms,
+            orphaned=r.orphaned,
+        )
+        for r in project.reactions
+    ]
+    found.sort(key=lambda r: _by_time(r.t_ms, r.id))
+    return found
 
 
 def _chain_version(project: Project) -> str:

@@ -34,6 +34,9 @@ Slider limits: exaggeration 0.0 to 2.0, cfg_weight 0.0 to 1.0, default emotion `
 ## `GET /api/lines/{line_id}/takes` : `TakeItem[]` (`backend/voice/takes.py`)
 `id`, `line_id`, `seed`, `text` (snapshot), `exaggeration`, `cfg_weight`, `duration_ms`, `starred`, `active`, `created` (ISO), `raw_file`, `file_exists`, `trim_start_ms`, `trim_end_ms` (M5-0, null = no cut). Oldest first. Audio: `GET /media/take/{id}`.
 
+## `GET /api/takes/{take_id}/envelope?stretch=1.0` : `EnvelopeReport` (`backend/avatar/envelope.py`, M5-2)
+`take_id`, `stretch`, `hop_ms` (10), `values` (dBFS of the processed take as it plays, one per hop from its start; -100 = silence). The processed file is rendered first if needed, then measured once and cached in `media/envelopes/`. 404 without a take file, 400 for an unusable chain or stretch. The browser should not need it: the solver runs in Python and S10a serves its frame track.
+
 ## `GET /api/takes/{take_id}/trim` : `TakeTrimInfo` (`backend/voice/takes.py`, M5-0)
 `take_id`, `duration_ms`, `trim_start_ms`, `trim_end_ms` (the cuts this report was measured with), `stored_start_ms`, `stored_end_ms`, `auto_start_ms`, `auto_end_ms` (where the automatic silence trim keeps the take inside the cuts, raw ms), `silent`. With `?preview=1&start_ms=..&end_ms=..` (either may be left out = no cut) it measures those cuts instead, read only. HTTP 400 for an unknown take, a missing file or unacceptable cuts.
 
@@ -132,6 +135,28 @@ One `Session` holds the open project. Pattern for every mutating method: `with s
 - `voicePlayback.ts`: `PlayablePlacement { id, take_id, start_ms, duration_ms, orphaned, stretch? }` (a `TimelinePlacement` fits); `planVoices(placements, fromMs) -> VoiceStart[]` (pure); `class VoicePlayback(onError)` with `setPlacements`, `start(ms)`, `sync(ms)`, `stop()`, `dispose()`, `now()`, `running`. Decoded audio is cached per take id and stretch.
 - `stretch.ts`: `STRETCH_MIN` 1, `STRETCH_MAX` 1.25, `STRETCH_AUTO_MAX` 1.08, `STRETCH_WARN` 1.15 (copies of the backend values), `stretchText(1.083) = "+8.3%"`, `tightenTarget(fit, current)`.
 - `Editor.svelte` (selected placed-line bar): `nudgeEarlier(id)` (`min(overflow_ms, slack_ms)` earlier through `movePlacement`), `setStretch(id, stretch)` (`setPlacementStretch`, ignored when unchanged), a **Tighten** button, and a **Speed up** range input (1 to 1.25, step 0.01, applied on `change`).
+
+# Avatar edits (M5 S9: `backend/project/edit_ops.py`, `backend/project/avatar_commands.py`)
+
+Avatar ops are timeline `EditOp`s: send them through `POST /api/timeline/batch` `{label, ops}` (one undo step) and get `TimelineState` back. Times are timeline ms, stored as footage anchors.
+
+| `op` | fields |
+|---|---|
+| `add_keyframe` | `lane_id`, `timeline_ms`, `value` (number, or an expression name on `expression`), `interpolation?` (`hold` / `smooth`; default smooth for x, y, scale, rotation, else hold), `keyframe_id?` |
+| `key_lane` | `lane_id`, `timeline_ms`, `value`, `keyframe_id?`: changes the key already at that spot on that lane, else adds one (E hotkey, avatar drag) |
+| `move_keyframe` | `keyframe_id`, `timeline_ms` (an orphan is settled) |
+| `set_keyframe_value` | `keyframe_id`, `value` |
+| `set_keyframe_interpolation` | `keyframe_id`, `interpolation` (expression keys: hold only) |
+| `remove_keyframe` | `keyframe_id` |
+| `add_reaction` | `type` (`shake`, `hop`, `pop_in`, `squish`), `timeline_ms`, `intensity=1` (0 to 3), `duration_ms=500` (1 to 10000), `reaction_id?` |
+| `move_reaction` | `reaction_id`, `timeline_ms` |
+| `set_reaction` | `reaction_id`, `type?`, `intensity?`, `duration_ms?` |
+| `remove_reaction` | `reaction_id` |
+| `set_avatar_settings` | `x?`, `y?`, `scale?`, `rotation_deg?` (lane ranges), `auto_key_expression?` |
+
+Lanes (`backend/avatar/lanes.py`): `expression` (name), `bounce` 0-3 (1), `float_amp` 0-3 (1), `float_speed` 0-4 (1), `blink_rate` 0-4 (1), `mouth_sensitivity` 0.25-4 (1), `scale` 0.05-5, `x` -0.5-1.5, `y` -0.5-1.5, `rotation` -180-180 (the last four default to `AvatarSettings`). A value outside the range is HTTP 400. Labels: "Add key", "Add expression key", "Set key", "Move key", "Change key", "Change key easing", "Remove key", "Add reaction", "Move reaction", "Change reaction", "Remove reaction", "Change avatar settings".
+
+`TimelineState` gains `keyframes: TimelineKeyframe[]` (`id, lane_id, value, interpolation, t_ms|null, anchor_clip_id, anchor_source_ms, orphaned`), `reactions: TimelineReaction[]` (`id, type, intensity, duration_ms, t_ms|null, anchor_clip_id, anchor_source_ms, orphaned`), both ordered by time, and `avatar: AvatarSettings`. A cut that removes the footage under a key or reaction flags it orphaned (parked at the nearest edge), never deletes it.
 
 # Voice chain (M4 chat B, S3: `backend/audio/fxstate.py`, `backend/project/fx_ops.py`)
 

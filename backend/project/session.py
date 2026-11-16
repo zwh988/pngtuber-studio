@@ -34,6 +34,7 @@ from backend.audio.trim import (
     spec_with_manual_trim,
     validate_manual_trim,
 )
+from backend.avatar.envelope import EnvelopeReport, envelope_for
 from backend.avatar.scan import (
     AvatarState,
     avatar_status_text,
@@ -610,6 +611,21 @@ class Session:
             return ensure_processed(raw_path, raw_key, stretch, spec, cache=self._trims)
         except ProcessError as exc:
             raise SessionError(str(exc)) from exc
+
+    def envelope(self, take_id: str, stretch: float = 1.0) -> EnvelopeReport | None:
+        """Loudness envelope (M5-2) of a take as it plays: the processed file for this
+        stretch, rendered first when needed, then measured once and cached in
+        ``media/envelopes/``. None when the take or its file does not exist."""
+        path = self.processed_take_path(take_id, stretch)
+        if path is None:
+            return None
+        try:
+            found = envelope_for(path)
+        except (OSError, RuntimeError, ValueError) as exc:
+            raise SessionError(f"cannot measure the take's loudness: {exc}") from exc
+        return EnvelopeReport(
+            take_id=take_id, stretch=stretch, hop_ms=found.hop_ms, values=list(found.values)
+        )
 
     def storage(self) -> StorageReport:
         """Disk use per line and take, plus files no take points at."""

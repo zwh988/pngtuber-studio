@@ -173,6 +173,41 @@ export type TimelineState = {
   fx_version: string;
   /** Level of the footage's own sound in the preview mix, in dB (set in the Voice FX tab). */
   game_audio_db: number;
+  /** Avatar lane keys (M5-5), by time; `t_ms` null when the anchor cannot be mapped. */
+  keyframes: TimelineKeyframe[];
+  reactions: TimelineReaction[];
+  avatar: AvatarSettings;
+};
+
+export type TimelineKeyframe = {
+  id: string;
+  lane_id: string;
+  value: number | string;
+  interpolation: "hold" | "smooth";
+  t_ms: number | null;
+  anchor_clip_id: string;
+  anchor_source_ms: number;
+  orphaned: boolean;
+};
+
+export type TimelineReaction = {
+  id: string;
+  type: "shake" | "hop" | "pop_in" | "squish";
+  intensity: number;
+  duration_ms: number;
+  t_ms: number | null;
+  anchor_clip_id: string;
+  anchor_source_ms: number;
+  orphaned: boolean;
+};
+
+export type AvatarSettings = {
+  art_folder: string | null;
+  x: number;
+  y: number;
+  scale: number;
+  rotation_deg: number;
+  auto_key_expression: boolean;
 };
 
 export type EditResult = {

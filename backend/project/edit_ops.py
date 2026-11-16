@@ -13,6 +13,19 @@ from typing import Annotated, Literal
 
 from pydantic import BaseModel, ConfigDict, Field
 
+from backend.project.avatar_commands import (
+    AddKeyframe,
+    AddReaction,
+    KeyLane,
+    MoveKeyframe,
+    MoveReaction,
+    RemoveKeyframe,
+    RemoveReaction,
+    SetAvatarSettings,
+    SetKeyframeInterpolation,
+    SetKeyframeValue,
+    SetReaction,
+)
 from backend.project.clip_commands import AddClip, RemoveClip, ReorderClip, SetSpeed
 from backend.project.commands import Command, CommandError
 from backend.project.cut_commands import RippleDelete, SplitClip, TrimClip
@@ -100,6 +113,88 @@ class SetPlacementStretchOp(_Op):
     stretch: float
 
 
+# --- avatar (M5-5): keys and reactions take timeline times, stored as anchors -----
+
+
+class AddKeyframeOp(_Op):
+    op: Literal["add_keyframe"] = "add_keyframe"
+    lane_id: str
+    timeline_ms: int
+    value: float | str
+    interpolation: Literal["hold", "smooth"] | None = None  # None: the lane's default
+    keyframe_id: str | None = None
+
+
+class KeyLaneOp(_Op):
+    """Set a lane at a time: change the key already there, else add one."""
+
+    op: Literal["key_lane"] = "key_lane"
+    lane_id: str
+    timeline_ms: int
+    value: float | str
+    keyframe_id: str | None = None
+
+
+class MoveKeyframeOp(_Op):
+    op: Literal["move_keyframe"] = "move_keyframe"
+    keyframe_id: str
+    timeline_ms: int
+
+
+class SetKeyframeValueOp(_Op):
+    op: Literal["set_keyframe_value"] = "set_keyframe_value"
+    keyframe_id: str
+    value: float | str
+
+
+class SetKeyframeInterpolationOp(_Op):
+    op: Literal["set_keyframe_interpolation"] = "set_keyframe_interpolation"
+    keyframe_id: str
+    interpolation: Literal["hold", "smooth"]
+
+
+class RemoveKeyframeOp(_Op):
+    op: Literal["remove_keyframe"] = "remove_keyframe"
+    keyframe_id: str
+
+
+class AddReactionOp(_Op):
+    op: Literal["add_reaction"] = "add_reaction"
+    type: str
+    timeline_ms: int
+    intensity: float = 1.0
+    duration_ms: int = 500
+    reaction_id: str | None = None
+
+
+class MoveReactionOp(_Op):
+    op: Literal["move_reaction"] = "move_reaction"
+    reaction_id: str
+    timeline_ms: int
+
+
+class SetReactionOp(_Op):
+    op: Literal["set_reaction"] = "set_reaction"
+    reaction_id: str
+    type: str | None = None
+    intensity: float | None = None
+    duration_ms: int | None = None
+
+
+class RemoveReactionOp(_Op):
+    op: Literal["remove_reaction"] = "remove_reaction"
+    reaction_id: str
+
+
+class SetAvatarSettingsOp(_Op):
+    op: Literal["set_avatar_settings"] = "set_avatar_settings"
+    x: float | None = None
+    y: float | None = None
+    scale: float | None = None
+    rotation_deg: float | None = None
+    auto_key_expression: bool | None = None
+
+
 EditOp = Annotated[
     AddClipOp
     | RemoveClipOp
@@ -111,7 +206,18 @@ EditOp = Annotated[
     | AddPlacementOp
     | MovePlacementOp
     | RemovePlacementOp
-    | SetPlacementStretchOp,
+    | SetPlacementStretchOp
+    | AddKeyframeOp
+    | KeyLaneOp
+    | MoveKeyframeOp
+    | SetKeyframeValueOp
+    | SetKeyframeInterpolationOp
+    | RemoveKeyframeOp
+    | AddReactionOp
+    | MoveReactionOp
+    | SetReactionOp
+    | RemoveReactionOp
+    | SetAvatarSettingsOp,
     Field(discriminator="op"),
 ]
 
@@ -146,4 +252,42 @@ def build_command(op: EditOp) -> Command:
         return RemovePlacement(op.placement_id)
     if isinstance(op, SetPlacementStretchOp):
         return SetPlacementStretch(op.placement_id, op.stretch)
+    return _build_avatar_command(op)
+
+
+def _build_avatar_command(op: EditOp) -> Command:
+    if isinstance(op, AddKeyframeOp):
+        return AddKeyframe(
+            op.lane_id, op.timeline_ms, op.value, op.interpolation, keyframe_id=op.keyframe_id
+        )
+    if isinstance(op, KeyLaneOp):
+        return KeyLane(op.lane_id, op.timeline_ms, op.value, keyframe_id=op.keyframe_id)
+    if isinstance(op, MoveKeyframeOp):
+        return MoveKeyframe(op.keyframe_id, op.timeline_ms)
+    if isinstance(op, SetKeyframeValueOp):
+        return SetKeyframeValue(op.keyframe_id, op.value)
+    if isinstance(op, SetKeyframeInterpolationOp):
+        return SetKeyframeInterpolation(op.keyframe_id, op.interpolation)
+    if isinstance(op, RemoveKeyframeOp):
+        return RemoveKeyframe(op.keyframe_id)
+    if isinstance(op, AddReactionOp):
+        return AddReaction(
+            op.type, op.timeline_ms, op.intensity, op.duration_ms, reaction_id=op.reaction_id
+        )
+    if isinstance(op, MoveReactionOp):
+        return MoveReaction(op.reaction_id, op.timeline_ms)
+    if isinstance(op, SetReactionOp):
+        return SetReaction(
+            op.reaction_id, type_=op.type, intensity=op.intensity, duration_ms=op.duration_ms
+        )
+    if isinstance(op, RemoveReactionOp):
+        return RemoveReaction(op.reaction_id)
+    if isinstance(op, SetAvatarSettingsOp):
+        return SetAvatarSettings(
+            x=op.x,
+            y=op.y,
+            scale=op.scale,
+            rotation_deg=op.rotation_deg,
+            auto_key_expression=op.auto_key_expression,
+        )
     raise CommandError(f"unsupported edit {op!r}")
