@@ -21,9 +21,19 @@ from backend.audio.cleanup import run_cleanup
 from backend.audio.fxpresets import load_fx_presets_file
 from backend.audio.fxstate import FxProcessing, FxState, build_fx_state
 from backend.audio.prefetch import Prefetcher, plan_jobs
-from backend.audio.processed import TrimCache, ensure_processed, trim_bounds_for
+from backend.audio.processed import (
+    TrimCache,
+    ensure_processed,
+    measure_bounds,
+    trim_bounds_for,
+)
 from backend.audio.render import ProcessError
-from backend.audio.trim import TrimBounds
+from backend.audio.trim import (
+    ManualTrimError,
+    TrimBounds,
+    spec_with_manual_trim,
+    validate_manual_trim,
+)
 from backend.edl.anchoring import check_references, check_voice_references
 from backend.project.clip_commands import AddClip
 from backend.project.commands import (
@@ -94,6 +104,7 @@ from backend.voice.takes import (
     TakeError,
     TakeItem,
     TakeRemoval,
+    TakeTrimInfo,
     build_delete_report,
     build_storage_report,
     build_take,
@@ -510,6 +521,57 @@ class Session:
             except TakeError:
                 return None
 
+    def take_trim(
+        self,
+        take_id: str,
+        *,
+        preview: bool = False,
+        start_ms: int | None = None,
+        end_ms: int | None = None,
+    ) -> TakeTrimInfo:
+        """Trim view of one take for the trimmer (M5-0): the stored cut points, or with
+        ``preview`` the given ones, and where the automatic trim keeps the take inside
+        them. Reads the raw take (CPU only); nothing is changed or saved."""
+        with self._lock:
+            _, stack = self._require_open()
+            assert self._folder is not None
+            take = next((t for t in stack.project.takes if t.id == take_id), None)
+            if take is None:
+                raise SessionError(f"unknown take id {take_id!r}")
+            try:
+                raw_path = TakeStore(self._folder).path(take.raw_file)
+            except TakeError as exc:
+                raise SessionError(str(exc)) from exc
+            stored = (take.trim_start_ms, take.trim_end_ms)
+            duration_ms = take.duration_ms
+        cuts = stored
+        if preview:
+            try:
+                cuts = validate_manual_trim(start_ms, end_ms, duration_ms)
+            except ManualTrimError as exc:
+                raise SessionError(str(exc)) from exc
+        try:
+            if cuts == stored:
+                bounds = trim_bounds_for(
+                    raw_path, self._trims, manual_start_ms=cuts[0], manual_end_ms=cuts[1]
+                )
+            else:  # a preview: measure without touching the stored sidecar
+                bounds = measure_bounds(raw_path, cuts[0], cuts[1])
+        except ProcessError as exc:
+            raise SessionError(str(exc)) from exc
+        rate = bounds.sample_rate
+        return TakeTrimInfo(
+            take_id=take_id,
+            duration_ms=duration_ms,
+            trim_start_ms=cuts[0],
+            trim_end_ms=cuts[1],
+            stored_start_ms=stored[0],
+            stored_end_ms=stored[1],
+            auto_start_ms=bounds.start * 1000 // rate,
+            auto_end_ms=-(-bounds.end * 1000 // rate),
+            silent=bounds.silent,
+        )
+
     def processed_take_path(self, take_id: str, stretch: float = 1.0) -> Path | None:
         """Disk path of a take run through the open project's voice chain (trim,
         stretch, EQ, compressor, effects, loudness), rendered first when it does not
@@ -533,6 +595,7 @@ class Session:
                 spec = processing_spec(project.fx_chain)
             except FxChainError as exc:
                 raise SessionError(f"the voice chain cannot be used: {exc}") from exc
+            spec = spec_with_manual_trim(spec, take.trim_start_ms, take.trim_end_ms)
             raw_key = take.raw_key
         if not raw_path.is_file():
             return None
@@ -748,7 +811,12 @@ class Session:
             if take is None:
                 continue
             try:
-                found[take_id] = trim_bounds_for(store.path(take.raw_file), self._trims)
+                found[take_id] = trim_bounds_for(
+                    store.path(take.raw_file),
+                    self._trims,
+                    manual_start_ms=take.trim_start_ms,
+                    manual_end_ms=take.trim_end_ms,
+                )
             except (ProcessError, TakeError):
                 continue
         return found

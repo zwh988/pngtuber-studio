@@ -70,8 +70,8 @@ def make_project(stretch: float = 1.0) -> Project:
 # ---- schema ---------------------------------------------------------------
 
 
-def test_schema_is_version_two_and_stretch_defaults_to_one() -> None:
-    assert SCHEMA_VERSION == 2
+def test_schema_has_stretch_and_stretch_defaults_to_one() -> None:
+    assert SCHEMA_VERSION >= 2
     assert make_project().placements[0].stretch == 1.0
 
 
@@ -96,7 +96,7 @@ def v1_data() -> dict:
 
 
 def test_migration_adds_stretch_and_bumps_the_version() -> None:
-    result = migrate(v1_data())
+    result = migrate(v1_data(), target=2)
     assert result["schema_version"] == 2
     assert result["placements"][0]["stretch"] == 1.0
     assert Project.model_validate(result).placements[0].stretch == 1.0
@@ -112,7 +112,7 @@ def test_migration_keeps_an_existing_value_and_does_not_mutate_input() -> None:
 
 
 def test_migration_works_without_placements() -> None:
-    assert migrate({"schema_version": 1, "name": "x"})["schema_version"] == 2
+    assert migrate({"schema_version": 1, "name": "x"}, target=2)["schema_version"] == 2
 
 
 # ---- command --------------------------------------------------------------

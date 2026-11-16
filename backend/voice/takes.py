@@ -109,6 +109,27 @@ class TakeItem(BaseModel):
     created: datetime
     raw_file: str
     file_exists: bool
+    trim_start_ms: int | None = None  # manual cut points (M5-0), raw take time
+    trim_end_ms: int | None = None
+
+
+class TakeTrimInfo(BaseModel):
+    """What the trimmer shows for one take (M5-0). Times are raw take ms.
+
+    ``trim_start_ms`` / ``trim_end_ms`` are the cut points this report was measured
+    with (the stored ones, or the ones previewed); ``auto_start_ms`` / ``auto_end_ms``
+    are where the automatic silence trim then keeps the take, inside those cuts.
+    """
+
+    take_id: str
+    duration_ms: int
+    trim_start_ms: int | None
+    trim_end_ms: int | None
+    stored_start_ms: int | None
+    stored_end_ms: int | None
+    auto_start_ms: int
+    auto_end_ms: int
+    silent: bool
 
 
 class AddTakeResult(BaseModel):
@@ -131,6 +152,8 @@ def build_take_item(take: Take, line: Line, file_exists: bool) -> TakeItem:
         created=take.created,
         raw_file=take.raw_file,
         file_exists=file_exists,
+        trim_start_ms=take.trim_start_ms,
+        trim_end_ms=take.trim_end_ms,
     )
 
 

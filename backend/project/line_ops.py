@@ -20,6 +20,7 @@ from backend.project.line_commands import (
     SetLineEmotion,
     SetLineExaggeration,
     SetLineText,
+    SetTakeTrim,
     StarTake,
 )
 
@@ -83,6 +84,15 @@ class StarTakeOp(_Op):
     starred: bool = True
 
 
+class SetTakeTrimOp(_Op):
+    """Manual take trim (M5-0): cut points in raw take time, null = no cut."""
+
+    op: Literal["set_take_trim"] = "set_take_trim"
+    take_id: str
+    start_ms: int | None = None
+    end_ms: int | None = None
+
+
 LineEditOp = Annotated[
     AddLineOp
     | RemoveLineOp
@@ -92,7 +102,8 @@ LineEditOp = Annotated[
     | SetLineCfgWeightOp
     | SetAllowOverlapOp
     | SetActiveTakeOp
-    | StarTakeOp,
+    | StarTakeOp
+    | SetTakeTrimOp,
     Field(discriminator="op"),
 ]
 
@@ -132,4 +143,6 @@ def build_line_command(
         return SetActiveTake(op.line_id, op.take_id)
     if isinstance(op, StarTakeOp):
         return StarTake(op.take_id, op.starred)
+    if isinstance(op, SetTakeTrimOp):
+        return SetTakeTrim(op.take_id, op.start_ms, op.end_ms)
     raise CommandError(f"unsupported edit {op!r}")

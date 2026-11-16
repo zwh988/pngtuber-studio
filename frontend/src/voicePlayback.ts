@@ -13,6 +13,8 @@ export interface PlayablePlacement {
   orphaned: boolean;
   /** Speed-up of the audio (1 or missing: as recorded). `duration_ms` is the length that plays. */
   stretch?: number;
+  /** The take's manual trim tag (M5-0; "" or missing: no cut). Part of the cache key. */
+  trim?: string;
 }
 
 /** One take to start: `delayMs` after "now", `offsetMs` into the take's audio. */
@@ -52,11 +54,12 @@ export function planVoices(placements: PlayablePlacement[], fromMs: number): Voi
 }
 
 /**
- * Cache key of one decoded audio file: the take, the stretch, and the voice chain version
- * (`fx_version`). A chain edit changes the version, so the old audio is never played again.
+ * Cache key of one decoded audio file: the take, the stretch, the voice chain version
+ * (`fx_version`) and the take's manual trim. A chain edit or a trim changes the key, so the old
+ * audio is never played again.
  */
-function bufferKey(takeId: string, stretch: number, fxVersion: string): string {
-  return `${takeId}@${stretch}@${fxVersion}`;
+function bufferKey(takeId: string, stretch: number, fxVersion: string, trim: string): string {
+  return `${takeId}@${stretch}@${fxVersion}@${trim}`;
 }
 
 /** How far the voice clock may drift from the player's playhead before it is restarted. */
@@ -75,7 +78,7 @@ export const DRIFT_MS = 120;
  */
 export class VoicePlayback {
   private readonly graph: AudioGraph;
-  /** Decoded audio, keyed by take id, stretch and fx_version. */
+  /** Decoded audio, keyed by take id, stretch, fx_version and trim. */
   private readonly buffers = new Map<string, AudioBuffer>();
   private readonly loading = new Set<string>();
   private readonly failed = new Set<string>();
@@ -142,8 +145,10 @@ export class VoicePlayback {
     this.baseMs = timelineMs;
     const byId = new Map(this.placements.map((p) => [p.id, p]));
     for (const item of planVoices(this.placements, timelineMs)) {
-      const stretch = byId.get(item.placementId)?.stretch ?? 1;
-      const buffer = this.buffers.get(bufferKey(item.takeId, stretch, this.fxVersion));
+      const placed = byId.get(item.placementId);
+      const stretch = placed?.stretch ?? 1;
+      const trim = placed?.trim ?? "";
+      const buffer = this.buffers.get(bufferKey(item.takeId, stretch, this.fxVersion, trim));
       if (buffer === undefined) {
         continue; // still decoding: `load` re-plans when it lands
       }
@@ -196,7 +201,7 @@ export class VoicePlayback {
     const wanted = new Set<string>();
     for (const p of this.placements) {
       if (p.take_id !== null && !p.orphaned) {
-        wanted.add(bufferKey(p.take_id, p.stretch ?? 1, this.fxVersion));
+        wanted.add(bufferKey(p.take_id, p.stretch ?? 1, this.fxVersion, p.trim ?? ""));
       }
     }
     return wanted;
@@ -223,21 +228,21 @@ export class VoicePlayback {
     }
     for (const p of this.placements) {
       if (p.take_id !== null && !p.orphaned) {
-        void this.load(p.take_id, p.stretch ?? 1);
+        void this.load(p.take_id, p.stretch ?? 1, p.trim ?? "");
       }
     }
   }
 
   /** Fetch and decode one processed take (once). A take that fails is reported once and left silent. */
-  private async load(takeId: string, stretch: number): Promise<void> {
+  private async load(takeId: string, stretch: number, trim: string): Promise<void> {
     const version = this.fxVersion;
-    const key = bufferKey(takeId, stretch, version);
+    const key = bufferKey(takeId, stretch, version, trim);
     if (this.buffers.has(key) || this.loading.has(key) || this.failed.has(key)) {
       return;
     }
     this.loading.add(key);
     try {
-      const response = await fetch(processedTakeUrl(takeId, stretch, version));
+      const response = await fetch(processedTakeUrl(takeId, stretch, version, trim));
       if (!response.ok) {
         throw new Error(`HTTP ${response.status}`);
       }

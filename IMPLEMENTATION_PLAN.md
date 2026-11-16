@@ -89,7 +89,8 @@ Done when: moving a slider changes the audible result within about a second and 
 
 ## M5. Avatar (L)
 
-- [ ] M5-1 Art loader and validator (`expression_eyes_mouth.png`), fallback to neutral with warning
+- [ ] M5-0 Manual take trim: per-take start and end cut points (raw take time), applied before the automatic silence trim, short fade at a cut edge, undoable, trimmer in the take picker (added 2026-11-16)
+- [ ] M5-1 Art loader and validator (folder per expression `NN_name`, files `NNx_name_EEMM.png` with `oi`/`ci` eyes and `om`/`cm` mouth), fallback with warning
 - [ ] M5-2 Envelope extraction per take (about 100 Hz), cached
 - [ ] M5-3 Solver core: expression, mouth (hysteresis, min hold), seeded blink
 - [ ] M5-4 Solver: bounce, idle float, reactions (shake, hop, pop-in, squish), transform lanes

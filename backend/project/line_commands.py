@@ -14,6 +14,7 @@ from typing import Any
 
 from pydantic import ValidationError
 
+from backend.audio.trim import ManualTrimError, validate_manual_trim
 from backend.project.commands import Command, CommandError
 from backend.project.schema import Line, Project, Take, new_id
 
@@ -293,3 +294,48 @@ class StarTake(Command):
         if self._old is None:
             raise CommandError("nothing to restore: command was not applied")
         _find_take(project, self.take_id).starred = self._old
+
+
+class SetTakeTrim(Command):
+    """Set a take's manual cut points (M5-0), in raw take time; None = no cut.
+
+    Metadata only: the raw file is never touched (rule 1). The cut points go into
+    the take's processed key, so only that take's processed audio changes.
+    """
+
+    def __init__(self, take_id: str, start_ms: int | None, end_ms: int | None) -> None:
+        self.take_id = take_id
+        self.start_ms = start_ms
+        self.end_ms = end_ms
+        self._old: tuple[int | None, int | None] | None = None
+
+    @property
+    def label(self) -> str:
+        if self.start_ms is None and self.end_ms is None:
+            return "Reset take trim"
+        return "Trim take"
+
+    def apply(self, project: Project) -> None:
+        take = _find_take(project, self.take_id)
+        try:
+            new = validate_manual_trim(self.start_ms, self.end_ms, take.duration_ms)
+        except ManualTrimError as exc:
+            raise CommandError(str(exc)) from exc
+        old = (take.trim_start_ms, take.trim_end_ms)
+        if new == old:
+            raise NoChange("the take already has that trim")
+        self._old = old
+        _write_trim(take, new)
+
+    def revert(self, project: Project) -> None:
+        if self._old is None:
+            raise CommandError("nothing to restore: command was not applied")
+        _write_trim(_find_take(project, self.take_id), self._old)
+
+
+def _write_trim(take: Take, cuts: tuple[int | None, int | None]) -> None:
+    # Clear first: assigning one side at a time could pass through a state the
+    # model validator refuses (start after the old end).
+    take.trim_start_ms = None
+    take.trim_end_ms = None
+    take.trim_start_ms, take.trim_end_ms = cuts

@@ -24,6 +24,7 @@ from typing import Any
 from backend.audio.chainspec import FxChainError, processing_spec
 from backend.audio.processed import TrimCache, ensure_processed, processed_path
 from backend.audio.render import ProcessError
+from backend.audio.trim import spec_with_manual_trim
 from backend.audio.wanted import played_takes
 from backend.project.schema import Project
 from backend.voice.takes import TakeError
@@ -61,10 +62,15 @@ def plan_jobs(folder: Path, project: Project) -> list[RenderJob]:
     for played in played_takes(project):
         try:
             raw_path = store.path(played.raw_file)
-            dest = processed_path(raw_path, played.raw_key, played.stretch, spec)
+            take_spec = spec_with_manual_trim(
+                spec, played.trim_start_ms, played.trim_end_ms
+            )
+            dest = processed_path(raw_path, played.raw_key, played.stretch, take_spec)
         except (TakeError, ProcessError):
             continue
-        jobs.append(RenderJob(raw_path, played.raw_key, played.stretch, spec, dest))
+        jobs.append(
+            RenderJob(raw_path, played.raw_key, played.stretch, take_spec, dest)
+        )
     return jobs
 
 

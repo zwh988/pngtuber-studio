@@ -152,6 +152,8 @@ export type TimelinePlacement = {
   raw_duration_ms: number | null;
   /** The stretch that clears this line's overflow exactly; null when it has none or none can. */
   fit_stretch: number | null;
+  /** The playing take's manual cut points as a tag ("" without a cut, M5-0); part of the audio cache key. */
+  trim: string;
 };
 
 export type TimelineState = {
@@ -384,7 +386,40 @@ export type TakeItem = {
   created: string;
   raw_file: string;
   file_exists: boolean;
+  /** Manual cut points in raw take ms (M5-0); null = no cut on that side. */
+  trim_start_ms: number | null;
+  trim_end_ms: number | null;
 };
+
+/** `GET /api/takes/{id}/trim`: what the trimmer shows (raw take ms). */
+export type TakeTrimInfo = {
+  take_id: string;
+  duration_ms: number;
+  /** The cut points this report was measured with (stored, or the previewed ones). */
+  trim_start_ms: number | null;
+  trim_end_ms: number | null;
+  stored_start_ms: number | null;
+  stored_end_ms: number | null;
+  /** Where the automatic silence trim keeps the take, inside the cut points. */
+  auto_start_ms: number;
+  auto_end_ms: number;
+  silent: boolean;
+};
+
+/** The stored trim, or (with `preview`) the automatic trim measured inside the given cuts. */
+export function getTakeTrim(
+  takeId: string,
+  preview?: { start_ms: number | null; end_ms: number | null },
+): Promise<TakeTrimInfo> {
+  let url = `/api/takes/${encodeURIComponent(takeId)}/trim`;
+  if (preview !== undefined) {
+    const parts = ["preview=1"];
+    if (preview.start_ms !== null) parts.push(`start_ms=${Math.round(preview.start_ms)}`);
+    if (preview.end_ms !== null) parts.push(`end_ms=${Math.round(preview.end_ms)}`);
+    url += `?${parts.join("&")}`;
+  }
+  return request<TakeTrimInfo>(url);
+}
 
 export type TakeDeleteReport = {
   removed_take_count: number;
@@ -476,7 +511,8 @@ export type LineEditOp =
   | { op: "set_line_cfg_weight"; line_id: string; value: number | null }
   | { op: "set_allow_overlap"; line_id: string; value: boolean }
   | { op: "set_active_take"; line_id: string; take_id: string | null }
-  | { op: "star_take"; take_id: string; starred?: boolean };
+  | { op: "star_take"; take_id: string; starred?: boolean }
+  | { op: "set_take_trim"; take_id: string; start_ms: number | null; end_ms: number | null };
 
 export const EXAGGERATION_MIN = 0;
 export const EXAGGERATION_MAX = 2;
@@ -553,9 +589,17 @@ export function takeMediaUrl(takeId: string, stretch = 1): string {
  * editor plays and export writes. `fxVersion` is `TimelineState.fx_version`; it only makes the
  * URL change with the chain (the backend uses the open project's chain, never one from the URL).
  */
-export function processedTakeUrl(takeId: string, stretch: number, fxVersion: string): string {
+export function processedTakeUrl(
+  takeId: string,
+  stretch: number,
+  fxVersion: string,
+  trim = "",
+): string {
+  // `t` (the take's manual trim tag) is ignored by the server, like `v`: it only keeps the
+  // browser cache honest after a trim.
   return (
     `/media/take/${encodeURIComponent(takeId)}?processed=1` +
-    `&stretch=${stretch}&v=${encodeURIComponent(fxVersion)}`
+    `&stretch=${stretch}&v=${encodeURIComponent(fxVersion)}` +
+    (trim === "" ? "" : `&t=${encodeURIComponent(trim)}`)
   );
 }

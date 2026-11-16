@@ -91,6 +91,9 @@ class TimelinePlacement(BaseModel):
     # The stretch that would remove this line's overflow exactly; None when it does
     # not overflow or no stretch can fix it. May be above the allowed maximum.
     fit_stretch: float | None = None
+    # The playing take's manual cut points (M5-0) as a short tag, "" without a cut.
+    # The browser keys decoded audio by it, so a trim never plays stale audio.
+    trim: str = ""
 
 
 class TimelineState(BaseModel):
@@ -255,10 +258,18 @@ def _build_placements(
                 orphaned=placement.orphaned,
                 stretch=placement.stretch,
                 raw_duration_ms=raw_duration,
+                trim="" if take is None else trim_tag(take.trim_start_ms, take.trim_end_ms),
             )
         )
     shown.sort(key=lambda p: (p.start_ms is None, p.start_ms or 0, p.id))
     return mark_overflows(shown)
+
+
+def trim_tag(start_ms: int | None, end_ms: int | None) -> str:
+    """Short tag of a take's manual cut points: "" for none, else "<start>-<end>"."""
+    if start_ms is None and end_ms is None:
+        return ""
+    return f"{'' if start_ms is None else start_ms}-{'' if end_ms is None else end_ms}"
 
 
 def mark_overflows(placements: Sequence[TimelinePlacement]) -> list[TimelinePlacement]:

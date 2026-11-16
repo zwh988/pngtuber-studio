@@ -42,7 +42,7 @@ from backend.voice.peaks import PeaksError, PeaksReport, read_take_peaks
 from backend.voice.profile import VoiceState
 from backend.voice.stretchrender import StretchError, ensure_stretched
 from backend.voice.subprocess_worker import SubprocessWorker, default_worker_log_path
-from backend.voice.takes import StorageReport, TakeDeleteReport, TakeItem
+from backend.voice.takes import StorageReport, TakeDeleteReport, TakeItem, TakeTrimInfo
 
 APP_NAME = "PNGtuber Studio"
 
@@ -358,6 +358,22 @@ def create_app(
         try:
             return read_take_peaks(path, take_id, buckets)
         except PeaksError as exc:
+            raise HTTPException(status_code=400, detail=str(exc)) from exc
+
+    @app.get("/api/takes/{take_id}/trim")
+    def get_take_trim(
+        take_id: str,
+        preview: bool = False,
+        start_ms: int | None = None,
+        end_ms: int | None = None,
+    ) -> TakeTrimInfo:
+        # M5-0 trimmer: the stored cuts, or (preview=1) the given ones, with the
+        # automatic trim measured inside them. Read only.
+        try:
+            return active.take_trim(
+                take_id, preview=preview, start_ms=start_ms, end_ms=end_ms
+            )
+        except _API_ERRORS as exc:
             raise HTTPException(status_code=400, detail=str(exc)) from exc
 
     def run_edit(ops: Sequence[EditOp], label: str | None = None) -> TimelineState:

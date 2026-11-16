@@ -24,7 +24,7 @@ from pydantic import (
     model_validator,
 )
 
-SCHEMA_VERSION = 2
+SCHEMA_VERSION = 3
 
 # Placement.stretch is a speed-up factor for a placed line (Tighten, M3-9):
 # 1.0 plays the take as it is, 1.25 plays it 25 percent faster (shorter).
@@ -181,6 +181,17 @@ class Take(_Model):
     duration_ms: Ms
     starred: bool = False
     created: datetime = Field(default_factory=_utcnow)
+    # Manual trim (schema v3, M5-0): cut points in raw take time; None means no
+    # cut on that side. Metadata only: the raw file is never touched (rule 1).
+    trim_start_ms: Ms | None = None
+    trim_end_ms: PositiveMs | None = None
+
+    @model_validator(mode="after")
+    def _check_trim(self) -> "Take":
+        start, end = self.trim_start_ms, self.trim_end_ms
+        if start is not None and end is not None and start >= end:
+            raise ValueError("trim_start_ms must be before trim_end_ms")
+        return self
 
 
 class Placement(_Model):

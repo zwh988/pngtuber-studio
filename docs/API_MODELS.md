@@ -24,11 +24,15 @@ Ids are 12-char hex strings; durations are integer ms; errors are HTTP 400 `{"de
 | `set_allow_overlap` | `line_id`, `value` |
 | `set_active_take` | `line_id`, `take_id` (null clears) |
 | `star_take` | `take_id`, `starred=true` |
+| `set_take_trim` | `take_id`, `start_ms` (int or null), `end_ms` (int or null): manual cut points in raw take ms (M5-0). A cut at 0 or at the take end is stored as null; at least 200 ms must remain; start before end. Labels "Trim take" / "Reset take trim". The same cuts again change nothing (no undo step) |
 
 Slider limits: exaggeration 0.0 to 2.0, cfg_weight 0.0 to 1.0, default emotion `neutral`.
 
 ## `GET /api/lines/{line_id}/takes` : `TakeItem[]` (`backend/voice/takes.py`)
-`id`, `line_id`, `seed`, `text` (snapshot), `exaggeration`, `cfg_weight`, `duration_ms`, `starred`, `active`, `created` (ISO), `raw_file`, `file_exists`. Oldest first. Audio: `GET /media/take/{id}`.
+`id`, `line_id`, `seed`, `text` (snapshot), `exaggeration`, `cfg_weight`, `duration_ms`, `starred`, `active`, `created` (ISO), `raw_file`, `file_exists`, `trim_start_ms`, `trim_end_ms` (M5-0, null = no cut). Oldest first. Audio: `GET /media/take/{id}`.
+
+## `GET /api/takes/{take_id}/trim` : `TakeTrimInfo` (`backend/voice/takes.py`, M5-0)
+`take_id`, `duration_ms`, `trim_start_ms`, `trim_end_ms` (the cuts this report was measured with), `stored_start_ms`, `stored_end_ms`, `auto_start_ms`, `auto_end_ms` (where the automatic silence trim keeps the take inside the cuts, raw ms), `silent`. With `?preview=1&start_ms=..&end_ms=..` (either may be left out = no cut) it measures those cuts instead, read only. HTTP 400 for an unknown take, a missing file or unacceptable cuts.
 
 ## `POST /api/takes/delete`, `POST /api/lines/delete` : `TakeDeleteReport`
 `removed_take_count`, `removed_line`, `freed_bytes`, `failed_files`, `cleared_active_line_ids`, `cleared_override_placement_ids`.
@@ -59,7 +63,7 @@ Placement ops are part of the timeline `EditOp` union, so they also work inside 
 
 Rules: a line must exist and have an active take (error "generate the line first: it has no take yet"); the time must fall on footage (`0 <= t < timeline duration`, else "there is no footage at ..."); a duplicate or malformed `placement_id` is refused; moving an orphaned placement clears `orphaned` and undo brings it back. Remove keeps the line and its takes. Stretch: the value must be within 1.0 to 1.25 (else "stretch must be between 1.0 and 1.25") and different from the current one (else "the line already has that stretch"). Labels: "Place line", "Move placed line", "Remove placed line", "Tighten placed line". Errors are HTTP 400 `{"detail": message}`.
 
-`TimelineState.placements: TimelinePlacement[]` (`backend/project/timeline.py`), ordered by `start_ms` (unmappable ones last): `id`, `line_id`, `line_text` (empty if the line is gone), `allow_overlap`, `take_id` (override, else the line's active take, null if neither exists), `duration_ms` (the length that PLAYS: take length divided by `stretch`; null without a take), `start_ms` and `end_ms` (timeline time; null when the anchor cannot be mapped, `end_ms` also null without a take), `anchor_clip_id`, `anchor_source_ms`, `orphaned`, and (S8) `overflow_ms` (0, or how far the line runs past the next playing line), `overflow_next_id` (string or null), `slack_ms` (how far earlier it could start; only set when it overflows), `stretch` (1 to 1.25), `raw_duration_ms` (the take as recorded, or null), `fit_stretch` (the stretch that clears the overflow exactly, or null; may be above 1.25). The editor warns when `overflow_ms > 0` and `allow_overlap` is false. **M4:** `duration_ms` and `end_ms` are now the processed length (silence trimmed, then the stretch), and `raw_duration_ms` is the trimmed length before the stretch; a take whose file cannot be read keeps its recorded length. `TimelineState` also has `fx_version` (8 hex chars, `"invalid"` when the chain is unusable) and `game_audio_db`.
+`TimelineState.placements: TimelinePlacement[]` (`backend/project/timeline.py`), ordered by `start_ms` (unmappable ones last): `id`, `line_id`, `line_text` (empty if the line is gone), `allow_overlap`, `take_id` (override, else the line's active take, null if neither exists), `duration_ms` (the length that PLAYS: take length divided by `stretch`; null without a take), `start_ms` and `end_ms` (timeline time; null when the anchor cannot be mapped, `end_ms` also null without a take), `anchor_clip_id`, `anchor_source_ms`, `orphaned`, and (S8) `overflow_ms` (0, or how far the line runs past the next playing line), `overflow_next_id` (string or null), `slack_ms` (how far earlier it could start; only set when it overflows), `stretch` (1 to 1.25), `raw_duration_ms` (the take as recorded, or null), `fit_stretch` (the stretch that clears the overflow exactly, or null; may be above 1.25). The editor warns when `overflow_ms > 0` and `allow_overlap` is false. **M4:** `duration_ms` and `end_ms` are now the processed length (silence trimmed, then the stretch), and `raw_duration_ms` is the trimmed length before the stretch; a take whose file cannot be read keeps its recorded length. `TimelineState` also has `fx_version` (8 hex chars, `"invalid"` when the chain is unusable) and `game_audio_db`. **M5-0:** `TimelinePlacement.trim` is the playing take's manual cut tag (`""`, `"800-"`, `"-2000"`, `"800-2000"`); the lengths already follow the trim. Key decoded audio by (take id, stretch, `fx_version`, `trim`) and add `&t=<trim>` to the processed URL (ignored by the server).
 
 Audio of a placed take: `GET /media/take/{id}` is the take as recorded; `GET /media/take/{id}?stretch=1.083` is the sped-up copy (pitch kept), rendered on the first request into `media/takes_fx/` and reused (400 with the message when the stretch is outside (1.0, 1.25] or Pedalboard fails). `takeMediaUrl(takeId, stretch = 1)` builds either URL. **M4:** `GET /media/take/{id}?processed=1&stretch=1.083&v=<fx_version>` serves the take through the voice chain (trim, stretch, EQ, compressor, effects, loudness, limiter), rendered on the first request into `media/takes_fx/<key16>.wav` and reused; the server ignores `v`, it only keeps the browser cache honest. Key the decoded buffer by (take id, stretch, `fx_version`).
 
@@ -71,12 +75,12 @@ Audio of a placed take: `GET /media/take/{id}` is the take as recorded; `GET /me
 
 Written from the source files pasted in M3 chat E (2026-10-17). Source of truth is still the code; this is what a chat needs so the files need not be pasted again. If you change one of these modules, update the matching section.
 
-## Schema (`backend/project/schema.py`, `SCHEMA_VERSION = 2`)
+## Schema (`backend/project/schema.py`, `SCHEMA_VERSION = 3`)
 - Base `_Model`: `extra="forbid"`, `validate_assignment=True`, `protected_namespaces=()`. Types: `EntityId` (12 lowercase hex), `Ms` (int >= 0), `PositiveMs`, `RelPath` (relative POSIX, no `..`). `new_id()` makes an id.
 - `Anchor(clip_id, source_ms)`: source time, not timeline time.
 - `Clip`: `id, source_id, in_ms, out_ms, speed (0.25..8), track (0 = the timeline), overlay, effects`. `out_ms > in_ms`.
 - `Line`: `id, text, emotion, exaggeration|None, cfg_weight|None, active_take_id|None, allow_overlap`.
-- `Take`: `id, line_id, seed, text, exaggeration, cfg_weight, voice_profile_id, model_version, raw_key, raw_file (RelPath), duration_ms, starred, created`.
+- `Take`: `id, line_id, seed, text, exaggeration, cfg_weight, voice_profile_id, model_version, raw_key, raw_file (RelPath), duration_ms, starred, created, trim_start_ms|None, trim_end_ms|None` (schema v3, M5-0; migration `MIGRATIONS[2]` sets both null).
 - **`Placement`: `id, line_id, anchor: Anchor, take_override_id|None, orphaned: bool, stretch: float`** (`stretch` default 1.0, range `STRETCH_MIN` 1.0 to `STRETCH_MAX` 1.25; schema v2, migration `MIGRATIONS[1]` sets 1.0).
 - `Keyframe` and `Reaction` also carry `anchor` and `orphaned`.
 - `Project`: `schema_version, name, seed, sources, clips, lines, takes, placements, keyframes, reactions, voice_profiles, fx_chain, game_audio_db, avatar, export`. A validator rejects duplicate ids inside each collection.

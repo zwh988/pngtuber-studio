@@ -16,6 +16,8 @@ class PlayedTake:
     raw_file: str  # project-relative path of the raw take
     raw_key: str
     stretch: float
+    trim_start_ms: int | None = None  # the take's manual cut points (M5-0)
+    trim_end_ms: int | None = None
 
 
 def played_takes(project: Project) -> list[PlayedTake]:
@@ -44,6 +46,13 @@ def played_takes(project: Project) -> list[PlayedTake]:
             continue
         seen.add(key)
         found.append(
-            PlayedTake(take.id, take.raw_file, take.raw_key, placement.stretch)
+            PlayedTake(
+                take.id,
+                take.raw_file,
+                take.raw_key,
+                placement.stretch,
+                take.trim_start_ms,
+                take.trim_end_ms,
+            )
         )
     return found

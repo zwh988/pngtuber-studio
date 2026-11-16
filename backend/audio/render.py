@@ -1,6 +1,7 @@
 """Render a processed take (M4-1, S3a): the I/O edge of the audio chain.
 
-Order of processing (decision 2026-10-30): trim to the speech bounds, time-stretch
+Order of processing (decision 2026-10-30, M5-0): trim to the speech bounds (measured
+inside the manual cut points, with a short fade at a manual cut edge), time-stretch
 (only when the placement has a stretch), the plugin stages from the processing spec,
 one loudness gain, then a peak limiter. The result is written as a float WAV at the
 take's own sample rate, with exactly the number of samples the timeline computes
@@ -30,7 +31,13 @@ from backend.audio.loudness import (
     plan_gain,
     rms_dbfs,
 )
-from backend.audio.trim import TrimBounds, processed_samples
+from backend.audio.trim import (
+    TrimBounds,
+    apply_edge_fades,
+    edge_fades,
+    manual_cuts_from_spec,
+    processed_samples,
+)
 from backend.project.schema import STRETCH_MAX, STRETCH_MIN
 
 LIMITER_RELEASE_MS = 100.0
@@ -89,7 +96,9 @@ def render_processed(
     """Make the processed take ``dest`` from ``raw_path`` and report what was done.
 
     ``bounds`` must be the trim bounds of this very file (``trim_bounds_for``);
-    a mismatch raises ``ProcessError``. ``spec`` is ``processing_spec(chain)``.
+    a mismatch raises ``ProcessError``. ``spec`` is ``processing_spec(chain)``,
+    with the take's manual cut points added (``spec_with_manual_trim``); ``bounds``
+    must then have been measured with those cut points.
     """
     if not STRETCH_MIN <= stretch <= STRETCH_MAX:  # also false for NaN
         raise ProcessError(
@@ -109,9 +118,17 @@ def render_processed(
     if not np.all(np.isfinite(kept)):
         raise ProcessError("the take contains NaN or infinite values")
 
+    try:
+        cut_start, cut_end = manual_cuts_from_spec(spec)
+        fade_in, fade_out = edge_fades(bounds, cut_start, cut_end)
+    except ValueError as exc:
+        raise ProcessError(f"the manual trim cannot be used: {exc}") from exc
+
     pb = _pedalboard()
     expected = processed_samples(int(kept.size), stretch)
     samples = np.array(kept, dtype=np.float32)  # a copy: the raw array stays as read
+    if fade_in or fade_out:
+        samples = apply_edge_fades(samples, fade_in, fade_out).astype(np.float32)
     if stretch > 1.0:
         samples = _time_stretch(pb, samples, rate, stretch, expected)
     samples = _run_stages(pb, samples, rate, stages)

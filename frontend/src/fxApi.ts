@@ -118,7 +118,13 @@ export function editFx(ops: FxEditOp[], label?: string): Promise<FxState> {
 }
 
 /** A take through the open project's chain (rendered on the first request, no GPU). */
-export function processedTakeUrl(takeId: string, stretch: number, version: string): string {
+export function processedTakeUrl(
+  takeId: string,
+  stretch: number,
+  version: string,
+  trim = "",
+): string {
   const base = `/media/take/${encodeURIComponent(takeId)}`;
-  return `${base}?processed=1&stretch=${stretch}&v=${encodeURIComponent(version)}`;
+  const t = trim === "" ? "" : `&t=${encodeURIComponent(trim)}`;
+  return `${base}?processed=1&stretch=${stretch}&v=${encodeURIComponent(version)}${t}`;
 }

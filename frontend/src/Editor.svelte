@@ -771,6 +771,7 @@
                 onedited={() => void syncHistory()}
                 {jobs}
                 onjobchange={() => void jobsChanged()}
+                fxVersion={timeline?.fx_version ?? ""}
               />
             </div>
             <div hidden={tab !== "storage"}>

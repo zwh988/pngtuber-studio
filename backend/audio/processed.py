@@ -20,7 +20,9 @@ from backend.audio.trim import (
     TrimBounds,
     bounds_from_data,
     bounds_to_data,
-    find_speech_bounds,
+    find_speech_bounds_in_region,
+    manual_cuts_from_spec,
+    manual_region,
     sidecar_name,
 )
 from backend.project.schema import STRETCH_MAX, STRETCH_MIN
@@ -54,59 +56,81 @@ def processed_path(
 # --- trim bounds -----------------------------------------------------------------
 
 
+CacheKey = tuple[str, int, int, int | None, int | None]
+
+
 class TrimCache:
-    """In-memory trim bounds keyed by file path, size and modification time."""
+    """In-memory trim bounds keyed by file path, size, modification time and the
+    manual cut points they were measured with."""
 
     def __init__(self) -> None:
         self._lock = threading.Lock()
-        self._items: dict[tuple[str, int, int], TrimBounds] = {}
+        self._items: dict[CacheKey, TrimBounds] = {}
 
-    def get(self, key: tuple[str, int, int]) -> TrimBounds | None:
+    def get(self, key: CacheKey) -> TrimBounds | None:
         with self._lock:
             return self._items.get(key)
 
-    def put(self, key: tuple[str, int, int], bounds: TrimBounds) -> None:
+    def put(self, key: CacheKey, bounds: TrimBounds) -> None:
         with self._lock:
             if len(self._items) >= _CACHE_LIMIT:
                 self._items.clear()
             self._items[key] = bounds
 
 
-def measure_bounds(raw_path: Path) -> TrimBounds:
-    """Decode a raw take and find where its speech starts and ends."""
+def measure_bounds(
+    raw_path: Path,
+    manual_start_ms: int | None = None,
+    manual_end_ms: int | None = None,
+) -> TrimBounds:
+    """Decode a raw take and find where its speech starts and ends, inside the
+    manual cut points when there are any (M5-0: the manual cut is the outer step)."""
     samples, rate = read_mono(raw_path)
     try:
-        return find_speech_bounds(samples, rate)
+        start, end = manual_region(int(samples.size), rate, manual_start_ms, manual_end_ms)
+        return find_speech_bounds_in_region(samples, rate, start, end)
     except ValueError as exc:
         raise ProcessError(f"cannot measure {raw_path.name}: {exc}") from exc
 
 
-def trim_bounds_for(raw_path: Path, cache: TrimCache | None = None) -> TrimBounds:
+def trim_bounds_for(
+    raw_path: Path,
+    cache: TrimCache | None = None,
+    *,
+    manual_start_ms: int | None = None,
+    manual_end_ms: int | None = None,
+) -> TrimBounds:
     """Trim bounds of a raw take: memory cache, then the sidecar, then measuring.
 
     A sidecar is used only when it is newer than the take, matches its length and
-    sample rate and was made with the current trim settings. Writing a fresh sidecar
-    is best effort: failing to write it never fails the caller.
+    sample rate and was made with the current trim settings and the same manual cut
+    points. Writing a fresh sidecar is best effort: failing to write it never fails
+    the caller.
     """
     try:
         stat = raw_path.stat()
     except OSError as exc:
         raise ProcessError(f"take file not found: {raw_path.name}") from exc
-    key = (str(raw_path), stat.st_size, stat.st_mtime_ns)
+    key = (str(raw_path), stat.st_size, stat.st_mtime_ns, manual_start_ms, manual_end_ms)
     if cache is not None:
         hit = cache.get(key)
         if hit is not None:
             return hit
-    bounds = _read_sidecar(raw_path, stat.st_mtime_ns)
+    bounds = _read_sidecar(raw_path, stat.st_mtime_ns, manual_start_ms, manual_end_ms)
     if bounds is None:
-        bounds = measure_bounds(raw_path)
-        _write_sidecar(raw_path, bounds)
+        bounds = measure_bounds(raw_path, manual_start_ms, manual_end_ms)
+        _write_sidecar(raw_path, bounds, manual_start_ms, manual_end_ms)
     if cache is not None:
         cache.put(key, bounds)
     return bounds
 
 
-def _read_sidecar(raw_path: Path, raw_mtime_ns: int) -> TrimBounds | None:
+def _read_sidecar(
+    raw_path: Path,
+    raw_mtime_ns: int,
+    manual_start_ms: int | None,
+    manual_end_ms: int | None,
+) -> TrimBounds | None:
     side = sidecar_path(raw_path)
     try:
         if side.stat().st_mtime_ns < raw_mtime_ns:
@@ -115,18 +139,31 @@ def _read_sidecar(raw_path: Path, raw_mtime_ns: int) -> TrimBounds | None:
         info = soundfile.info(str(raw_path))
     except (OSError, ValueError, RuntimeError):
         return None
-    bounds = bounds_from_data(data, expect_total=int(info.frames))
+    bounds = bounds_from_data(
+        data,
+        expect_total=int(info.frames),
+        expect_manual_start_ms=manual_start_ms,
+        expect_manual_end_ms=manual_end_ms,
+    )
     if bounds is None or bounds.sample_rate != int(info.samplerate):
         return None
     return bounds
 
 
-def _write_sidecar(raw_path: Path, bounds: TrimBounds) -> None:
+def _write_sidecar(
+    raw_path: Path,
+    bounds: TrimBounds,
+    manual_start_ms: int | None,
+    manual_end_ms: int | None,
+) -> None:
     side = sidecar_path(raw_path)
     tmp = side.with_name(f"{side.name}.{os.getpid()}.{threading.get_ident()}.tmp")
     try:
         side.parent.mkdir(parents=True, exist_ok=True)
-        tmp.write_text(json.dumps(bounds_to_data(bounds)), encoding="utf-8")
+        data = bounds_to_data(
+            bounds, manual_start_ms=manual_start_ms, manual_end_ms=manual_end_ms
+        )
+        tmp.write_text(json.dumps(data), encoding="utf-8")
         os.replace(tmp, side)
     except OSError:
         with contextlib.suppress(OSError):
@@ -164,6 +201,8 @@ def ensure_processed(
     An existing file is reused as is (rule 3) and its modification time is
     refreshed, so clean-up sees it as recently used. Two threads asking for the
     same file render it once; the second waits and then reuses the result.
+    ``spec`` is the take's own spec (``spec_with_manual_trim``): its manual cut
+    points decide the trim bounds.
     """
     dest = processed_path(raw_path, raw_key, stretch, spec)
     if dest.is_file():
@@ -172,7 +211,13 @@ def ensure_processed(
     with _lock_for(str(dest)):
         if dest.is_file():
             return dest
-        bounds = trim_bounds_for(raw_path, cache)
+        try:
+            start_ms, end_ms = manual_cuts_from_spec(spec)
+        except ValueError as exc:
+            raise ProcessError(f"bad manual trim in the processing spec: {exc}") from exc
+        bounds = trim_bounds_for(
+            raw_path, cache, manual_start_ms=start_ms, manual_end_ms=end_ms
+        )
         render_processed(raw_path, dest, spec, stretch, bounds)
     return dest
 

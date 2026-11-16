@@ -17,6 +17,7 @@
     id: string;
     take_id: string | null;
     stretch?: number;
+    trim?: string;
     orphaned: boolean;
   }
 
@@ -181,7 +182,7 @@
     }
     stopAudition();
     error = null;
-    const el = new Audio(processedTakeUrl(target.take_id, target.stretch ?? 1, fx.fx_version));
+    const el = new Audio(processedTakeUrl(target.take_id, target.stretch ?? 1, fx.fx_version, target.trim ?? ""));
     audio = el;
     auditionState = "loading";
     el.onplaying = () => {

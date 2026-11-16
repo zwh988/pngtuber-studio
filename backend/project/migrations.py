@@ -21,8 +21,17 @@ def _v1_to_v2(data: dict[str, Any]) -> dict[str, Any]:
     return data
 
 
+def _v2_to_v3(data: dict[str, Any]) -> dict[str, Any]:
+    """v3 adds the manual take trim ``Take.trim_start_ms`` / ``trim_end_ms`` (no cut)."""
+    for take in data.get("takes", []):
+        if isinstance(take, dict):
+            take.setdefault("trim_start_ms", None)
+            take.setdefault("trim_end_ms", None)
+    return data
+
+
 # Maps "from version" -> function upgrading that version to version + 1.
-MIGRATIONS: dict[int, Migration] = {1: _v1_to_v2}
+MIGRATIONS: dict[int, Migration] = {1: _v1_to_v2, 2: _v2_to_v3}
 
 
 class MigrationError(Exception):

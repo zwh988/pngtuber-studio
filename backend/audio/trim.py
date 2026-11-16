@@ -269,6 +269,24 @@ def spec_with_manual_trim(
     return out
 
 
+def manual_cuts_from_spec(spec: Mapping[str, Any]) -> tuple[int | None, int | None]:
+    """The manual cut points ``(start_ms, end_ms)`` held in a take's processing spec.
+
+    The inverse of ``spec_with_manual_trim``: ``(None, None)`` when the spec has no
+    manual trim entry. Raises ``ValueError`` for a malformed entry.
+    """
+    entry = spec.get("manual_trim")
+    if entry is None:
+        return (None, None)
+    if not isinstance(entry, Mapping):
+        raise ValueError("the manual trim entry must be a mapping")  # noqa: TRY004
+    start, end = entry.get("start_ms"), entry.get("end_ms")
+    for value in (start, end):
+        if value is not None and (not _is_int(value) or value < 0):
+            raise ValueError("manual cut points must be whole ms, 0 or more")
+    return (start, end)
+
+
 # --- Lengths: one place, so the timeline and the renderer always agree -----------
 
 

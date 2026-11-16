@@ -60,7 +60,7 @@ def test_a_valid_sidecar_is_used_without_measuring(
     raw = make_take(tmp_path)
     first = trim_bounds_for(raw)
 
-    def boom(_path: Path) -> None:
+    def boom(_path: Path, *_cuts: int | None) -> None:
         raise AssertionError("measured again")
 
     monkeypatch.setattr(processed, "measure_bounds", boom)
@@ -95,9 +95,9 @@ def test_a_sidecar_older_than_the_take_is_ignored(
     calls: list[Path] = []
     real = processed.measure_bounds
 
-    def counting(path: Path):
+    def counting(path: Path, *cuts: int | None):
         calls.append(path)
-        return real(path)
+        return real(path, *cuts)
 
     monkeypatch.setattr(processed, "measure_bounds", counting)
     trim_bounds_for(raw)
@@ -112,7 +112,7 @@ def test_memory_cache_skips_disk_until_the_file_changes(
     first = trim_bounds_for(raw, cache)
     sidecar_path(raw).unlink()
 
-    def boom(_path: Path) -> None:
+    def boom(_path: Path, *_cuts: int | None) -> None:
         raise AssertionError("measured again")
 
     monkeypatch.setattr(processed, "measure_bounds", boom)

@@ -20,6 +20,7 @@
     type TakeItem,
   } from "./api";
   import ParamSlider from "./ParamSlider.svelte";
+  import TakeTrimmer from "./TakeTrimmer.svelte";
   import { LINE_DRAG_TYPE } from "./timeline";
   import {
     isBlank,
@@ -37,6 +38,7 @@
     onedited,
     jobs,
     onjobchange,
+    fxVersion = "",
   }: {
     /** Change this number to make the bank reload (after an undo or redo elsewhere). */
     reloadToken?: number;
@@ -46,6 +48,8 @@
     jobs: JobStatus | null;
     /** Ask the editor to refresh the job list now (after starting or cancelling a job). */
     onjobchange: () => void;
+    /** `TimelineState.fx_version`, so the trimmer can play the processed result. */
+    fxVersion?: string;
   } = $props();
 
   let bank = $state<LineBankState | null>(null);
@@ -71,6 +75,8 @@
   );
 
   let takes = $state<TakeItem[]>([]);
+  /** The take whose trimmer is open (M5-0), if any. */
+  let trimmingId = $state<string | null>(null);
   let playingId = $state<string | null>(null);
   let audio: HTMLAudioElement | null = null;
 
@@ -115,6 +121,9 @@
     void reloadToken;
     untrack(() => {
       stopAudio();
+      if (trimmingId !== null && !takes.some((t) => t.id === trimmingId && t.line_id === id)) {
+        trimmingId = null;
+      }
       if (id === null) {
         takes = [];
       } else {
@@ -216,6 +225,30 @@
 
   async function useTake(line: LineItem, take: TakeItem): Promise<void> {
     await apply([{ op: "set_active_take", line_id: line.id, take_id: take.id }]);
+  }
+
+  /** Save a take's manual trim (one undo step), then refresh its row. */
+  async function applyTrim(
+    take: TakeItem,
+    startMs: number | null,
+    endMs: number | null,
+  ): Promise<boolean> {
+    const ok = await apply([
+      { op: "set_take_trim", take_id: take.id, start_ms: startMs, end_ms: endMs },
+    ]);
+    if (ok) {
+      await reloadTakes(take.line_id);
+    }
+    return ok;
+  }
+
+  function trimText(take: TakeItem): string | null {
+    if (take.trim_start_ms === null && take.trim_end_ms === null) {
+      return null;
+    }
+    const start = ((take.trim_start_ms ?? 0) / 1000).toFixed(2);
+    const end = ((take.trim_end_ms ?? take.duration_ms) / 1000).toFixed(2);
+    return `trimmed ${start} to ${end} s`;
   }
 
   async function toggleStar(take: TakeItem): Promise<void> {
@@ -465,7 +498,18 @@
                 {#if normalizeText(take.text) !== normalizeText(line.text)}
                   <span class="meta">older text</span>
                 {/if}
+                {#if trimText(take) !== null}<span class="meta">{trimText(take)}</span>{/if}
                 {#if !take.file_exists}<span class="bad">file missing</span>{/if}
+                <button
+                  type="button"
+                  disabled={!take.file_exists}
+                  onclick={() => {
+                    stopAudio();
+                    trimmingId = trimmingId === take.id ? null : take.id;
+                  }}
+                >
+                  {trimmingId === take.id ? "Close trim" : "Trim"}
+                </button>
                 <button type="button" onclick={() => void toggleStar(take)}>
                   {take.starred ? "Starred" : "Star"}
                 </button>
@@ -473,6 +517,16 @@
                   <strong>Active</strong>
                 {:else}
                   <button type="button" onclick={() => void useTake(line, take)}>Use this take</button>
+                {/if}
+                {#if trimmingId === take.id}
+                  <div class="trim-slot">
+                    <TakeTrimmer
+                      {take}
+                      {fxVersion}
+                      onapply={(s, e) => applyTrim(take, s, e)}
+                      onclose={() => (trimmingId = null)}
+                    />
+                  </div>
                 {/if}
               </li>
             {/each}
@@ -603,6 +657,9 @@
   }
   .takes li.active {
     background: #4a90e233;
+  }
+  .trim-slot {
+    flex-basis: 100%;
   }
   .take-info {
     flex: 1;
