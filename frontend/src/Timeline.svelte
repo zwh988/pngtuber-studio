@@ -1,6 +1,13 @@
 <script lang="ts">
   import { untrack } from "svelte";
-  import type { PeaksReport, TimelineClip, TimelinePlacement } from "./api";
+  import type {
+    PeaksReport,
+    TimelineClip,
+    TimelineKeyframe,
+    TimelinePlacement,
+    TimelineReaction,
+  } from "./api";
+  import { MOTION_LANES, laneLabel } from "./avatarLanes";
   import { clock } from "./format";
   import { LINE_DRAG_TYPE, dropSlot, peakSpan, trimTarget, withTrim } from "./timeline";
 
@@ -18,6 +25,12 @@
     onreorder,
     onplace,
     onmoveplacement,
+    keyframes = [],
+    reactions = [],
+    selectedKeyId = $bindable(null),
+    selectedReactionId = $bindable(null),
+    onmovekey,
+    onmovereaction,
   }: {
     clips: TimelineClip[];
     durationMs: number;
@@ -39,6 +52,14 @@
     onplace: (lineId: string, timelineMs: number) => Promise<void>;
     /** A voice block was dragged. `timelineMs` is where its START goes (TIMELINE time). */
     onmoveplacement: (placementId: string, timelineMs: number) => Promise<void>;
+    /** Avatar lane keys and reactions (M5-5, M5-7), times already mapped by the backend. */
+    keyframes?: TimelineKeyframe[];
+    reactions?: TimelineReaction[];
+    selectedKeyId?: string | null;
+    selectedReactionId?: string | null;
+    /** A key or reaction was dragged sideways: its new TIMELINE time. One call per drag. */
+    onmovekey?: (keyframeId: string, timelineMs: number) => Promise<void>;
+    onmovereaction?: (reactionId: string, timelineMs: number) => Promise<void>;
   } = $props();
 
   /** Width of the grab zone at each clip edge, in pixels. */
@@ -49,7 +70,16 @@
   /** The voice lane sits under the video lane. */
   const VOICE_Y = LANE_Y + LANE_H + 8;
   const VOICE_H = 46;
-  const HEIGHT = VOICE_Y + VOICE_H + 10;
+  /** Avatar rows under the voice lane: expression, reactions, then the motion lanes. */
+  const EXPR_Y = VOICE_Y + VOICE_H + 6;
+  const ROW_H = 20;
+  const REACT_Y = EXPR_Y + ROW_H + 3;
+  const MOTION_Y = REACT_Y + ROW_H + 3;
+  const KEY_R = 5;
+  /** Collapsed: one row with every motion key. Expanded: one row per motion lane. */
+  let lanesOpen = $state(false);
+  const motionRows = $derived(lanesOpen ? MOTION_LANES.length : 1);
+  const HEIGHT = $derived(MOTION_Y + motionRows * (ROW_H + 2) + 8);
   /** Width given to a placed line that has no take yet, in ms. */
   const PLACEHOLDER_MS = 1000;
   /** Empty space kept to the right of the last clip, in pixels. */
@@ -78,7 +108,16 @@
     grabDx: number;
     startMs: number;
   };
+  type ItemDrag = {
+    mode: "ipress" | "imove";
+    kind: "key" | "reaction";
+    id: string;
+    fromMs: number;
+    startX: number;
+    toMs: number;
+  };
   type Drag =
+    | ItemDrag
     | { mode: "scrub" }
     | { mode: "press"; clip: TimelineClip; startX: number }
     | { mode: "ppress"; placement: TimelinePlacement; startX: number }
@@ -89,7 +128,8 @@
     | { kind: "trim"; x: number }
     | { kind: "move"; clipId: string; ghostX: number; slotMs: number }
     | { kind: "pmove"; ghostX: number; width: number }
-    | { kind: "drop"; x: number };
+    | { kind: "drop"; x: number }
+    | { kind: "imove"; id: string; ms: number };
 
   /** Pointer interaction in progress (not reactive: only the handlers use it). */
   let drag: Drag | null = null;
@@ -102,6 +142,22 @@
 
   function xPos(ms: number): number {
     return (ms - scrollMs) * pxPerMs;
+  }
+
+  /** Row (y) of a motion key: its own lane when the lanes are open, the summary row otherwise. */
+  function motionRowY(laneId: string): number {
+    const index = lanesOpen ? Math.max(0, MOTION_LANES.indexOf(laneId)) : 0;
+    return MOTION_Y + index * (ROW_H + 2);
+  }
+
+  function keyRowY(key: TimelineKeyframe): number {
+    return key.lane_id === "expression" ? EXPR_Y : motionRowY(key.lane_id);
+  }
+
+  /** Time an item is drawn at (its drag position while it is being dragged). */
+  function shownMs(id: string, t: number | null): number | null {
+    const ui = dragUi;
+    return ui !== null && ui.kind === "imove" && ui.id === id ? ui.ms : t;
   }
 
   function placementWidth(p: TimelinePlacement): number {
@@ -322,6 +378,81 @@
       }
     }
 
+    // Avatar rows: expression keys, reactions, motion keys (M5-5, M5-7).
+    const rowLabel = (text: string, y: number): void => {
+      ctx.fillStyle = "#23232b";
+      ctx.fillRect(0, y, viewWidth, ROW_H);
+      ctx.fillStyle = "#7a7a88";
+      ctx.font = "10px system-ui, sans-serif";
+      ctx.textBaseline = "middle";
+      ctx.fillText(text, 4, y + ROW_H / 2);
+    };
+    rowLabel("Expression (E)", EXPR_Y);
+    rowLabel("Reactions (R)", REACT_Y);
+    if (lanesOpen) {
+      MOTION_LANES.forEach((lane) => rowLabel(laneLabel(lane), motionRowY(lane)));
+    } else {
+      rowLabel("Motion keys", MOTION_Y);
+    }
+    for (const r of reactions) {
+      const t = shownMs(r.id, r.t_ms);
+      if (t === null) continue;
+      const x0 = xOf(t);
+      const w = Math.max(4, r.duration_ms * pxPerMs);
+      if (x0 + w < 0 || x0 > viewWidth) continue;
+      ctx.fillStyle = r.id === selectedReactionId ? "#c08cf0" : "#8a5cc0";
+      ctx.fillRect(x0, REACT_Y + 3, w, ROW_H - 6);
+      if (r.orphaned) {
+        ctx.strokeStyle = "#f5a142";
+        ctx.lineWidth = 2;
+        ctx.strokeRect(x0, REACT_Y + 3, w, ROW_H - 6);
+      }
+      if (r.id === selectedReactionId) {
+        ctx.strokeStyle = "#ffffff";
+        ctx.lineWidth = 1.5;
+        ctx.strokeRect(x0, REACT_Y + 3, w, ROW_H - 6);
+      }
+      if (w > 24) {
+        ctx.fillStyle = "#ffffff";
+        ctx.font = "10px system-ui, sans-serif";
+        ctx.textBaseline = "middle";
+        ctx.fillText(r.type.replace("_", "-"), x0 + 3, REACT_Y + ROW_H / 2);
+      }
+    }
+    for (const key of keyframes) {
+      const t = shownMs(key.id, key.t_ms);
+      if (t === null) continue;
+      const x = xOf(t);
+      if (x < -60 || x > viewWidth + KEY_R) continue;
+      const cy = keyRowY(key) + ROW_H / 2;
+      const picked = key.id === selectedKeyId;
+      ctx.beginPath();
+      ctx.moveTo(x, cy - KEY_R);
+      ctx.lineTo(x + KEY_R, cy);
+      ctx.lineTo(x, cy + KEY_R);
+      ctx.lineTo(x - KEY_R, cy);
+      ctx.closePath();
+      ctx.fillStyle = key.lane_id === "expression" ? "#f5c542" : key.interpolation === "smooth" ? "#4da3ff" : "#9ec5ff";
+      ctx.fill();
+      if (key.orphaned || picked) {
+        ctx.strokeStyle = key.orphaned ? "#f5a142" : "#ffffff";
+        ctx.lineWidth = 2;
+        ctx.stroke();
+      }
+      const text =
+        key.lane_id === "expression"
+          ? String(key.value)
+          : lanesOpen
+            ? String(Math.round(Number(key.value) * 100) / 100)
+            : `${laneLabel(key.lane_id)} ${Math.round(Number(key.value) * 100) / 100}`;
+      ctx.fillStyle = "#e8e8ee";
+      ctx.font = "10px system-ui, sans-serif";
+      ctx.textBaseline = "middle";
+      ctx.fillText(text, x + KEY_R + 3, cy);
+    }
+    ctx.textBaseline = "top";
+    ctx.font = "11px system-ui, sans-serif";
+
     // Drag feedback: a dashed line at the pointer while trimming; a ghost and a drop marker
     // while reordering.
     const ui = dragUi;
@@ -482,6 +613,29 @@
       }
       return null;
     }
+    /** A key diamond or a reaction bar under the pointer (keys win: they are small). */
+    function hitItem(x: number, y: number): { kind: "key" | "reaction"; id: string; t: number } | null {
+      for (let i = keyframes.length - 1; i >= 0; i -= 1) {
+        const key = keyframes[i];
+        if (key === undefined || key.t_ms === null) continue;
+        const top = keyRowY(key);
+        if (y < top || y > top + ROW_H) continue;
+        if (Math.abs(x - xPos(key.t_ms)) <= KEY_R + 3) {
+          return { kind: "key", id: key.id, t: key.t_ms };
+        }
+      }
+      if (y >= REACT_Y && y <= REACT_Y + ROW_H) {
+        for (let i = reactions.length - 1; i >= 0; i -= 1) {
+          const r = reactions[i];
+          if (r === undefined || r.t_ms === null) continue;
+          const x0 = xPos(r.t_ms);
+          if (x >= x0 - 2 && x <= x0 + Math.max(4, r.duration_ms * pxPerMs)) {
+            return { kind: "reaction", id: r.id, t: r.t_ms };
+          }
+        }
+      }
+      return null;
+    }
     function updateMove(d: MoveDrag, x: number): void {
       d.slot = dropSlot(clips, d.clip.id, scrollMs + x / pxPerMs);
       const others = clips.filter((c) => c.id !== d.clip.id);
@@ -510,13 +664,35 @@
       if (e.button !== 0 || canvas === null) {
         return;
       }
-      canvas.setPointerCapture(e.pointerId);
+      try {
+        canvas.setPointerCapture(e.pointerId);
+      } catch {
+        // not a live pointer (synthetic event): the drag still works inside the canvas
+      }
       const { x, y } = pointerXY(e);
+      const item = hitItem(x, y);
+      if (item !== null) {
+        // A key or a reaction: select it (and nothing else); drag sideways to move it.
+        selectedKeyId = item.kind === "key" ? item.id : null;
+        selectedReactionId = item.kind === "reaction" ? item.id : null;
+        selectedPlacementId = null;
+        selectedId = null;
+        drag = locked
+          ? null
+          : { mode: "ipress", kind: item.kind, id: item.id, fromMs: item.t, startX: x, toMs: item.t };
+        return;
+      }
+      if (y >= EXPR_Y) {
+        selectedKeyId = null;
+        selectedReactionId = null;
+      }
       const placed = hitPlacement(x, y);
       if (placed !== null) {
         // A voice block: select it (and nothing else); the playhead stays where it is.
         selectedPlacementId = placed.id;
         selectedId = null;
+        selectedKeyId = null;
+        selectedReactionId = null;
         drag = locked ? null : { mode: "ppress", placement: placed, startX: x };
         return;
       }
@@ -557,7 +733,21 @@
       if (d === null) {
         const over = hit(x, y);
         canvas.style.cursor =
-          over === null || locked ? "pointer" : over.part === "body" ? "grab" : "ew-resize";
+          hitItem(x, y) !== null && !locked
+            ? "grab"
+            : over === null || locked
+              ? "pointer"
+              : over.part === "body"
+                ? "grab"
+                : "ew-resize";
+        return;
+      }
+      if (d.mode === "ipress" || d.mode === "imove") {
+        if (d.mode === "ipress" && Math.abs(x - d.startX) <= 4) return;
+        d.mode = "imove";
+        const ms = Math.round(d.fromMs + (x - d.startX) / pxPerMs);
+        d.toMs = Math.min(Math.max(ms, 0), Math.max(0, durationMs - 1));
+        dragUi = { kind: "imove", id: d.id, ms: d.toMs };
         return;
       }
       if (d.mode === "scrub") {
@@ -591,7 +781,7 @@
         }
       } else if (d.mode === "pmove") {
         updatePlacementMove(d, x);
-      } else {
+      } else if (d.mode === "move") {
         updateMove(d, x);
       }
     }
@@ -599,6 +789,15 @@
       const d = drag;
       drag = null;
       if (d === null) {
+        return;
+      }
+      if (d.mode === "imove") {
+        const handler = d.kind === "key" ? onmovekey : onmovereaction;
+        if (d.toMs !== d.fromMs && handler !== undefined) {
+          void finish(handler(d.id, d.toMs));
+        } else {
+          dragUi = null;
+        }
         return;
       }
       if (d.mode === "trim") {
@@ -692,7 +891,10 @@
     <button type="button" onclick={() => zoomAt(1 / 1.5, viewWidth / 2)}>Zoom out</button>
     <button type="button" onclick={() => zoomAt(1.5, viewWidth / 2)}>Zoom in</button>
     <button type="button" onclick={fit}>Fit</button>
-    <span class="hint">Click the ruler to seek, click a clip to select it, drag its edge to trim, drag it sideways to reorder. Click a voice block to select it and drag it to move it; drag a line from the bank onto the timeline to place it. Wheel scrolls, Ctrl+wheel zooms.</span>
+    <button type="button" onclick={() => (lanesOpen = !lanesOpen)} aria-expanded={lanesOpen}>
+      {lanesOpen ? "▾ Lanes" : "▸ Lanes"}
+    </button>
+    <span class="hint">Click the ruler to seek, click a clip to select it, drag its edge to trim, drag it sideways to reorder. Click a voice block to select it and drag it to move it; drag a line from the bank onto the timeline to place it. Avatar keys and reactions: click to select, drag sideways to move. Wheel scrolls, Ctrl+wheel zooms.</span>
   </div>
   <div class="view" bind:clientWidth={viewWidth}>
     <canvas bind:this={canvasEl} style:width="{viewWidth}px" style:height="{HEIGHT}px"></canvas>

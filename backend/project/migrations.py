@@ -30,8 +30,27 @@ def _v2_to_v3(data: dict[str, Any]) -> dict[str, Any]:
     return data
 
 
+AVATAR_V4_DEFAULTS: dict[str, float] = {
+    "bounce": 1.0,
+    "float_amp": 1.0,
+    "float_speed": 1.0,
+    "float_angle_deg": 0.0,
+    "blink_rate": 1.0,
+    "mouth_sensitivity": 1.0,
+}
+
+
+def _v3_to_v4(data: dict[str, Any]) -> dict[str, Any]:
+    """v4 adds the avatar's base motion settings (bounce, float, blink, mouth)."""
+    avatar = data.get("avatar")
+    if isinstance(avatar, dict):
+        for name, value in AVATAR_V4_DEFAULTS.items():
+            avatar.setdefault(name, value)
+    return data
+
+
 # Maps "from version" -> function upgrading that version to version + 1.
-MIGRATIONS: dict[int, Migration] = {1: _v1_to_v2, 2: _v2_to_v3}
+MIGRATIONS: dict[int, Migration] = {1: _v1_to_v2, 2: _v2_to_v3, 3: _v3_to_v4}
 
 
 class MigrationError(Exception):

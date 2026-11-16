@@ -332,3 +332,36 @@ def test_key_lane_by_adds_to_the_lane_value_there() -> None:
         KeyLaneBy("expression", 0, delta=1).apply(project)
     with pytest.raises(CommandError):
         KeyLaneBy("x", 0, factor=0)
+
+
+# ---- schema v4: base motion settings (S11) -------------------------------------------
+
+
+def test_v3_projects_get_the_base_motion_settings() -> None:
+    from backend.project.migrations import migrate
+    from backend.project.schema import SCHEMA_VERSION
+
+    assert SCHEMA_VERSION == 4
+    data = {"schema_version": 3, "name": "x", "avatar": {"x": 0.5}}
+    result = migrate(data)
+    assert result["schema_version"] == 4
+    assert result["avatar"]["bounce"] == 1.0 and result["avatar"]["float_angle_deg"] == 0.0
+    assert "bounce" not in data["avatar"]  # input untouched
+    assert Project.model_validate(result).avatar.x == 0.5
+    assert migrate({"schema_version": 3, "name": "x"})["schema_version"] == 4
+
+
+def test_settings_for_motion_and_float_direction() -> None:
+    from backend.project.avatar_commands import lane_value_at
+
+    project = make_project()
+    stack = CommandStack(project)
+    stack.execute(SetAvatarSettings(bounce=2.0, float_angle_deg=90, mouth_sensitivity=1.5))
+    assert (project.avatar.bounce, project.avatar.float_angle_deg) == (2.0, 90.0)
+    assert lane_value_at(project, "bounce", 0) == 2.0  # no keys: the setting
+    with pytest.raises(CommandError):
+        SetAvatarSettings(float_angle_deg=200)
+    with pytest.raises(CommandError):
+        SetAvatarSettings(bounce=9)
+    stack.undo()
+    assert project.avatar.bounce == 1.0

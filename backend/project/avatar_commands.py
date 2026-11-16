@@ -348,12 +348,8 @@ def lane_value_at(project: Project, lane_id: str, timeline_ms: int) -> float:
     spec = LANES_BY_ID.get(lane_id)
     if spec is None or spec.kind != "number":
         raise CommandError(f"{lane_id!r} is not a numeric lane")
-    base = {
-        "x": project.avatar.x,
-        "y": project.avatar.y,
-        "scale": project.avatar.scale,
-        "rotation": project.avatar.rotation_deg,
-    }.get(lane_id, spec.default)
+    field_name = SETTING_FOR_LANE.get(lane_id)
+    base = spec.default if field_name is None else getattr(project.avatar, field_name)
     keys = []
     for key in project.keyframes:
         if key.lane_id != lane_id or key.orphaned or isinstance(key.value, str):
@@ -526,15 +522,27 @@ class SetReaction(Command):
 
 # --- settings ------------------------------------------------------------------------
 
-SETTING_LANES = {"x": "x", "y": "y", "scale": "scale", "rotation_deg": "rotation"}
+# AvatarSettings field -> the lane whose base value it is (and whose range it uses).
+SETTING_LANES = {
+    "x": "x",
+    "y": "y",
+    "scale": "scale",
+    "rotation_deg": "rotation",
+    "bounce": "bounce",
+    "float_amp": "float_amp",
+    "float_speed": "float_speed",
+    "blink_rate": "blink_rate",
+    "mouth_sensitivity": "mouth_sensitivity",
+}
+SETTING_FOR_LANE = {lane: field for field, lane in SETTING_LANES.items()}
 
 
 class SetAvatarSettings(Command):
-    """Change the base transform and/or the auto-key switch (None keeps a field).
-    Numbers use the matching lane's range."""
+    """Change base values, the float direction and/or the auto-key switch (None keeps
+    a field). Numbers use the matching lane's range."""
 
     def __init__(self, **changes: float | bool | None) -> None:
-        allowed = {*SETTING_LANES, "auto_key_expression"}
+        allowed = {*SETTING_LANES, "auto_key_expression", "float_angle_deg"}
         unknown = set(changes) - allowed
         if unknown:
             raise CommandError(f"unknown avatar setting(s): {', '.join(sorted(unknown))}")
@@ -546,6 +554,13 @@ class SetAvatarSettings(Command):
                 if not isinstance(value, bool):
                     raise CommandError("auto_key_expression must be true or false")
                 self.changes[name] = value
+            elif name == "float_angle_deg":
+                if isinstance(value, bool) or not isinstance(value, (int, float)):
+                    raise CommandError("the float direction must be a number")
+                angle = float(value)
+                if not (math.isfinite(angle) and -180.0 <= angle <= 180.0):
+                    raise CommandError("the float direction must be between -180 and 180")
+                self.changes[name] = round(angle, 2)
             else:
                 self.changes[name] = float(check_value(SETTING_LANES[name], value))
         self._old: dict[str, float | bool] | None = None

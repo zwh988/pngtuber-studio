@@ -51,12 +51,19 @@ class ReactionCue:
 
 @dataclass(frozen=True)
 class BaseTransform:
-    """``AvatarSettings``: where the avatar sits when no transform key says otherwise."""
+    """``AvatarSettings``: each lane's value where it has no keys, and the float's
+    direction (degrees; 0 = up and down, 90 = left and right)."""
 
     x: float = 0.85
     y: float = 0.75
     scale: float = 1.0
     rotation_deg: float = 0.0
+    bounce: float = 1.0
+    float_amp: float = 1.0
+    float_speed: float = 1.0
+    float_angle_deg: float = 0.0
+    blink_rate: float = 1.0
+    mouth_sensitivity: float = 1.0
 
 
 @dataclass(frozen=True)
@@ -131,16 +138,9 @@ REACTIONS: dict[str, ReactionFn] = {
 
 
 def _lane(inp: SolverInput, lane_id: str) -> Lane:
-    base = LANES_BY_ID[lane_id].default
-    if lane_id == "x":
-        base = inp.base.x
-    elif lane_id == "y":
-        base = inp.base.y
-    elif lane_id == "scale":
-        base = inp.base.scale
-    elif lane_id == "rotation":
-        base = inp.base.rotation_deg
-    return Lane(inp.lanes.get(lane_id, ()), base)
+    field_name = "rotation_deg" if lane_id == "rotation" else lane_id
+    base = getattr(inp.base, field_name, LANES_BY_ID[lane_id].default)
+    return Lane(inp.lanes.get(lane_id, ()), float(base))
 
 
 def _track(lane: Lane, frames: int) -> np.ndarray:
@@ -295,14 +295,18 @@ class Solver:
         bounce = self._interp(self._bounce, t)
         phase = self._interp(self._phase, t)
         drift = float(self._amp[k]) * T.FLOAT_HEIGHT * math.sin(2 * math.pi * phase)
+        angle = math.radians(self.input.base.float_angle_deg)
+        # Drift along the float direction, the same distance in pixels either way.
+        drift_x = drift * math.sin(angle) / T.FRAME_ASPECT
+        drift_y = drift * math.cos(angle)
         react = self.reaction_offset(t)
         return Frame(
             t_ms=t,
             expression=self.expression(t),
             eyes_open=self.eyes_open(t),
             mouth_open=self.mouth_open(t),
-            x=lanes["x"].value_at(t) + react.dx,
-            y=lanes["y"].value_at(t) - bounce * T.BOUNCE_HEIGHT + drift + react.dy,
+            x=lanes["x"].value_at(t) + drift_x + react.dx,
+            y=lanes["y"].value_at(t) - bounce * T.BOUNCE_HEIGHT + drift_y + react.dy,
             scale=max(0.0, lanes["scale"].value_at(t) * react.scale_mul),
             rotation_deg=lanes["rotation"].value_at(t) + react.rotation_deg,
             squash=react.squash,

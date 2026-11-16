@@ -302,3 +302,26 @@ def test_times_outside_the_timeline_are_safe() -> None:
     assert solver.query(25_000).mouth_open is False
     empty = build_solver(SolverInput(duration_ms=0, seed=0))
     assert empty.query(0).expression is None
+
+
+def test_float_direction_and_base_motion_settings() -> None:
+    import math
+
+    def drift(angle: float) -> tuple[float, float]:
+        solver = build_solver(
+            SolverInput(duration_ms=8000, seed=1, base=BaseTransform(float_angle_deg=angle))
+        )
+        xs = [solver.query(t).x for t in range(0, 8000, 50)]
+        ys = [solver.query(t).y for t in range(0, 8000, 50)]
+        return max(xs) - min(xs), max(ys) - min(ys)
+
+    up = drift(0.0)
+    side = drift(90.0)
+    assert up[0] == pytest.approx(0.0, abs=1e-6) and up[1] > 0.015
+    assert side[1] == pytest.approx(0.0, abs=1e-6)
+    assert side[0] == pytest.approx(up[1] / T.FRAME_ASPECT, rel=0.05)
+    still = build_solver(SolverInput(duration_ms=4000, seed=1, base=BaseTransform(float_amp=0.0)))
+    assert len({still.query(t).y for t in range(0, 4000, 100)}) == 1
+    no_blinks = build_solver(SolverInput(duration_ms=60_000, seed=1, base=BaseTransform(blink_rate=0.0)))
+    assert no_blinks.blinks == []
+    assert math.isfinite(drift(45.0)[0])

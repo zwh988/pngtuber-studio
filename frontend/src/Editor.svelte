@@ -38,6 +38,7 @@
   import { clock } from "./format";
   import { lufsText } from "./loudness";
   import AvatarOverlay from "./AvatarOverlay.svelte";
+  import AvatarPanel from "./AvatarPanel.svelte";
   import LineBank from "./LineBank.svelte";
   import StorageList from "./StorageList.svelte";
   import VoiceFx from "./VoiceFx.svelte";
@@ -85,7 +86,11 @@
   let voiceArmed = false;
   let voiceArmedMs = 0;
   /** Which tab of the footage / line bank panel is showing. */
-  let tab = $state<"footage" | "lines" | "storage" | "fx">("footage");
+  let tab = $state<"footage" | "lines" | "storage" | "fx" | "avatar">("footage");
+  /** Selected avatar key or reaction (click in the timeline's avatar rows). */
+  let selectedKeyId = $state<string | null>(null);
+  let selectedReactionId = $state<string | null>(null);
+  let avatarPanel = $state<ReturnType<typeof AvatarPanel> | null>(null);
   /** Bumped after an undo or redo so the line bank reloads. */
   let lineReload = $state(0);
   let lineBank = $state<ReturnType<typeof LineBank> | null>(null);
@@ -481,6 +486,10 @@
 
   /** Delete: remove the selected placed line, or else the selected clip. */
   function removeSelected(): void {
+    if (selectedKeyId !== null || selectedReactionId !== null) {
+      void avatarPanel?.deleteSelected();
+      return;
+    }
     const placed = selectedPlacement;
     if (placed !== null) {
       removePlaced(placed.id);
@@ -588,6 +597,21 @@
         e.preventDefault();
         if (canEdit) {
           splitAtPlayhead();
+        }
+        break;
+      case "e":
+      case "E":
+        e.preventDefault();
+        if (canEdit) {
+          player?.pause();
+          void avatarPanel?.addExpressionKey();
+        }
+        break;
+      case "r":
+      case "R":
+        e.preventDefault();
+        if (canEdit && !e.ctrlKey) {
+          void avatarPanel?.dropReaction();
         }
         break;
       case "Delete":
@@ -803,6 +827,15 @@
             >
               Voice FX
             </button>
+            <button
+              type="button"
+              role="tab"
+              aria-selected={tab === "avatar"}
+              class:on={tab === "avatar"}
+              onclick={() => (tab = "avatar")}
+            >
+              Avatar
+            </button>
           </div>
           <div class="pane">
             <div hidden={tab !== "footage"}>
@@ -838,6 +871,21 @@
             </div>
             <div hidden={tab !== "storage"}>
               <StorageList report={storage} onchanged={takesDeleted} />
+            </div>
+            <div hidden={tab !== "avatar"}>
+              {#if timeline !== null}
+                <AvatarPanel
+                  bind:this={avatarPanel}
+                  avatar={timeline.avatar}
+                  keyframes={timeline.keyframes}
+                  reactions={timeline.reactions}
+                  {playheadMs}
+                  {busy}
+                  bind:selectedKeyId
+                  bind:selectedReactionId
+                  oncommit={commitAvatar}
+                />
+              {/if}
             </div>
             <div hidden={tab !== "fx"}>
               <VoiceFx
@@ -881,6 +929,16 @@
             onreorder={reorderByDrag}
             onplace={placeAt}
             onmoveplacement={movePlacementByDrag}
+            keyframes={timeline.keyframes}
+            reactions={timeline.reactions}
+            bind:selectedKeyId
+            bind:selectedReactionId
+            onmovekey={async (id, ms) => {
+              await commitAvatar("Move key", [{ op: "move_keyframe", keyframe_id: id, timeline_ms: ms }]);
+            }}
+            onmovereaction={async (id, ms) => {
+              await commitAvatar("Move reaction", [{ op: "move_reaction", reaction_id: id, timeline_ms: ms }]);
+            }}
           />
           <div class="clipbar">
             {#if selectedClip !== null}
@@ -965,7 +1023,7 @@
           <details class="keys">
             <summary>Shortcuts</summary>
             <p>
-              Space play/pause, , and . step a frame, S split at playhead, N new voice line, G generate, Shift+G reroll, M place the selected line at the playhead, Delete remove the selected clip or placed line,
+              Space play/pause, , and . step a frame, S split at playhead, N new voice line, G generate, Shift+G reroll, M place the selected line at the playhead, E add an expression key at the playhead (Avatar tab picks which), R drop a reaction at the playhead, Delete remove the selected clip, placed line, key or reaction,
               [ and ] cut the selected clip's in/out at the playhead, Ctrl+Z / Ctrl+Y undo / redo.
               Drag a clip's edge to trim it, drag a clip sideways to reorder, drag a voice block to move it, drag a line from the bank onto the timeline to place it; each drag is one undo step.
               Drag the thin bars between the panels to resize them (arrow keys work when a bar is focused).

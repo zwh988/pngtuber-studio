@@ -28,7 +28,13 @@
     "y": 0.75,
     "scale": 1.0,
     "rotation_deg": 0.0,
-    "auto_key_expression": true
+    "auto_key_expression": true,
+    "bounce": 1.0,
+    "float_amp": 1.0,
+    "float_speed": 1.0,
+    "float_angle_deg": 0.0,
+    "blink_rate": 1.0,
+    "mouth_sensitivity": 1.0
   },
   "export": {
     "height": 1080,

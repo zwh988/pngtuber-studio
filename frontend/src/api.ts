@@ -208,6 +208,14 @@ export type AvatarSettings = {
   scale: number;
   rotation_deg: number;
   auto_key_expression: boolean;
+  /** Base motion (schema v4): each lane's value where it has no keys. */
+  bounce: number;
+  float_amp: number;
+  float_speed: number;
+  /** Direction of the idle float in degrees: 0 up and down, 90 side to side. */
+  float_angle_deg: number;
+  blink_rate: number;
+  mouth_sensitivity: number;
 };
 
 export type EditResult = {
@@ -280,6 +288,12 @@ export type EditOp =
       scale?: number;
       rotation_deg?: number;
       auto_key_expression?: boolean;
+      bounce?: number;
+      float_amp?: number;
+      float_speed?: number;
+      float_angle_deg?: number;
+      blink_rate?: number;
+      mouth_sensitivity?: number;
     };
 
 export function splitClip(timelineMs: number): Promise<TimelineState> {

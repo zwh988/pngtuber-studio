@@ -78,8 +78,8 @@ def make_project(**take_kw: Any) -> Project:
 # ---- schema and migration ---------------------------------------------------
 
 
-def test_schema_is_version_three_and_trim_defaults_to_none() -> None:
-    assert SCHEMA_VERSION == 3
+def test_schema_has_the_trim_fields_and_they_default_to_none() -> None:
+    assert SCHEMA_VERSION >= 3
     take = make_take()
     assert (take.trim_start_ms, take.trim_end_ms) == (None, None)
 
@@ -105,7 +105,7 @@ def v2_data() -> dict[str, Any]:
 
 def test_migration_v2_to_v3_adds_empty_trim_to_every_take() -> None:
     old = v2_data()
-    result = migrate(old)
+    result = migrate(old, target=3)
     assert result["schema_version"] == 3
     assert result["takes"][0]["trim_start_ms"] is None
     assert result["takes"][0]["trim_end_ms"] is None
@@ -118,14 +118,14 @@ def test_migration_from_v1_runs_both_steps() -> None:
     data["schema_version"] = 1
     for placement in data["placements"]:
         del placement["stretch"]
-    result = migrate(data)
+    result = migrate(data, target=3)
     assert result["schema_version"] == 3
     assert result["placements"][0]["stretch"] == 1.0
     assert result["takes"][0]["trim_start_ms"] is None
 
 
 def test_migration_works_without_takes() -> None:
-    assert migrate({"schema_version": 2, "name": "x"})["schema_version"] == 3
+    assert migrate({"schema_version": 2, "name": "x"}, target=3)["schema_version"] == 3
 
 
 # ---- command and op ------------------------------------------------------------

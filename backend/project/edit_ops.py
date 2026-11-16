@@ -204,6 +204,12 @@ class SetAvatarSettingsOp(_Op):
     scale: float | None = None
     rotation_deg: float | None = None
     auto_key_expression: bool | None = None
+    bounce: float | None = None
+    float_amp: float | None = None
+    float_speed: float | None = None
+    float_angle_deg: float | None = None
+    blink_rate: float | None = None
+    mouth_sensitivity: float | None = None
 
 
 EditOp = Annotated[
@@ -297,11 +303,5 @@ def _build_avatar_command(op: EditOp) -> Command:
     if isinstance(op, RemoveReactionOp):
         return RemoveReaction(op.reaction_id)
     if isinstance(op, SetAvatarSettingsOp):
-        return SetAvatarSettings(
-            x=op.x,
-            y=op.y,
-            scale=op.scale,
-            rotation_deg=op.rotation_deg,
-            auto_key_expression=op.auto_key_expression,
-        )
+        return SetAvatarSettings(**op.model_dump(exclude={"op"}))
     raise CommandError(f"unsupported edit {op!r}")

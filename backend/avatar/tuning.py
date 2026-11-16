@@ -33,6 +33,7 @@ BOUNCE_DAMPING = 18.0  # damping (1/s)
 # --- idle float (M5-4) -----------------------------------------------------------------
 FLOAT_HEIGHT = 0.01  # fraction of the frame height at float_amp 1.0
 FLOAT_BASE_HZ = 0.25  # cycles per second at float_speed 1.0
+FRAME_ASPECT = 16 / 9  # width / height of the output frame (sideways float in pixels)
 
 # --- reactions (M5-4) -------------------------------------------------------------------
 SHAKE_X = 0.012  # fraction of the frame width at intensity 1

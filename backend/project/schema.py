@@ -24,7 +24,7 @@ from pydantic import (
     model_validator,
 )
 
-SCHEMA_VERSION = 3
+SCHEMA_VERSION = 4
 
 # Placement.stretch is a speed-up factor for a placed line (Tighten, M3-9):
 # 1.0 plays the take as it is, 1.25 plays it 25 percent faster (shorter).
@@ -271,6 +271,15 @@ class AvatarSettings(_Model):
     scale: float = Field(default=1.0, gt=0)
     rotation_deg: float = 0.0
     auto_key_expression: bool = True
+    # Base motion (schema v4, M5 S11): the value of each motion lane where it has no
+    # keys. Ranges match backend/avatar/lanes.py. ``float_angle_deg`` is the direction
+    # of the idle float: 0 = up and down, 90 = left and right.
+    bounce: float = Field(default=1.0, ge=0.0, le=3.0)
+    float_amp: float = Field(default=1.0, ge=0.0, le=3.0)
+    float_speed: float = Field(default=1.0, ge=0.0, le=4.0)
+    float_angle_deg: float = Field(default=0.0, ge=-180.0, le=180.0)
+    blink_rate: float = Field(default=1.0, ge=0.0, le=4.0)
+    mouth_sensitivity: float = Field(default=1.0, ge=0.25, le=4.0)
 
 
 class ExportSettings(_Model):

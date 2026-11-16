@@ -81,7 +81,7 @@ Audio of a placed take: `GET /media/take/{id}` is the take as recorded; `GET /me
 
 Written from the source files pasted in M3 chat E (2026-10-17). Source of truth is still the code; this is what a chat needs so the files need not be pasted again. If you change one of these modules, update the matching section.
 
-## Schema (`backend/project/schema.py`, `SCHEMA_VERSION = 3`)
+## Schema (`backend/project/schema.py`, `SCHEMA_VERSION = 4`)
 - Base `_Model`: `extra="forbid"`, `validate_assignment=True`, `protected_namespaces=()`. Types: `EntityId` (12 lowercase hex), `Ms` (int >= 0), `PositiveMs`, `RelPath` (relative POSIX, no `..`). `new_id()` makes an id.
 - `Anchor(clip_id, source_ms)`: source time, not timeline time.
 - `Clip`: `id, source_id, in_ms, out_ms, speed (0.25..8), track (0 = the timeline), overlay, effects`. `out_ms > in_ms`.
@@ -153,11 +153,11 @@ Avatar ops are timeline `EditOp`s: send them through `POST /api/timeline/batch` 
 | `move_reaction` | `reaction_id`, `timeline_ms` |
 | `set_reaction` | `reaction_id`, `type?`, `intensity?`, `duration_ms?` |
 | `remove_reaction` | `reaction_id` |
-| `set_avatar_settings` | `x?`, `y?`, `scale?`, `rotation_deg?` (lane ranges), `auto_key_expression?` |
+| `set_avatar_settings` | `x?`, `y?`, `scale?`, `rotation_deg?`, `bounce?`, `float_amp?`, `float_speed?`, `blink_rate?`, `mouth_sensitivity?` (lane ranges), `float_angle_deg?` (-180 to 180), `auto_key_expression?` |
 
 Lanes (`backend/avatar/lanes.py`): `expression` (name), `bounce` 0-3 (1), `float_amp` 0-3 (1), `float_speed` 0-4 (1), `blink_rate` 0-4 (1), `mouth_sensitivity` 0.25-4 (1), `scale` 0.05-5, `x` -0.5-1.5, `y` -0.5-1.5, `rotation` -180-180 (the last four default to `AvatarSettings`). A value outside the range is HTTP 400. Labels: "Add key", "Add expression key", "Set key", "Move key", "Change key", "Change key easing", "Remove key", "Add reaction", "Move reaction", "Change reaction", "Remove reaction", "Change avatar settings".
 
-`TimelineState` gains `keyframes: TimelineKeyframe[]` (`id, lane_id, value, interpolation, t_ms|null, anchor_clip_id, anchor_source_ms, orphaned`), `reactions: TimelineReaction[]` (`id, type, intensity, duration_ms, t_ms|null, anchor_clip_id, anchor_source_ms, orphaned`), both ordered by time, and `avatar: AvatarSettings`. A cut that removes the footage under a key or reaction flags it orphaned (parked at the nearest edge), never deletes it.
+`TimelineState` gains `keyframes: TimelineKeyframe[]` (`id, lane_id, value, interpolation, t_ms|null, anchor_clip_id, anchor_source_ms, orphaned`), `reactions: TimelineReaction[]` (`id, type, intensity, duration_ms, t_ms|null, anchor_clip_id, anchor_source_ms, orphaned`), both ordered by time, and `avatar: AvatarSettings` (schema v4: also `bounce`, `float_amp`, `float_speed`, `float_angle_deg`, `blink_rate`, `mouth_sensitivity`, the base of each lane). A cut that removes the footage under a key or reaction flags it orphaned (parked at the nearest edge), never deletes it.
 
 # Avatar preview (M5 S10a: `backend/avatar/track.py`)
 
