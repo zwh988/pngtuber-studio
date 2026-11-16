@@ -15,7 +15,7 @@ GAME_AUDIO_MAX_DB = 12.0
 def clean_game_audio_db(value: Any) -> float:
     """A valid level, rounded to 2 decimals. Raises ``ValueError`` otherwise."""
     if isinstance(value, bool) or not isinstance(value, (int, float)):
-        raise ValueError("the game audio level must be a number")
+        raise ValueError("the game audio level must be a number")  # noqa: TRY004
     number = float(value)
     if not math.isfinite(number):
         raise ValueError("the game audio level must be a finite number")
