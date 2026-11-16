@@ -104,10 +104,10 @@ Done when: the live preview looks right and scrubbing to any frame always shows 
 ## M6. Export (L)
 
 - [ ] M6-1 Pre-flight checks (ungenerated lines, orphans, unresolved overflow, missing files)
-- [ ] M6-2 Voice track builder: raw and processed tracks with overlap mixing
-- [ ] M6-3 EDL to ffmpeg filter graph, producing `video_edited.mp4`
-- [ ] M6-4 Python compositor: avatar layer from solver frame states
-- [ ] M6-5 Single-pass final render (NVENC) with mixed audio
+- [x] M6-2 Voice track builder: raw and processed tracks with overlap mixing
+- [x] M6-3 EDL to ffmpeg filter graph, producing `video_edited.mp4`
+- [x] M6-4 Python compositor: avatar layer from solver frame states
+- [x] M6-5 Single-pass final render (NVENC) with mixed audio
 - [ ] M6-6 Bundle writer: per-line wavs, hard-linked raw video, optional transparent overlay, project snapshot
 - [ ] M6-7 Export UI: output folder, progress, cancel
 - [ ] M6-8 Parity spot-check test (preview vs export frames at sample timestamps)

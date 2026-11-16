@@ -223,3 +223,19 @@ def test_real_ffmpeg_cuts_speeds_and_letterboxes_exactly(tmp_path: Path) -> None
     assert rms(200, 800) > 0.05  # red: sine (lavfi sine is 1/8 full scale)
     assert rms(1200, 1800) < 0.01  # blue: no audio, silence
     assert rms(2200, 2800) > 0.05  # red at half speed: still a sine (atempo)
+
+
+def test_limit_clips_cuts_the_timeline_at_the_limit() -> None:
+    from backend.edl.timemap import timeline_duration
+    from backend.export.editgraph import limit_clips
+
+    proj = project([*THREE, clip("d", RED, 0, 500, track=1)])
+    short = limit_clips(proj, 1500)
+    ids = [c.id[0] for c in short.clips]
+    assert ids == ["a", "b", "d"]  # c starts at 2000: dropped; the other track stays
+    assert short.clips[1].out_ms == 1000  # 500 ms of timeline at 2x is 1000 ms of source
+    assert timeline_duration(short.clips) == 1500
+    assert limit_clips(proj, 99_999).clips == proj.clips
+    assert len(proj.clips) == 4  # the input is not changed
+    with pytest.raises(ExportError):
+        limit_clips(proj, 0)

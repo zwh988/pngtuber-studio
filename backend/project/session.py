@@ -56,6 +56,7 @@ from backend.avatar.track import (
     sprite_path_for_key,
 )
 from backend.edl.anchoring import check_references, check_voice_references
+from backend.export.pipeline import ExportInputs
 from backend.export.preflight import PreflightReport, preflight
 from backend.project.avatar_commands import SetAvatarArtFolder
 from backend.project.clip_commands import AddClip
@@ -658,6 +659,34 @@ class Session:
             return render_aligned_raw(raw_path, spec, stretch, bounds)
         except ProcessError as exc:
             raise SessionError(str(exc)) from exc
+
+    def export_inputs(self) -> ExportInputs:
+        """A snapshot of what an export needs (M6): the project, its timeline, the
+        footage paths, the avatar frame track (the one the preview draws) and the art."""
+        with self._lock:
+            folder, stack = self._require_open()
+            project = stack.project.model_copy(deep=True)
+            timeline = self._timeline_state()
+            art = self._art_or_none(folder, project)
+            art_root = (
+                None
+                if project.avatar.art_folder is None
+                else resolve_art_folder(project.avatar.art_folder, folder)
+            )
+        paths: dict[str, Path] = {}
+        for clip in timeline.clips:
+            path = self.source_path(clip.source_id)
+            if path is not None:
+                paths[clip.source_id] = path
+        track = self.avatar_track() if art is not None else None
+        return ExportInputs(
+            project=project,
+            timeline=timeline,
+            source_paths=paths,
+            track=track,
+            art=art,
+            art_root=art_root,
+        )
 
     def export_preflight(self, tools_problem: str | None = None) -> PreflightReport:
         """What blocks or needs confirming before an export (M6-1). ``tools_problem``

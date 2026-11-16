@@ -226,6 +226,28 @@ def build_edit_graph(
     )
 
 
+def limit_clips(project: Project, limit_ms: int) -> Project:
+    """A copy of the project whose track-0 clips stop at ``limit_ms`` of the timeline (a
+    short test export). Clips after the limit are dropped; the clip across it is cut,
+    its source out point scaled by its speed. Other tracks and everything else stay."""
+    if limit_ms <= 0:
+        raise ExportError("the export length must be above 0")
+    spans = {span.index: span for span in clip_spans(project.clips)}
+    kept = []
+    for index, clip in enumerate(project.clips):
+        span = spans.get(index)
+        if span is None:
+            kept.append(clip)
+            continue
+        if span.start_ms >= limit_ms:
+            continue
+        if span.end_ms > limit_ms:
+            source_ms = round_half_up((limit_ms - span.start_ms) * speed_fraction(clip.speed))
+            clip = clip.model_copy(update={"out_ms": max(clip.in_ms + 1, clip.in_ms + source_ms)})
+        kept.append(clip)
+    return project.model_copy(update={"clips": kept})
+
+
 def edited_video_args(
     ffmpeg: Path, graph: EditGraph, script_path: Path, dest: Path, fmt: OutputFormat
 ) -> list[str]:
