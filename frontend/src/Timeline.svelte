@@ -10,6 +10,17 @@
   import { MOTION_LANES, laneLabel } from "./avatarLanes";
   import { clock } from "./format";
   import { LINE_DRAG_TYPE, dropSlot, peakSpan, trimTarget, withTrim } from "./timeline";
+  import { FALLBACK, readTimelineColors, type TimelineColors } from "./timelineTheme";
+  import {
+    ChevronDown,
+    ChevronRight,
+    CircleHelp,
+    Maximize2,
+    Rows3,
+    ZoomIn,
+    ZoomOut,
+  } from "@lucide/svelte";
+  import IconButton from "./ui/IconButton.svelte";
 
   let {
     clips,
@@ -78,6 +89,8 @@
   const KEY_R = 5;
   /** Collapsed: one row with every motion key. Expanded: one row per motion lane. */
   let lanesOpen = $state(false);
+  /** The how-to text under the toolbar (the "?" button). */
+  let helpOpen = $state(false);
   const motionRows = $derived(lanesOpen ? MOTION_LANES.length : 1);
   const HEIGHT = $derived(MOTION_Y + motionRows * (ROW_H + 2) + 8);
   /** Width given to a placed line that has no take yet, in ms. */
@@ -92,6 +105,8 @@
   ];
 
   let canvasEl = $state<HTMLCanvasElement | null>(null);
+  /** Canvas colours from the theme tokens (timelineTheme.ts), read once the canvas exists. */
+  let colors = $state<TimelineColors>(FALLBACK);
   let viewWidth = $state(0);
   /** Zoom: pixels per millisecond. */
   let pxPerMs = $state(0.1);
@@ -210,39 +225,52 @@
     }
     ctx.setTransform(dpr, 0, 0, dpr, 0, 0);
     const xOf = (ms: number): number => (ms - scrollMs) * pxPerMs;
+    const c = colors;
+    const font = (px: number, weight = 400): string => `${weight} ${px}px ${c.font}`;
+    /** One selected look for every item: a white outline inside an accent ring. */
+    const selectRect = (x: number, y: number, w: number, h: number): void => {
+      ctx.lineWidth = 2;
+      ctx.strokeStyle = c.selectedRing;
+      ctx.strokeRect(x - 1, y - 1, w + 2, h + 2);
+      ctx.strokeStyle = c.selected;
+      ctx.strokeRect(x + 1, y + 1, Math.max(1, w - 2), Math.max(1, h - 2));
+    };
 
-    ctx.fillStyle = "#1e1e24";
+    ctx.fillStyle = c.background;
     ctx.fillRect(0, 0, viewWidth, HEIGHT);
 
     // Ruler
-    ctx.fillStyle = "#2a2a33";
+    ctx.fillStyle = c.ruler;
     ctx.fillRect(0, 0, viewWidth, RULER_H);
+    ctx.fillStyle = c.rowLine;
+    ctx.fillRect(0, RULER_H - 1, viewWidth, 1);
     const step = STEPS.find((s) => s * pxPerMs >= 90) ?? STEPS[STEPS.length - 1] ?? 1000;
     const minor = step / 5;
-    ctx.font = "11px system-ui, sans-serif";
+    ctx.font = font(11);
     ctx.textBaseline = "top";
     ctx.lineWidth = 1;
     const endMs = scrollMs + viewMs;
     for (let t = Math.floor(scrollMs / minor) * minor; t <= endMs; t += minor) {
       const x = Math.round(xOf(t)) + 0.5;
       const major = t % step === 0;
-      ctx.strokeStyle = major ? "#9a9aa8" : "#5a5a66";
+      ctx.strokeStyle = major ? c.rulerMajor : c.rulerMinor;
       ctx.beginPath();
       ctx.moveTo(x, RULER_H);
       ctx.lineTo(x, RULER_H - (major ? 10 : 5));
       ctx.stroke();
       if (major && t >= 0) {
-        ctx.fillStyle = "#c8c8d2";
+        ctx.fillStyle = c.rulerText;
         ctx.fillText(rulerLabel(t, step), x + 3, 4);
       }
     }
 
     // Video strip lane
     const shown = preview ?? clips;
-    const hues = new Map<string, number>();
+    // Clips alternate between two tones by source, so cuts between recordings stand out.
+    const tones = new Map<string, number>();
     for (const clip of clips) {
-      if (!hues.has(clip.source_id)) {
-        hues.set(clip.source_id, (hues.size * 70 + 210) % 360);
+      if (!tones.has(clip.source_id)) {
+        tones.set(clip.source_id, tones.size % 2);
       }
     }
     for (const clip of shown) {
@@ -254,36 +282,40 @@
       const missing = clip.source?.file_missing ?? true;
       ctx.globalAlpha = dragUi?.kind === "move" && dragUi.clipId === clip.id ? 0.35 : 1;
       const selected = clip.id === selectedId;
-      ctx.fillStyle = `hsl(${hues.get(clip.source_id) ?? 210} 45% ${selected ? 50 : 38}%)`;
-      ctx.fillRect(x0, LANE_Y, Math.max(1, w - 1), LANE_H);
+      ctx.fillStyle = tones.get(clip.source_id) === 1 ? c.clipAlt : c.clip;
       if (selected) {
-        ctx.strokeStyle = "#ffffff";
+        ctx.filter = "brightness(1.2)";
+      }
+      ctx.fillRect(x0, LANE_Y, Math.max(1, w - 1), LANE_H);
+      ctx.filter = "none";
+      if (missing) {
+        ctx.strokeStyle = c.missing;
         ctx.lineWidth = 2;
         ctx.strokeRect(x0 + 1, LANE_Y + 1, Math.max(1, w - 3), LANE_H - 2);
       }
-      if (missing) {
-        ctx.strokeStyle = "#ff5a5a";
-        ctx.lineWidth = 2;
-        ctx.strokeRect(x0 + 1, LANE_Y + 1, Math.max(1, w - 3), LANE_H - 2);
+      if (selected) {
+        selectRect(x0, LANE_Y, Math.max(1, w - 1), LANE_H);
       }
       if (w > 30) {
         ctx.save();
         ctx.beginPath();
         ctx.rect(x0, LANE_Y, w - 1, LANE_H);
         ctx.clip();
-        ctx.fillStyle = "#ffffff";
+        ctx.fillStyle = c.clipText;
         ctx.textBaseline = "top";
+        ctx.font = font(11, 600);
         ctx.fillText(missing ? `${label(clip)} (missing)` : label(clip), x0 + 6, LANE_Y + 6);
-        ctx.fillStyle = "#ffffffaa";
+        ctx.font = font(11);
+        ctx.fillStyle = c.clipTextMuted;
         ctx.fillText(clock(clip.duration_ms), x0 + 6, LANE_Y + 22);
         ctx.restore();
       }
       if (clip.speed !== 1 && w > 40) {
         const text = `${clip.speed}x`;
         const tw = ctx.measureText(text).width;
-        ctx.fillStyle = "#f5c542";
+        ctx.fillStyle = c.speedBadge;
         ctx.fillRect(x0 + w - tw - 14, LANE_Y + 4, tw + 10, 16);
-        ctx.fillStyle = "#1e1e24";
+        ctx.fillStyle = c.speedText;
         ctx.textBaseline = "top";
         ctx.fillText(text, x0 + w - tw - 9, LANE_Y + 6);
       }
@@ -292,7 +324,7 @@
     ctx.globalAlpha = 1;
 
     // Cut markers between clips
-    ctx.strokeStyle = "#ffffffcc";
+    ctx.strokeStyle = c.cut;
     ctx.lineWidth = 1.5;
     for (let i = 1; i < shown.length; i += 1) {
       const clip = shown[i];
@@ -310,10 +342,11 @@
     }
 
     // Voice lane: placed lines as blocks with their waveform
-    ctx.fillStyle = "#23232b";
+    ctx.fillStyle = c.row;
     ctx.fillRect(0, VOICE_Y, viewWidth, VOICE_H);
     if (placements.length === 0) {
-      ctx.fillStyle = "#7a7a88";
+      ctx.font = font(11);
+      ctx.fillStyle = c.hint;
       ctx.textBaseline = "middle";
       ctx.fillText(
         "Voice lane: select a line in the bank, move the playhead, press M",
@@ -333,13 +366,18 @@
       }
       const picked = p.id === selectedPlacementId;
       const noAudio = p.take_id === null;
-      ctx.fillStyle = noAudio ? "#3a3a44" : picked ? "#4f9a7e" : "#3b7a64";
+      ctx.fillStyle = noAudio ? c.voiceEmpty : c.voice;
+      if (picked) {
+        ctx.filter = "brightness(1.2)";
+      }
       ctx.fillRect(x0, VOICE_Y + 2, Math.max(1, w - 1), VOICE_H - 4);
+      ctx.filter = "none";
       const report = p.take_id === null ? undefined : peaks[p.take_id];
       if (report !== undefined && w > 4) {
         const midY = VOICE_Y + 14 + (VOICE_H - 18) / 2;
         const half = (VOICE_H - 18) / 2 - 1;
-        ctx.fillStyle = "#ffffffcc";
+        ctx.fillStyle = c.wave;
+        ctx.globalAlpha = 0.8;
         const first = Math.max(0, Math.floor(-x0));
         const last = Math.min(Math.ceil(w), Math.ceil(viewWidth - x0));
         for (let col = first; col < last; col += 1) {
@@ -348,6 +386,7 @@
           const bottom = midY - low * half;
           ctx.fillRect(x0 + col, top, 1, Math.max(1, bottom - top));
         }
+        ctx.globalAlpha = 1;
       }
       if (w > 30) {
         const text = p.line_text === "" ? "(line gone)" : p.line_text;
@@ -355,44 +394,46 @@
         ctx.beginPath();
         ctx.rect(x0, VOICE_Y, Math.max(1, w - 1), VOICE_H);
         ctx.clip();
-        ctx.fillStyle = "#ffffff";
+        ctx.fillStyle = c.clipText;
         ctx.textBaseline = "top";
-        ctx.font = "10px system-ui, sans-serif";
+        ctx.font = font(10, 600);
         ctx.fillText(noAudio ? `${text} (no take)` : text, x0 + 4, VOICE_Y + 4);
         ctx.restore();
       }
       if (p.overflow_ms > 0 && !p.allow_overlap) {
         // Runs into the next line: red edge at the end of the block.
-        ctx.fillStyle = "#e5484d";
-        ctx.fillRect(x0 + Math.max(1, w - 1) - 3, VOICE_Y + 2, 3, VOICE_H - 4);
+        ctx.fillStyle = c.overflow;
+        ctx.fillRect(x0 + Math.max(1, w - 1) - 4, VOICE_Y + 2, 4, VOICE_H - 4);
       }
       if (p.orphaned) {
-        ctx.strokeStyle = "#f5a142";
+        ctx.strokeStyle = c.orphan;
         ctx.lineWidth = 2;
         ctx.strokeRect(x0 + 1, VOICE_Y + 3, Math.max(1, w - 3), VOICE_H - 6);
       }
       if (picked) {
-        ctx.strokeStyle = "#ffffff";
-        ctx.lineWidth = 2;
-        ctx.strokeRect(x0 + 1, VOICE_Y + 3, Math.max(1, w - 3), VOICE_H - 6);
+        selectRect(x0, VOICE_Y + 2, Math.max(1, w - 1), VOICE_H - 4);
       }
     }
 
-    // Avatar rows: expression keys, reactions, motion keys (M5-5, M5-7).
-    const rowLabel = (text: string, y: number): void => {
-      ctx.fillStyle = "#23232b";
+    // Avatar rows: expression keys, reactions, motion keys (M5-5, M5-7). Their names are in
+    // the lane header column next to the canvas; an empty row says how to add to it.
+    const row = (y: number, hint: string | null): void => {
+      ctx.fillStyle = c.row;
       ctx.fillRect(0, y, viewWidth, ROW_H);
-      ctx.fillStyle = "#7a7a88";
-      ctx.font = "10px system-ui, sans-serif";
-      ctx.textBaseline = "middle";
-      ctx.fillText(text, 4, y + ROW_H / 2);
+      if (hint !== null) {
+        ctx.fillStyle = c.hint;
+        ctx.font = font(10);
+        ctx.textBaseline = "middle";
+        ctx.fillText(hint, 6, y + ROW_H / 2);
+      }
     };
-    rowLabel("Expression (E)", EXPR_Y);
-    rowLabel("Reactions (R)", REACT_Y);
+    const exprKeys = keyframes.some((k) => k.lane_id === "expression" && k.t_ms !== null);
+    row(EXPR_Y, exprKeys ? null : "No expression keys: press E to key one at the playhead");
+    row(REACT_Y, reactions.length > 0 ? null : "No reactions: press R to drop one at the playhead");
     if (lanesOpen) {
-      MOTION_LANES.forEach((lane) => rowLabel(laneLabel(lane), motionRowY(lane)));
+      MOTION_LANES.forEach((lane) => row(motionRowY(lane), null));
     } else {
-      rowLabel("Motion keys", MOTION_Y);
+      row(MOTION_Y, null);
     }
     for (const r of reactions) {
       const t = shownMs(r.id, r.t_ms);
@@ -400,21 +441,24 @@
       const x0 = xOf(t);
       const w = Math.max(4, r.duration_ms * pxPerMs);
       if (x0 + w < 0 || x0 > viewWidth) continue;
-      ctx.fillStyle = r.id === selectedReactionId ? "#c08cf0" : "#8a5cc0";
+      const pickedReaction = r.id === selectedReactionId;
+      ctx.fillStyle = c.reaction;
+      if (pickedReaction) {
+        ctx.filter = "brightness(1.2)";
+      }
       ctx.fillRect(x0, REACT_Y + 3, w, ROW_H - 6);
+      ctx.filter = "none";
       if (r.orphaned) {
-        ctx.strokeStyle = "#f5a142";
+        ctx.strokeStyle = c.orphan;
         ctx.lineWidth = 2;
         ctx.strokeRect(x0, REACT_Y + 3, w, ROW_H - 6);
       }
-      if (r.id === selectedReactionId) {
-        ctx.strokeStyle = "#ffffff";
-        ctx.lineWidth = 1.5;
-        ctx.strokeRect(x0, REACT_Y + 3, w, ROW_H - 6);
+      if (pickedReaction) {
+        selectRect(x0, REACT_Y + 3, w, ROW_H - 6);
       }
       if (w > 24) {
-        ctx.fillStyle = "#ffffff";
-        ctx.font = "10px system-ui, sans-serif";
+        ctx.fillStyle = c.clipText;
+        ctx.font = font(10, 600);
         ctx.textBaseline = "middle";
         ctx.fillText(r.type.replace("_", "-"), x0 + 3, REACT_Y + ROW_H / 2);
       }
@@ -432,10 +476,16 @@
       ctx.lineTo(x, cy + KEY_R);
       ctx.lineTo(x - KEY_R, cy);
       ctx.closePath();
-      ctx.fillStyle = key.lane_id === "expression" ? "#f5c542" : key.interpolation === "smooth" ? "#4da3ff" : "#9ec5ff";
+      ctx.fillStyle =
+        key.lane_id === "expression" ? c.expression : key.interpolation === "smooth" ? c.motion : c.motionHold;
       ctx.fill();
+      if (picked) {
+        ctx.strokeStyle = c.selectedRing;
+        ctx.lineWidth = 4;
+        ctx.stroke();
+      }
       if (key.orphaned || picked) {
-        ctx.strokeStyle = key.orphaned ? "#f5a142" : "#ffffff";
+        ctx.strokeStyle = key.orphaned ? c.orphan : c.selected;
         ctx.lineWidth = 2;
         ctx.stroke();
       }
@@ -445,19 +495,19 @@
           : lanesOpen
             ? String(Math.round(Number(key.value) * 100) / 100)
             : `${laneLabel(key.lane_id)} ${Math.round(Number(key.value) * 100) / 100}`;
-      ctx.fillStyle = "#e8e8ee";
-      ctx.font = "10px system-ui, sans-serif";
+      ctx.fillStyle = key.lane_id === "expression" ? c.expression : c.keyText;
+      ctx.font = font(10);
       ctx.textBaseline = "middle";
       ctx.fillText(text, x + KEY_R + 3, cy);
     }
     ctx.textBaseline = "top";
-    ctx.font = "11px system-ui, sans-serif";
+    ctx.font = font(11);
 
     // Drag feedback: a dashed line at the pointer while trimming; a ghost and a drop marker
     // while reordering.
     const ui = dragUi;
     if (ui !== null && ui.kind === "trim") {
-      ctx.strokeStyle = "#ffffff";
+      ctx.strokeStyle = c.selected;
       ctx.lineWidth = 1;
       ctx.setLineDash([4, 3]);
       ctx.beginPath();
@@ -469,12 +519,12 @@
       const dragged = clips.find((c) => c.id === ui.clipId);
       if (dragged !== undefined) {
         ctx.globalAlpha = 0.7;
-        ctx.fillStyle = "#4da3ff";
+        ctx.fillStyle = c.ghost;
         ctx.fillRect(ui.ghostX, LANE_Y + 6, Math.max(4, dragged.duration_ms * pxPerMs - 1), LANE_H - 12);
         ctx.globalAlpha = 1;
       }
       const slotX = Math.round(xOf(ui.slotMs));
-      ctx.strokeStyle = "#4da3ff";
+      ctx.strokeStyle = c.ghost;
       ctx.lineWidth = 3;
       ctx.beginPath();
       ctx.moveTo(slotX, LANE_Y - 6);
@@ -482,17 +532,17 @@
       ctx.stroke();
     } else if (ui !== null && ui.kind === "pmove") {
       ctx.globalAlpha = 0.7;
-      ctx.fillStyle = "#9be0c2";
+      ctx.fillStyle = c.voice;
       ctx.fillRect(ui.ghostX, VOICE_Y + 2, Math.max(4, ui.width - 1), VOICE_H - 4);
       ctx.globalAlpha = 1;
-      ctx.strokeStyle = "#9be0c2";
+      ctx.strokeStyle = c.selected;
       ctx.lineWidth = 2;
       ctx.beginPath();
       ctx.moveTo(Math.round(ui.ghostX), VOICE_Y - 4);
       ctx.lineTo(Math.round(ui.ghostX), VOICE_Y + VOICE_H + 4);
       ctx.stroke();
     } else if (ui !== null && ui.kind === "drop") {
-      ctx.strokeStyle = "#ffffff";
+      ctx.strokeStyle = c.selected;
       ctx.lineWidth = 2;
       ctx.beginPath();
       ctx.moveTo(Math.round(ui.x), VOICE_Y - 4);
@@ -503,8 +553,8 @@
     // Playhead
     const px = xOf(playheadMs);
     if (px >= -6 && px <= viewWidth + 6) {
-      ctx.strokeStyle = "#ff4d4d";
-      ctx.fillStyle = "#ff4d4d";
+      ctx.strokeStyle = c.playhead;
+      ctx.fillStyle = c.playhead;
       ctx.lineWidth = 2;
       ctx.beginPath();
       ctx.moveTo(px, 0);
@@ -518,6 +568,14 @@
       ctx.fill();
     }
   }
+
+  // Read the theme colours once the canvas is in the page.
+  $effect(() => {
+    const canvas = canvasEl;
+    if (canvas !== null) {
+      colors = readTimelineColors(getComputedStyle(canvas));
+    }
+  });
 
   // Redraw whenever anything it reads changes.
   $effect(() => {
@@ -888,21 +946,92 @@
 
 <div class="timeline">
   <div class="bar">
-    <button type="button" onclick={() => zoomAt(1 / 1.5, viewWidth / 2)}>Zoom out</button>
-    <button type="button" onclick={() => zoomAt(1.5, viewWidth / 2)}>Zoom in</button>
-    <button type="button" onclick={fit}>Fit</button>
-    <button type="button" onclick={() => (lanesOpen = !lanesOpen)} aria-expanded={lanesOpen}>
-      {lanesOpen ? "▾ Lanes" : "▸ Lanes"}
-    </button>
-    <span class="hint">Click the ruler to seek, click a clip to select it, drag its edge to trim, drag it sideways to reorder. Click a voice block to select it and drag it to move it; drag a line from the bank onto the timeline to place it. Avatar keys and reactions: click to select, drag sideways to move. Wheel scrolls, Ctrl+wheel zooms.</span>
+    <IconButton icon={ZoomOut} label="Zoom out (Ctrl+wheel)" onclick={() => zoomAt(1 / 1.5, viewWidth / 2)} />
+    <IconButton icon={ZoomIn} label="Zoom in (Ctrl+wheel)" onclick={() => zoomAt(1.5, viewWidth / 2)} />
+    <IconButton icon={Maximize2} label="Fit the whole timeline" onclick={fit} />
+    <span class="sep" aria-hidden="true"></span>
+    <IconButton
+      icon={Rows3}
+      label={lanesOpen ? "Show the motion keys in one row" : "Show one row per motion lane"}
+      pressed={lanesOpen}
+      onclick={() => (lanesOpen = !lanesOpen)}
+    />
+    <span class="spacer"></span>
+    <IconButton
+      icon={CircleHelp}
+      label="How the timeline works"
+      pressed={helpOpen}
+      onclick={() => (helpOpen = !helpOpen)}
+    />
   </div>
-  <div class="view" bind:clientWidth={viewWidth}>
-    <canvas bind:this={canvasEl} style:width="{viewWidth}px" style:height="{HEIGHT}px"></canvas>
+  {#if helpOpen}
+    <p class="help">
+      Click the ruler to seek, click a clip to select it, drag its edge to trim, drag it sideways to
+      reorder. Click a voice block to select it and drag it to move it; drag a line from the bank
+      onto the timeline to place it. Avatar keys and reactions: click to select, drag sideways to
+      move. Wheel scrolls, Ctrl+wheel zooms.
+    </p>
+  {/if}
+  <div class="body">
+    <div class="heads" style:height="{HEIGHT}px">
+      <div class="head ruler num" style:top="0px" style:height="{RULER_H}px">{clock(playheadMs)}</div>
+      <div class="head big" style:top="{LANE_Y}px" style:height="{LANE_H}px">
+        <span class="sw" style:background="var(--lane-clip)"></span>Video
+      </div>
+      <div class="head big" style:top="{VOICE_Y}px" style:height="{VOICE_H}px">
+        <span class="sw" style:background="var(--lane-voice)"></span>Voice
+      </div>
+      <div class="head" style:top="{EXPR_Y}px" style:height="{ROW_H}px">
+        <span class="sw" style:background="var(--lane-expression)"></span>Expression
+        <span class="kbd k">E</span>
+      </div>
+      <div class="head" style:top="{REACT_Y}px" style:height="{ROW_H}px">
+        <span class="sw" style:background="var(--lane-reaction)"></span>Reactions
+        <span class="kbd k">R</span>
+      </div>
+      {#if lanesOpen}
+        {#each MOTION_LANES as lane, i (lane)}
+          <div class="head sub" style:top="{motionRowY(lane)}px" style:height="{ROW_H}px">
+            {#if i === 0}
+              <button
+                type="button"
+                class="toggle"
+                aria-expanded="true"
+                aria-label="Collapse the motion lanes into one row"
+                title="Collapse the motion lanes into one row"
+                onclick={() => (lanesOpen = false)}
+              >
+                <ChevronDown size={12} strokeWidth={2} aria-hidden="true" />
+              </button>
+            {/if}
+            <span class="ellipsis">{laneLabel(lane)}</span>
+          </div>
+        {/each}
+      {:else}
+        <div class="head" style:top="{MOTION_Y}px" style:height="{ROW_H}px">
+          <button
+            type="button"
+            class="toggle"
+            aria-expanded="false"
+            aria-label="Show one row per motion lane"
+            title="Show one row per motion lane"
+            onclick={() => (lanesOpen = true)}
+          >
+            <ChevronRight size={12} strokeWidth={2} aria-hidden="true" />
+          </button>
+          <span class="sw" style:background="var(--lane-motion)"></span>Motion keys
+        </div>
+      {/if}
+    </div>
+    <div class="view" bind:clientWidth={viewWidth}>
+      <canvas bind:this={canvasEl} style:width="{viewWidth}px" style:height="{HEIGHT}px"></canvas>
+    </div>
   </div>
   {#if maxScrollMs > 0}
     <input
       class="scroll"
       type="range"
+      aria-label="Scroll the timeline"
       min="0"
       max={maxScrollMs}
       step="1"
@@ -919,15 +1048,103 @@
   .bar {
     display: flex;
     align-items: center;
-    gap: 0.5rem;
-    margin-bottom: 0.4rem;
+    gap: 2px;
+    margin-bottom: 6px;
   }
-  .hint {
-    opacity: 0.7;
-    font-size: 0.85rem;
+  .sep {
+    width: 1px;
+    height: 18px;
+    margin: 0 6px;
+    background: var(--border-strong);
+  }
+  .spacer {
+    flex: 1;
+  }
+  .help {
+    margin: 0 0 8px;
+    padding: 8px 10px;
+    border: 1px solid var(--border);
+    border-radius: var(--r-md);
+    background: var(--surface-2);
+    color: var(--text-2);
+    font-size: var(--fs-sm);
+  }
+  .body {
+    display: flex;
+    border: 1px solid var(--border);
+    border-radius: var(--r-md);
+    overflow: hidden;
+  }
+  .heads {
+    position: relative;
+    flex: none;
+    width: 128px;
+    border-right: 1px solid var(--border);
+    background: var(--surface-1);
+  }
+  .head {
+    position: absolute;
+    left: 0;
+    right: 0;
+    display: flex;
+    align-items: center;
+    gap: 6px;
+    padding: 0 8px;
+    box-sizing: border-box;
+    color: var(--text-2);
+    font-size: var(--fs-xs);
+    white-space: nowrap;
+  }
+  .head.big {
+    font-size: var(--fs-sm);
+    font-weight: 600;
+  }
+  .head.ruler {
+    color: var(--text-1);
+    font-size: var(--fs-xs);
+    font-weight: 600;
+    border-bottom: 1px solid var(--border);
+  }
+  .head.sub {
+    padding-left: 26px;
+    color: var(--text-3);
+  }
+  .head.sub .toggle {
+    position: absolute;
+    left: 6px;
+  }
+  .sw {
+    flex: none;
+    width: 8px;
+    height: 8px;
+    border-radius: 2px;
+  }
+  .k {
+    margin-left: auto;
+  }
+  .ellipsis {
+    overflow: hidden;
+    text-overflow: ellipsis;
+  }
+  .toggle {
+    display: inline-flex;
+    align-items: center;
+    justify-content: center;
+    width: 16px;
+    height: 16px;
+    padding: 0;
+    border: none;
+    border-radius: var(--r-sm);
+    background: none;
+    color: var(--text-2);
+  }
+  .toggle:hover {
+    background: var(--surface-3);
+    color: var(--text-1);
   }
   .view {
-    width: 100%;
+    flex: 1;
+    min-width: 0;
   }
   canvas {
     display: block;
@@ -937,6 +1154,6 @@
   .scroll {
     display: block;
     width: 100%;
-    margin: 0.4rem 0 0;
+    margin: 6px 0 0;
   }
 </style>
