@@ -110,7 +110,7 @@ Done when: the live preview looks right and scrubbing to any frame always shows 
 - [x] M6-5 Single-pass final render (NVENC) with mixed audio
 - [x] M6-6 Bundle writer: per-line wavs, hard-linked raw video, optional transparent overlay, project snapshot
 - [x] M6-7 Export UI: output folder, progress, cancel
-- [ ] M6-8 Parity spot-check test (preview vs export frames at sample timestamps)
+- [x] M6-8 Parity spot-check test (preview vs export frames at sample timestamps)
 
 Done when: the export matches the preview at spot-check timestamps and the bundle contains every asset.
 
