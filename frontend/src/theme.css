@@ -170,3 +170,57 @@ body {
 :where(.error, .bad) {
   color: var(--danger);
 }
+
+/* keyboard key chip, for hotkey hints next to buttons */
+.kbd {
+  display: inline-block;
+  min-width: 18px;
+  height: 18px;
+  padding: 0 5px;
+  border: 1px solid var(--border-strong);
+  border-radius: var(--r-sm);
+  background: var(--surface-2);
+  color: var(--text-2);
+  font: 500 var(--fs-xs) / 16px var(--font);
+  text-align: center;
+  box-sizing: border-box;
+}
+
+/* range sliders: thin track, round thumb (WebView2 is Chromium) */
+:where(input[type="range"]) {
+  -webkit-appearance: none;
+  appearance: none;
+  height: 16px;
+  margin: 0;
+  background: transparent;
+  cursor: pointer;
+}
+:where(input[type="range"])::-webkit-slider-runnable-track {
+  height: 4px;
+  border-radius: 2px;
+  background: var(--surface-3);
+}
+:where(input[type="range"])::-webkit-slider-thumb {
+  -webkit-appearance: none;
+  width: 12px;
+  height: 12px;
+  margin-top: -4px;
+  border: none;
+  border-radius: 50%;
+  background: var(--text-1);
+  box-shadow: 0 0 0 3px var(--accent-soft);
+}
+:where(input[type="range"]):hover::-webkit-slider-thumb {
+  background: #fff;
+  box-shadow: 0 0 0 4px var(--accent-strong-soft);
+}
+:where(input[type="range"]):focus-visible {
+  box-shadow: none;
+}
+:where(input[type="range"]):focus-visible::-webkit-slider-thumb {
+  box-shadow: var(--focus-ring);
+}
+:where(input[type="range"]:disabled) {
+  cursor: default;
+  opacity: 0.5;
+}

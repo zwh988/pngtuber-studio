@@ -10,6 +10,11 @@
   import { LANE_INFO, REACTION_TYPES, laneInfo, laneLabel, reactionLabel } from "./avatarLanes";
   import { clock } from "./format";
   import FxSlider from "./FxSlider.svelte";
+  import { Diamond, LocateFixed, Trash2, Zap } from "@lucide/svelte";
+  import Banner from "./ui/Banner.svelte";
+  import Button from "./ui/Button.svelte";
+  import IconButton from "./ui/IconButton.svelte";
+  import Section from "./ui/Section.svelte";
 
   /**
    * Avatar tab (M5 S11): the base motion and placement (used wherever a lane has no keys),
@@ -127,13 +132,12 @@
 </script>
 
 <div class="panel">
-  {#if artProblem !== null}<p class="warn">{artProblem}</p>{/if}
+  {#if artProblem !== null}<Banner kind="warning">{artProblem}</Banner>{/if}
 
-  <section>
-    <h4>Selected</h4>
+  <Section title="Selected" collapsible={false}>
     {#if selectedKey !== null}
       {@const key = selectedKey}
-      <p><strong>{laneLabel(key.lane_id)} key</strong> at {when(key.t_ms, key.orphaned)}</p>
+      <p class="what"><strong>{laneLabel(key.lane_id)} key</strong> at <span class="num">{when(key.t_ms, key.orphaned)}</span></p>
       {#if key.lane_id === "expression"}
         <label>
           Expression
@@ -187,18 +191,21 @@
         </label>
       {/if}
       <div class="row">
-        <button
-          type="button"
+        <Button
+          size="sm"
+          icon={LocateFixed}
           disabled={busy}
           onclick={() => void oncommit("Move key", [{ op: "move_keyframe", keyframe_id: key.id, timeline_ms: at }])}
         >
           Move to playhead
-        </button>
-        <button type="button" disabled={busy} onclick={() => void deleteSelected()}>Delete</button>
+        </Button>
+        <Button size="sm" variant="danger" icon={Trash2} disabled={busy} onclick={() => void deleteSelected()}>
+          Delete
+        </Button>
       </div>
     {:else if selectedReaction !== null}
       {@const r = selectedReaction}
-      <p><strong>{reactionLabel(r.type)}</strong> at {when(r.t_ms, r.orphaned)}</p>
+      <p class="what"><strong>{reactionLabel(r.type)}</strong> at <span class="num">{when(r.t_ms, r.orphaned)}</span></p>
       <label>
         Type
         <select
@@ -238,23 +245,25 @@
         }}
       />
       <div class="row">
-        <button
-          type="button"
+        <Button
+          size="sm"
+          icon={LocateFixed}
           disabled={busy}
           onclick={() =>
             void oncommit("Move reaction", [{ op: "move_reaction", reaction_id: r.id, timeline_ms: at }])}
         >
           Move to playhead
-        </button>
-        <button type="button" disabled={busy} onclick={() => void deleteSelected()}>Delete</button>
+        </Button>
+        <Button size="sm" variant="danger" icon={Trash2} disabled={busy} onclick={() => void deleteSelected()}>
+          Delete
+        </Button>
       </div>
     {:else}
       <p class="hint">Click a key or reaction in the timeline's avatar rows to edit it here.</p>
     {/if}
-  </section>
+  </Section>
 
-  <section>
-    <h4>At the playhead ({clock(at)})</h4>
+  <Section title={`At the playhead · ${clock(at)}`} collapsible={false}>
     <div class="row">
       <label class="inline">
         Expression
@@ -264,9 +273,9 @@
           {/each}
         </select>
       </label>
-      <button type="button" disabled={busy || keyExpression === ""} onclick={() => void addExpressionKey()}>
-        Add expression key (E)
-      </button>
+      <Button icon={Diamond} disabled={busy || keyExpression === ""} onclick={() => void addExpressionKey()}>
+        Add expression key <span class="kbd">E</span>
+      </Button>
     </div>
     <div class="row">
       <label class="inline">
@@ -283,15 +292,16 @@
         Length (ms)
         <input type="number" min="100" max="10000" step="50" bind:value={reactionDuration} />
       </label>
-      <button type="button" disabled={busy} onclick={() => void dropReaction()}>Drop reaction (R)</button>
+      <Button icon={Zap} disabled={busy} onclick={() => void dropReaction()}>
+        Drop reaction <span class="kbd">R</span>
+      </Button>
     </div>
-  </section>
+  </Section>
 
-  <section>
-    <h4>Base motion and placement</h4>
+  <Section title="Base motion and placement">
     <p class="hint">
-      Used wherever a lane has no keys. ◆ keys the lane at the playhead so it can change over time
-      (open "▸ Lanes" in the timeline to see every lane).
+      Used wherever a lane has no keys. The diamond button keys the lane at the playhead so it can
+      change over time (open the lanes in the timeline to see every lane).
     </p>
     {#each LANE_INFO as info (info.id)}
       <div class="lane">
@@ -305,13 +315,14 @@
           disabled={busy}
           oncommit={(v) => setting(info.setting, v)}
         />
-        <button
-          type="button"
-          class="key"
-          title="Key {info.label} at the playhead"
+        <IconButton
+          icon={Diamond}
+          size="sm"
+          variant="secondary"
+          label={`Key ${info.label} at the playhead`}
           disabled={busy}
-          onclick={() => void keyHere(info.id)}>◆</button
-        >
+          onclick={() => void keyHere(info.id)}
+        />
       </div>
     {/each}
     <div class="lane">
@@ -337,66 +348,57 @@
       Auto-key the expression from each placed line's emotion (only where the art has a matching
       expression, or avatar.json maps it)
     </label>
-  </section>
+  </Section>
 </div>
 
 <style>
   .panel {
     display: flex;
     flex-direction: column;
-    gap: 0.5rem;
+    gap: 18px;
   }
-  section {
-    border-bottom: 1px solid #8884;
-    padding-bottom: 0.5rem;
-  }
-  h4 {
-    margin: 0.4rem 0;
+  .what {
+    margin: 0;
   }
   .row {
     display: flex;
     flex-wrap: wrap;
     align-items: end;
-    gap: 0.5rem;
-    margin: 0.35rem 0;
+    gap: 8px;
   }
   label {
-    display: block;
-    margin: 0.3rem 0;
-  }
-  label.inline {
-    display: inline-block;
-    margin: 0;
+    display: flex;
+    flex-direction: column;
+    gap: 4px;
+    color: var(--text-2);
+    font-size: var(--fs-sm);
   }
   label.inline input {
     width: 5rem;
   }
   select {
-    display: block;
-    margin-top: 0.15rem;
+    min-width: 8rem;
   }
   .lane {
     display: flex;
     align-items: center;
-    gap: 0.35rem;
+    gap: 8px;
   }
   .lane :global(> :first-child) {
     flex: 1;
   }
-  .key {
-    padding: 0.1rem 0.4rem;
-  }
   .check {
-    display: flex;
-    gap: 0.4rem;
-    align-items: start;
+    flex-direction: row;
+    align-items: flex-start;
+    gap: 8px;
+    font-size: var(--fs-md);
+  }
+  .check input {
+    margin: 2px 0 0;
   }
   .hint {
-    font-size: 0.85rem;
-    opacity: 0.7;
-    margin: 0.2rem 0;
-  }
-  .warn {
-    color: #d9a441;
+    margin: 0;
+    color: var(--text-3);
+    font-size: var(--fs-sm);
   }
 </style>

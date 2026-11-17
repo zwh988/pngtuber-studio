@@ -12,6 +12,8 @@
     variant?: "ghost" | "secondary" | "primary" | "danger";
     size?: "sm" | "md";
     pressed?: boolean;
+    /** Fill colour for the icon (for example a filled star); none by default. */
+    iconFill?: string;
   };
 
   let {
@@ -20,6 +22,7 @@
     variant = "ghost",
     size = "md",
     pressed,
+    iconFill = "none",
     type = "button",
     class: extra = "",
     ...rest
@@ -35,7 +38,7 @@
   aria-pressed={pressed}
   {...rest}
 >
-  <Icon size={size === "sm" ? 14 : 16} strokeWidth={1.75} aria-hidden="true" />
+  <Icon size={size === "sm" ? 14 : 16} strokeWidth={1.75} fill={iconFill} aria-hidden="true" />
 </button>
 
 <style>

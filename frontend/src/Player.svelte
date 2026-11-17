@@ -4,6 +4,8 @@
   import type { AudioGraph } from "./audioGraph";
   import { clock } from "./format";
   import { clipIndexAt, toSource } from "./timeline";
+  import { ChevronLeft, ChevronRight, Pause, Play } from "@lucide/svelte";
+  import IconButton from "./ui/IconButton.svelte";
 
   let {
     clips,
@@ -12,6 +14,7 @@
     playing = $bindable(false),
     graph = null,
     overlay,
+    onstep,
   }: {
     clips: TimelineClip[];
     durationMs: number;
@@ -22,6 +25,8 @@
     graph?: AudioGraph | null;
     /** Drawn over the video, filling its box (the avatar, M5-6). */
     overlay?: Snippet;
+    /** Step one frame (the same as the , and . hotkeys); the buttons are hidden without it. */
+    onstep?: (direction: 1 | -1) => void;
   } = $props();
 
   let video = $state<HTMLVideoElement | null>(null);
@@ -249,23 +254,43 @@
     {@render overlay?.()}
   </div>
   <div class="controls">
-    <button type="button" onclick={toggle} disabled={clips.length === 0}>
-      {playing ? "Pause" : "Play"}
-    </button>
+    {#if onstep}
+      <IconButton
+        icon={ChevronLeft}
+        label="Previous frame (,)"
+        onclick={() => onstep(-1)}
+        disabled={clips.length === 0}
+      />
+    {/if}
+    <IconButton
+      icon={playing ? Pause : Play}
+      variant="primary"
+      label={playing ? "Pause (Space)" : "Play (Space)"}
+      onclick={toggle}
+      disabled={clips.length === 0}
+    />
+    {#if onstep}
+      <IconButton
+        icon={ChevronRight}
+        label="Next frame (.)"
+        onclick={() => onstep(1)}
+        disabled={clips.length === 0}
+      />
+    {/if}
     <input
       type="range"
+      aria-label="Playhead"
       min="0"
       max={durationMs}
       step="1"
       value={playheadMs}
       oninput={(e) => scrub(e.currentTarget.valueAsNumber)}
     />
-    <span class="time">{clock(playheadMs)} / {clock(durationMs)}</span>
+    <span class="time num"><strong>{clock(playheadMs)}</strong> / {clock(durationMs)}</span>
+    <span class="info num" title="The clip under the playhead and its speed">
+      Clip {Math.min(curIdx + 1, clips.length)} of {clips.length} · {clips[curIdx]?.speed ?? 1}x
+    </span>
   </div>
-  <p class="info">
-    Clip {Math.min(curIdx + 1, clips.length)} of {clips.length}
-    ({clips[curIdx]?.speed ?? 1}x)
-  </p>
   {#if error !== null}
     <p class="error">{error}</p>
   {/if}
@@ -282,28 +307,40 @@
     display: block;
     width: 100%;
     aspect-ratio: 16 / 9;
+    border-radius: var(--r-md);
     background: #000;
     object-fit: contain;
   }
   .controls {
     display: flex;
     align-items: center;
-    gap: 0.75rem;
-    margin-top: 0.5rem;
+    gap: 4px;
+    margin-top: 8px;
   }
   .controls input[type="range"] {
     flex: 1;
+    min-width: 60px;
+    margin: 0 8px;
   }
   .time {
-    font-variant-numeric: tabular-nums;
+    color: var(--text-2);
+    font-size: var(--fs-sm);
     white-space: nowrap;
   }
+  .time strong {
+    color: var(--text-1);
+    font-weight: 600;
+  }
   .info {
-    margin: 0.25rem 0 0;
-    opacity: 0.7;
-    font-size: 0.85rem;
+    margin-left: 8px;
+    padding: 2px 8px;
+    border-radius: 10px;
+    background: var(--surface-3);
+    color: var(--text-2);
+    font-size: var(--fs-xs);
+    white-space: nowrap;
   }
   .error {
-    color: #b00020;
+    color: var(--danger);
   }
 </style>

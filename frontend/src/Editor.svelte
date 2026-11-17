@@ -49,7 +49,19 @@
   import { clipIndexAt, stepFrame } from "./timeline";
   import { formatBytes, isLive, jobText, newLineId, workerText } from "./voice";
   import { VoicePlayback } from "./voicePlayback";
-  import { ArrowLeft, Redo2, Undo2, Upload } from "@lucide/svelte";
+  import {
+    ArrowLeft,
+    Cpu,
+    Gauge,
+    HardDrive,
+    Mic,
+    Plus,
+    Redo2,
+    Trash2,
+    Undo2,
+    Upload,
+    X,
+  } from "@lucide/svelte";
   import Banner from "./ui/Banner.svelte";
   import Button from "./ui/Button.svelte";
   import IconButton from "./ui/IconButton.svelte";
@@ -770,6 +782,7 @@
               bind:playheadMs
               bind:playing
               {graph}
+              onstep={stepBy}
             >
               {#snippet overlay()}
                 <AvatarOverlay
@@ -782,14 +795,22 @@
             </Player>
             {#if avatarError !== null}<p class="error">{avatarError}</p>{/if}
           {:else}
-            <p class="hint">The timeline is empty. Add a recording from the Footage tab.</p>
+            <div class="empty-stage">
+              <p>The timeline is empty.</p>
+              <p class="hint">Add a recording from the Footage tab.</p>
+            </div>
           {/if}
         </div>
+        <!-- A focusable separator is a widget in ARIA (it has a value and takes arrow keys), but
+             Svelte's a11y rules list "separator" as non-interactive, so these two warnings are expected. -->
+        <!-- svelte-ignore a11y_no_noninteractive_tabindex, a11y_no_noninteractive_element_interactions -->
         <div
           class="divider v"
           role="separator"
           aria-orientation="vertical"
           aria-label="Resize the side panel"
+          aria-valuenow={sideW}
+          aria-valuemin={SIDE_MIN}
           tabindex="0"
           onpointerdown={(e) => startDivider(e, "v")}
           onpointermove={moveDivider}
@@ -820,18 +841,6 @@
             <button
               type="button"
               role="tab"
-              aria-selected={tab === "storage"}
-              class:on={tab === "storage"}
-              onclick={() => {
-                tab = "storage";
-                void refreshStorage();
-              }}
-            >
-              Storage
-            </button>
-            <button
-              type="button"
-              role="tab"
               aria-selected={tab === "fx"}
               class:on={tab === "fx"}
               onclick={() => (tab = "fx")}
@@ -847,24 +856,38 @@
             >
               Avatar
             </button>
+            <button
+              type="button"
+              role="tab"
+              aria-selected={tab === "storage"}
+              class:on={tab === "storage"}
+              onclick={() => {
+                tab = "storage";
+                void refreshStorage();
+              }}
+            >
+              Storage
+            </button>
           </div>
           <div class="pane">
             <div hidden={tab !== "footage"}>
               {#if sources.length === 0}
-                <p class="hint">No footage in this project yet. Go back and rescan.</p>
+                <p class="empty">No footage in this project yet. Go back to the project screen and Rescan.</p>
               {:else}
                 <ul class="sources">
                   {#each sources as item (item.id)}
                     <li class:missing={!item.exists}>
                       <span class="name">{fileName(item.path)}</span>
-                      <span class="meta">{clock(item.duration_ms)}</span>
-                      <button
-                        type="button"
+                      <span class="meta num">{clock(item.duration_ms)}</span>
+                      <Button
+                        size="sm"
+                        icon={Plus}
+                        title={item.exists ? "Add this recording to the end of the timeline" : "The file is missing"}
                         disabled={busy || !item.exists}
                         onclick={() => edit(() => addClip(item.id))}
                       >
-                        Add to timeline
-                      </button>
+                        Add
+                      </Button>
                     </li>
                   {/each}
                 </ul>
@@ -911,11 +934,14 @@
         </div>
       </div>
 
+      <!-- svelte-ignore a11y_no_noninteractive_tabindex, a11y_no_noninteractive_element_interactions -->
       <div
         class="divider h"
         role="separator"
         aria-orientation="horizontal"
         aria-label="Resize the preview and the timeline"
+        aria-valuenow={topH}
+        aria-valuemin={TOP_MIN}
         tabindex="0"
         onpointerdown={(e) => startDivider(e, "h")}
         onpointermove={moveDivider}
@@ -955,7 +981,7 @@
             {#if selectedClip !== null}
               {@const clip = selectedClip}
               <strong>Clip {clip.position + 1}: {sourceName(clip.source_id)}</strong>
-              <label>
+              <label class="inline">
                 Speed
                 <select
                   value={String(clip.speed)}
@@ -971,7 +997,9 @@
                   {/each}
                 </select>
               </label>
-              <button type="button" disabled={busy} onclick={removeSelected}>Remove clip</button>
+              <Button size="sm" variant="danger" icon={Trash2} disabled={busy} onclick={removeSelected}>
+                Remove clip
+              </Button>
             {:else if selectedPlacement === null}
               <span class="hint">No clip selected. Click a clip on the timeline.</span>
             {/if}
@@ -991,21 +1019,21 @@
                 </span>
                 {@const tighten = tightenTarget(placed.fit_stretch, placed.stretch)}
                 {#if tighten !== null}
-                  <button type="button" disabled={busy} onclick={() => setStretch(placed.id, tighten)}>
+                  <Button size="sm" disabled={busy} onclick={() => setStretch(placed.id, tighten)}>
                     Tighten {stretchText(tighten)}
                     {placed.fit_stretch !== null && placed.fit_stretch > tighten + 0.0005
                       ? `(clearing it needs ${stretchText(placed.fit_stretch)}: use the slider)`
                       : ""}
-                  </button>
+                  </Button>
                 {/if}
                 {#if placed.fit_stretch !== null && placed.fit_stretch > STRETCH_MAX}
                   <span class="hint">Even {stretchText(STRETCH_MAX)} would not clear it: also nudge or shorten the line.</span>
                 {/if}
                 {#if placed.slack_ms > 0}
-                  <button type="button" disabled={busy} onclick={() => nudgeEarlier(placed.id)}>
+                  <Button size="sm" disabled={busy} onclick={() => nudgeEarlier(placed.id)}>
                     Nudge earlier {(Math.min(placed.overflow_ms, placed.slack_ms) / 1000).toFixed(2)} s
                     {placed.slack_ms < placed.overflow_ms ? "(not enough room to clear it)" : ""}
-                  </button>
+                  </Button>
                 {:else}
                   <span class="hint">No room to nudge earlier: the previous line ends where this one starts.</span>
                 {/if}
@@ -1022,13 +1050,15 @@
                     disabled={busy}
                     onchange={(event) => setStretch(placed.id, event.currentTarget.valueAsNumber)}
                   />
-                  {placed.stretch === 1 ? "as recorded" : stretchText(placed.stretch)}
+                  <span class="num">{placed.stretch === 1 ? "as recorded" : stretchText(placed.stretch)}</span>
                 </label>
                 {#if placed.stretch > STRETCH_WARN}
                   <span class="hint">Above +15% the voice may sound unnatural.</span>
                 {/if}
               {/if}
-              <button type="button" disabled={busy} onclick={removeSelected}>Remove placed line</button>
+              <Button size="sm" variant="danger" icon={Trash2} disabled={busy} onclick={removeSelected}>
+                Remove placed line
+              </Button>
             {/if}
           </div>
           <details class="keys">
@@ -1042,7 +1072,7 @@
           </details>
         {/if}
 
-        <h3>Timeline: {timeline.clips.length} clip(s), {clock(timeline.duration_ms)}</h3>
+        <h3>Clips <span class="count num">{timeline.clips.length} · {clock(timeline.duration_ms)}</span></h3>
         {#if timeline.other_track_clips > 0}
           <p class="hint">{timeline.other_track_clips} clip(s) on other tracks are not shown.</p>
         {/if}
@@ -1071,7 +1101,7 @@
                   class:selected={clip.id === selectedId}
                   class:active={i === activeIndex}
                 >
-                  <td>{clip.position + 1}</td>
+                  <td class="num">{clip.position + 1}</td>
                   <td class="file">
                     <button type="button" class="pick" onclick={() => {
                         selectedId = clip.id;
@@ -1081,10 +1111,10 @@
                       {sourceName(clip.source_id)}
                     </button>
                   </td>
-                  <td>{clock(clip.start_ms)} to {clock(clip.end_ms)}</td>
-                  <td>{clock(clip.duration_ms)}</td>
-                  <td>{clock(clip.in_ms)} to {clock(clip.out_ms)}</td>
-                  <td>{clip.speed}x</td>
+                  <td class="num">{clock(clip.start_ms)} to {clock(clip.end_ms)}</td>
+                  <td class="num">{clock(clip.duration_ms)}</td>
+                  <td class="num">{clock(clip.in_ms)} to {clock(clip.out_ms)}</td>
+                  <td class="num">{clip.speed}x</td>
                 </tr>
               {/each}
             </tbody>
@@ -1094,31 +1124,37 @@
     </div>
 
     <footer class="statusbar">
-      <span>Voice model: {workerText(jobs)}</span>
-      <span>
-        GPU queue:
+      <span class="seg" title="Voice model">
+        <Mic size={14} strokeWidth={1.75} aria-hidden="true" />Voice model: {workerText(jobs)}
+      </span>
+      <span class="seg" class:busy-seg={liveJobs.length > 0} title="GPU queue">
+        <Cpu size={14} strokeWidth={1.75} aria-hidden="true" />
         {#if liveJobs.length === 0}
-          idle
+          GPU idle
         {:else}
           {jobText(liveJobs[0])}{#if liveJobs.length > 1} (+{liveJobs.length - 1} waiting){/if}
         {/if}
       </span>
       {#if liveJobs.length > 0}
-        <button type="button" onclick={() => void cancelFirstJob()}>Cancel</button>
+        <Button size="sm" variant="danger" icon={X} onclick={() => void cancelFirstJob()}>Cancel</Button>
       {:else if lastJob !== undefined}
-        <span>Last job: {jobText(lastJob)}</span>
+        <span class="seg">Last job: {jobText(lastJob)}</span>
       {/if}
       {#if storage !== null}
-        <span>Takes on disk: {formatBytes(storage.total_bytes)} ({storage.take_count})</span>
+        <span class="seg num" title="Takes on disk">
+          <HardDrive size={14} strokeWidth={1.75} aria-hidden="true" />Takes {formatBytes(
+            storage.total_bytes,
+          )} ({storage.take_count})
+        </span>
         {#if storage.missing_file_count > 0}
-          <span class="error">{storage.missing_file_count} take file(s) missing</span>
+          <span class="seg error">{storage.missing_file_count} take file(s) missing</span>
         {/if}
       {/if}
       <span
-        class="meter"
+        class="seg meter num"
         title="Momentary loudness (400 ms, K-weighted) of the preview mix. An approximation; the export is measured with pyloudnorm."
       >
-        Mix loudness: {meterText}
+        <Gauge size={14} strokeWidth={1.75} aria-hidden="true" />Mix {meterText}
       </span>
     </footer>
   {/if}
@@ -1180,8 +1216,21 @@
   .preview {
     flex: 1;
     min-width: 0;
-    padding: 0.5rem 0.75rem;
+    padding: 10px 12px;
     overflow: auto;
+  }
+  .empty-stage {
+    display: grid;
+    place-content: center;
+    gap: 4px;
+    height: 100%;
+    min-height: 120px;
+    border: 1px dashed var(--border-strong);
+    border-radius: var(--r-md);
+    text-align: center;
+  }
+  .empty-stage p {
+    margin: 0;
   }
   .preview :global(.player) {
     max-width: none;
@@ -1202,14 +1251,19 @@
     flex: 1;
     min-height: 0;
     overflow: auto;
-    padding: 0.5rem 0.75rem;
+    padding: 12px;
+  }
+  .empty {
+    margin: 0;
+    padding: 16px 4px;
+    color: var(--text-2);
   }
   .side :global(.bank) {
     grid-template-columns: minmax(0, 1fr);
   }
   .divider {
     flex: none;
-    background: var(--line);
+    background: var(--border);
     touch-action: none;
   }
   .divider:hover,
@@ -1229,14 +1283,26 @@
     flex: 1;
     min-height: 0;
     overflow: auto;
-    padding: 0.5rem 0.75rem 1rem;
-    background: var(--bg);
+    padding: 8px 12px 16px;
+    background: var(--surface-1);
   }
   .bottom h3 {
-    margin: 1rem 0 0;
-    font-size: 0.95rem;
+    display: flex;
+    align-items: baseline;
+    gap: 8px;
+    margin: 16px 0 0;
+    color: var(--text-3);
+    font-size: var(--fs-xs);
     font-weight: 600;
-    color: var(--muted);
+    letter-spacing: 0.06em;
+    text-transform: uppercase;
+  }
+  .bottom h3 .count {
+    color: var(--text-2);
+    font-size: var(--fs-sm);
+    font-weight: 500;
+    letter-spacing: 0;
+    text-transform: none;
   }
   .sources {
     list-style: none;
@@ -1246,9 +1312,12 @@
   .sources li {
     display: flex;
     align-items: center;
-    gap: 0.75rem;
-    padding: 0.35rem 0;
-    border-bottom: 1px solid var(--line);
+    gap: 10px;
+    padding: 6px 0;
+    border-bottom: 1px solid var(--border);
+  }
+  .sources li.missing .name {
+    color: var(--danger);
   }
   .sources .name {
     flex: 1;
@@ -1266,12 +1335,18 @@
   th,
   td {
     text-align: left;
-    padding: 0.3rem 0.5rem;
-    border-bottom: 1px solid var(--line);
+    padding: 6px 10px;
+    border-bottom: 1px solid var(--border);
   }
   th {
-    color: var(--muted);
-    font-weight: 500;
+    color: var(--text-3);
+    font-size: var(--fs-xs);
+    font-weight: 600;
+    letter-spacing: 0.06em;
+    text-transform: uppercase;
+  }
+  tr.missing td.file {
+    color: var(--danger);
   }
   td.file {
     overflow-wrap: anywhere;
@@ -1286,13 +1361,23 @@
     display: flex;
     align-items: center;
     flex-wrap: wrap;
-    gap: 0.75rem;
-    margin-top: 0.5rem;
-    min-height: 2rem;
+    gap: 8px 12px;
+    margin-top: 8px;
+    min-height: 32px;
+    padding: 4px 10px;
+    border: 1px solid var(--border);
+    border-radius: var(--r-md);
+    background: var(--surface-2);
+  }
+  .inline {
+    display: inline-flex;
+    align-items: center;
+    gap: 6px;
+    color: var(--text-2);
   }
   .keys {
-    margin-top: 0.4rem;
-    font-size: 0.85rem;
+    margin-top: 8px;
+    font-size: var(--fs-sm);
     color: var(--muted);
   }
   .keys summary {
@@ -1304,55 +1389,72 @@
   .pick {
     background: none;
     border: none;
+    border-radius: var(--r-sm);
     padding: 0;
     margin: 0;
     color: inherit;
     font: inherit;
     text-align: left;
     text-decoration: underline;
+    text-decoration-color: var(--text-3);
+    text-underline-offset: 2px;
     cursor: pointer;
+  }
+  .pick:hover {
+    background: none;
+    text-decoration-color: currentColor;
   }
   .statusbar {
     flex: none;
     display: flex;
     flex-wrap: wrap;
     align-items: center;
-    gap: 1.25rem;
-    padding: 0.35rem 0.75rem;
-    border-top: 1px solid var(--line);
-    background: var(--panel);
-    font-size: 0.85rem;
-    color: var(--muted);
+    gap: 4px 16px;
+    min-height: 28px;
+    padding: 2px 12px;
+    border-top: 1px solid var(--border);
+    background: var(--surface-1);
+    font-size: var(--fs-sm);
+    color: var(--text-2);
+  }
+  .seg {
+    display: inline-flex;
+    align-items: center;
+    gap: 6px;
+  }
+  .busy-seg {
+    color: var(--accent-hover);
   }
   .meter {
     margin-left: auto;
-    font-variant-numeric: tabular-nums;
   }
   .tabs {
     flex: none;
     display: flex;
-    gap: 0.25rem;
-    padding: 0.35rem 0.5rem 0;
-    border-bottom: 1px solid var(--line);
+    gap: 2px;
+    padding: 0 8px;
+    border-bottom: 1px solid var(--border);
     overflow-x: auto;
   }
   .tabs button {
     margin: 0 0 -1px;
-    padding: 0.35rem 0.7rem;
+    padding: 10px 10px 9px;
     white-space: nowrap;
-    border: 1px solid transparent;
-    border-bottom: none;
-    border-radius: 6px 6px 0 0;
+    border: none;
+    border-bottom: 2px solid transparent;
+    border-radius: 0;
     background: none;
-    color: var(--muted);
-    font: inherit;
+    color: var(--text-2);
+    font: 500 var(--fs-md) var(--font);
     cursor: pointer;
   }
+  .tabs button:hover {
+    background: none;
+    color: var(--text-1);
+  }
   .tabs button.on {
-    border-color: var(--line);
-    background: var(--panel-2);
-    color: var(--text);
-    font-weight: 600;
+    border-bottom-color: var(--accent);
+    color: var(--text-1);
   }
   .hint {
     color: var(--muted);

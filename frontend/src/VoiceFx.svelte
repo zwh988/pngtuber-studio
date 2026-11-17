@@ -11,6 +11,10 @@
     type FxState,
   } from "./fxApi";
   import FxSlider from "./FxSlider.svelte";
+  import { ChevronDown, ChevronUp, Play, Plus, Square, Trash2 } from "@lucide/svelte";
+  import Banner from "./ui/Banner.svelte";
+  import Button from "./ui/Button.svelte";
+  import IconButton from "./ui/IconButton.svelte";
 
   /** The part of a timeline placement the audition needs. */
   interface AuditionPlacement {
@@ -210,26 +214,31 @@
 
 <div class="fx">
   {#if fx === null}
-    <p class={error === null ? "hint" : "bad"}>{error ?? "Loading the voice chain..."}</p>
+    {#if error === null}
+      <p class="hint">Loading the voice chain...</p>
+    {:else}
+      <Banner kind="error">{error}</Banner>
+    {/if}
   {:else}
     {@const state = fx}
     {@const limits = state.limits}
     <p class="status">{processingText(state.processing)}</p>
     {#if state.problem !== null}
-      <p class="bad">{state.problem}</p>
+      <Banner kind="error">{state.problem}</Banner>
     {/if}
     {#if error !== null}
-      <p class="bad">{error}</p>
+      <Banner kind="error">{error}</Banner>
     {/if}
 
     {#key resync}
       <section>
         <h3>Presets</h3>
-        <div class="presets">
+        <div class="presets" role="group" aria-label="Voice FX presets">
           {#each state.presets as preset (preset.name)}
             <button
               type="button"
               class:on={current === preset.name}
+              aria-pressed={current === preset.name}
               onclick={() => void applyPreset(preset)}
             >
               {preset.name}
@@ -243,15 +252,15 @@
         <h3>Audition</h3>
         <div class="row">
           {#if auditionState === "idle"}
-            <button
-              type="button"
+            <Button
+              icon={Play}
               disabled={auditionTarget === null || state.problem !== null}
               onclick={audition}
             >
               Play through the chain
-            </button>
+            </Button>
           {:else}
-            <button type="button" onclick={stopAudition}>Stop</button>
+            <Button icon={Square} onclick={stopAudition}>Stop</Button>
             {#if auditionState === "loading"}
               <span class="hint">Rendering...</span>
             {/if}
@@ -383,38 +392,39 @@
             <div class="effect-head">
               <strong>{info?.label ?? spec.type}</strong>
               <span class="spacer"></span>
-              <button
-                type="button"
+              <IconButton
+                icon={ChevronUp}
+                size="sm"
+                label="Move up (runs earlier)"
                 disabled={i === 0}
                 onclick={() =>
                   void editChain((c) => {
                     c.effects = moveItem(c.effects, i, -1);
                   })}
-              >
-                Up
-              </button>
-              <button
-                type="button"
+              />
+              <IconButton
+                icon={ChevronDown}
+                size="sm"
+                label="Move down (runs later)"
                 disabled={i === state.chain.effects.length - 1}
                 onclick={() =>
                   void editChain((c) => {
                     c.effects = moveItem(c.effects, i, 1);
                   })}
-              >
-                Down
-              </button>
-              <button
-                type="button"
+              />
+              <IconButton
+                icon={Trash2}
+                size="sm"
+                variant="danger"
+                label="Remove this effect"
                 onclick={() =>
                   void editChain((c) => {
                     c.effects.splice(i, 1);
                   })}
-              >
-                Remove
-              </button>
+              />
             </div>
             {#if info === undefined}
-              <p class="bad">This server does not offer the effect "{spec.type}".</p>
+              <Banner kind="error">This server does not offer the effect "{spec.type}".</Banner>
             {:else}
               {#each info.params as param (param.name)}
                 <FxSlider
@@ -447,7 +457,7 @@
                 <option value={info.type}>{info.label}</option>
               {/each}
             </select>
-            <button type="button" onclick={() => void addEffect(chosenType)}>Add effect</button>
+            <Button icon={Plus} onclick={() => void addEffect(chosenType)}>Add effect</Button>
           </div>
         {/if}
       </section>
@@ -485,55 +495,84 @@
 
 <style>
   .fx {
-    padding-bottom: 1rem;
+    display: flex;
+    flex-direction: column;
+    gap: 18px;
+    padding-bottom: 16px;
   }
   section {
-    margin-bottom: 1.1rem;
+    display: flex;
+    flex-direction: column;
+    gap: 6px;
   }
   h3 {
-    margin: 0 0 0.4rem;
-    font-size: 0.85rem;
+    margin: 0 0 2px;
+    color: var(--text-3);
+    font-size: var(--fs-xs);
+    font-weight: 600;
+    letter-spacing: 0.06em;
     text-transform: uppercase;
-    letter-spacing: 0.04em;
-    color: var(--muted);
   }
   .status {
-    margin: 0 0 0.5rem;
+    margin: 0;
+    color: var(--text-2);
   }
-  .presets,
+  .presets {
+    display: inline-flex;
+    flex-wrap: wrap;
+    align-self: flex-start;
+    padding: 2px;
+    border: 1px solid var(--border-strong);
+    border-radius: var(--r-md);
+    background: var(--surface-2);
+  }
+  .presets button {
+    padding: 3px 12px;
+    border: none;
+    border-radius: var(--r-sm);
+    background: none;
+    color: var(--text-2);
+    font: 500 var(--fs-md) var(--font);
+  }
+  .presets button:hover {
+    background: var(--surface-3);
+    color: var(--text-1);
+  }
+  .presets button.on {
+    background: var(--accent);
+    color: #fff;
+  }
   .row {
     display: flex;
     flex-wrap: wrap;
     align-items: center;
-    gap: 0.4rem;
-  }
-  .presets button.on {
-    font-weight: 600;
-    border-color: var(--text);
+    gap: 6px;
   }
   .check {
     display: flex;
     align-items: center;
-    gap: 0.4rem;
-    margin-bottom: 0.5rem;
+    gap: 8px;
+    margin-bottom: 4px;
+    color: var(--text-2);
   }
   .effect {
-    margin-bottom: 0.75rem;
-    padding: 0.5rem 0.6rem;
-    border: 1px solid var(--line);
-    border-radius: 6px;
+    padding: 8px 10px 4px;
+    border: 1px solid var(--border);
+    border-radius: var(--r-md);
+    background: var(--surface-2);
   }
   .effect-head {
     display: flex;
     align-items: center;
-    gap: 0.35rem;
-    margin-bottom: 0.4rem;
+    gap: 2px;
+    margin-bottom: 6px;
   }
   .spacer {
     flex: 1;
   }
   .hint {
-    margin: 0.3rem 0 0;
-    font-size: 0.85rem;
+    margin: 0;
+    color: var(--text-3);
+    font-size: var(--fs-sm);
   }
 </style>
