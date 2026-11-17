@@ -475,7 +475,6 @@
 
 <style>
   main {
-    font-family: system-ui, sans-serif;
     padding: 2rem;
     max-width: 52rem;
   }
@@ -515,13 +514,13 @@
   td {
     text-align: left;
     padding: 0.3rem 0.5rem;
-    border-bottom: 1px solid #8884;
+    border-bottom: 1px solid var(--border);
   }
   td.file {
     overflow-wrap: anywhere;
   }
   tr.missing td {
-    color: #b00020;
+    color: var(--danger);
   }
   .hint,
   .note {
@@ -537,7 +536,7 @@
     align-items: center;
     gap: 0.5rem;
     padding: 0.5rem 0;
-    border-bottom: 1px solid #8884;
+    border-bottom: 1px solid var(--border);
   }
   .info {
     flex: 1;
@@ -553,13 +552,13 @@
   }
   .tag {
     margin-left: 0.5rem;
-    color: #b00020;
+    color: var(--danger);
     font-size: 0.8rem;
   }
   .error {
-    color: #b00020;
+    color: var(--danger);
   }
   .warn {
-    color: #8a5a00;
+    color: var(--warning);
   }
 </style>

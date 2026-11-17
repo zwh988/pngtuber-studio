@@ -327,23 +327,15 @@
 </div>
 
 <style>
-  /* The editor's dark theme (Editor.svelte), so the screen matches where it opens from. */
+  /* Colours come from theme.css. */
   .screen {
-    --bg: #15161a;
-    --panel: #1d1f25;
-    --line: #353944;
-    --text: #e7e8ec;
-    --muted: #9ca0ab;
-    --accent: #4a90e2;
     position: fixed;
     inset: 0;
     overflow: auto;
     background: var(--bg);
     color: var(--text);
-    color-scheme: dark;
   }
   main {
-    font-family: system-ui, sans-serif;
     padding: 1.5rem 2rem;
     max-width: 52rem;
   }
@@ -415,12 +407,12 @@
     border-left: 4px solid;
   }
   .error-item {
-    border-color: #ff7a7a;
-    background: #ff7a7a1a;
+    border-color: var(--danger);
+    background: var(--danger-soft);
   }
   .warn-item {
-    border-color: #d9a441;
-    background: #d9a4411a;
+    border-color: var(--warning);
+    background: var(--warning-soft);
   }
   .time {
     font-variant-numeric: tabular-nums;
@@ -428,10 +420,10 @@
     opacity: 0.8;
   }
   .ok {
-    color: #6fcf97;
+    color: var(--success);
   }
   .error {
-    color: #ff7a7a;
+    color: var(--danger);
   }
   .primary {
     font-weight: 600;
@@ -451,7 +443,7 @@
   }
   .fill {
     height: 100%;
-    background: #4a90e2;
+    background: var(--accent);
     transition: width 0.4s linear;
   }
   .files {

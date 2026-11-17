@@ -1118,22 +1118,12 @@
 
 <style>
   .editor {
-    --bg: #15161a;
-    --panel: #1d1f25;
-    --panel-2: #262932;
-    --line: #353944;
-    --text: #e7e8ec;
-    --muted: #9ca0ab;
-    --accent: #4a90e2;
-    --danger: #ff7a7a;
     position: fixed;
     inset: 0;
     display: flex;
     flex-direction: column;
-    color-scheme: dark;
     background: var(--bg);
     color: var(--text);
-    font-family: system-ui, sans-serif;
   }
   header {
     flex: none;
@@ -1269,10 +1259,10 @@
     overflow-wrap: anywhere;
   }
   tr.active td {
-    background: #4a90e222;
+    background: var(--accent-soft);
   }
   tr.selected td {
-    background: #4a90e255;
+    background: var(--accent-strong-soft);
   }
   .clipbar {
     display: flex;
