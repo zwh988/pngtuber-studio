@@ -706,7 +706,7 @@
   .kbd.on-primary {
     border-color: rgba(255, 255, 255, 0.45);
     background: transparent;
-    color: #fff;
+    color: var(--on-accent);
   }
   .job {
     margin: 0;

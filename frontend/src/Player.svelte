@@ -308,7 +308,7 @@
     width: 100%;
     aspect-ratio: 16 / 9;
     border-radius: var(--r-md);
-    background: #000;
+    background: var(--video-bg);
     object-fit: contain;
   }
   .controls {

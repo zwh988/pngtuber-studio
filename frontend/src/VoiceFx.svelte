@@ -540,7 +540,7 @@
   }
   .presets button.on {
     background: var(--accent);
-    color: #fff;
+    color: var(--on-accent);
   }
   .row {
     display: flex;

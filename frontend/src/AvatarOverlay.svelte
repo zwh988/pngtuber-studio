@@ -185,10 +185,14 @@
       ctx.scale(l.sx, l.sy);
       ctx.setLineDash([6, 4]);
       ctx.lineWidth = 1;
-      ctx.strokeStyle = "#ffffffaa";
+      // Editing chrome only (the sprite above is solver output and is never restyled).
+      const styles = canvas === null ? null : getComputedStyle(canvas);
+      ctx.strokeStyle = styles?.getPropertyValue("--selected").trim() || "white";
+      ctx.globalAlpha = 0.7;
       ctx.strokeRect(-l.w / 2, -l.h, l.w, l.h);
+      ctx.globalAlpha = 1;
       ctx.setLineDash([]);
-      ctx.fillStyle = "#4a90e2";
+      ctx.fillStyle = styles?.getPropertyValue("--accent").trim() || "royalblue";
       ctx.fillRect(l.w / 2 - 6, -l.h - 6, 12, 12);
       ctx.restore();
     }

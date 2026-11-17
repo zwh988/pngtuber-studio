@@ -22,6 +22,7 @@
   /* accent and states */
   --accent: #4f8cff;
   --accent-hover: #6a9dff;
+  --on-accent: #ffffff;
   --accent-soft: rgba(79, 140, 255, 0.16);
   --accent-strong-soft: rgba(79, 140, 255, 0.32);
   --success: #3dbb84;
@@ -41,6 +42,7 @@
   --lane-reaction: #9b72de;
   --lane-motion: #4ea3c9;
   --playhead: #f4f6fa;
+  --video-bg: #000000;
   --overflow: var(--danger);
   --selected: #ffffff;
 

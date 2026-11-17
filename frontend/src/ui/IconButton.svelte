@@ -75,11 +75,11 @@
   .primary {
     border-color: var(--accent);
     background: var(--accent);
-    color: #fff;
+    color: var(--on-accent);
   }
   .primary:hover:not(:disabled) {
     background: var(--accent-hover);
-    color: #fff;
+    color: var(--on-accent);
   }
   .danger {
     color: var(--danger);

@@ -1,11 +1,11 @@
 # UI-2: UI/UX overhaul and polish (shared theme, components, every existing screen)
 
-> Written 2026-11-17 after M6, before M7's UI steps. Sources: `docs/DESIGN_SPEC.md` section 4 (screens, layout, hotkeys), `PROJECT_STATE.md` (UI-1 decisions, known issues, "Next up" item 3), `docs/tasks/M7-polish.md` and the frontend as of `m6-done`. Nothing here has been built. The questions under "Decisions" are for the user at the start; the answers go into the decisions log in `PROJECT_STATE.md`.
+> Written 2026-11-17 after M6, before M7's UI steps. Sources: `docs/DESIGN_SPEC.md` section 4 (screens, layout, hotkeys), `PROJECT_STATE.md` (UI-1 decisions, known issues, "Next up" item 3), `docs/tasks/M7-polish.md` and the frontend as of `m6-done`. Built 2026-11-17; see the status line. The questions under "Decisions" are for the user at the start; the answers go into the decisions log in `PROJECT_STATE.md`.
 
 - **Spec sections:** 4.1 to 4.3 (layout and behaviour stay as written; this task changes how they look and feel).
 - **Branch:** `ui-2-overhaul` (from `main` after M7 S1 is settled and logged).
 - **Where it sits:** after M7 S1 (decisions), before M7 S3 to S6 (first-run screen, empty states, Settings, hotkey map, templates), so those are built on the new theme. M7 S2 (`install.bat`) does not touch the frontend and can go before or alongside it. M7 S7 (clean install) stays last.
-- **Status:** not started.
+- **Status:** done 2026-11-17 on `ui-2-overhaul` (S1 to S8; each step checked by the user in the app). Results are in `PROJECT_STATE.md` (decisions log, UI-2 rows).
 - **Done when:** every existing screen uses one shared theme and a small set of shared components, UI-1d and UI-1e are done, and every feature that worked at `m6-done` still works.
 
 ## Facts already established (do not re-ask)
