@@ -35,10 +35,22 @@ export type FootageReport = {
   errors: string[];
 };
 
+/** Shown when the backend cannot be reached at all (M7 S4). */
+export const BACKEND_GONE =
+  "The app's background service is not answering. Close PNGtuber Studio and start it again; your project was saved after the last change.";
+
 async function request<T>(url: string, init?: RequestInit): Promise<T> {
-  const response = await fetch(url, init);
+  let response: Response;
+  try {
+    response = await fetch(url, init);
+  } catch {
+    throw new Error(BACKEND_GONE); // network-level failure: no HTTP answer
+  }
   if (!response.ok) {
-    let message = `HTTP ${response.status}`;
+    let message =
+      response.status >= 500
+        ? `Something went wrong inside the app (HTTP ${response.status}). The console window shows the details.`
+        : `HTTP ${response.status}`;
     try {
       const body = (await response.json()) as { detail?: unknown };
       if (typeof body.detail === "string") {

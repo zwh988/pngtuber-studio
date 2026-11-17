@@ -201,7 +201,7 @@ class SubprocessWorker:
                 job_id=self._active_job,
                 message=(
                     f"the voice worker exited unexpectedly (exit code {code}); "
-                    "see the worker log"
+                    f"details are in {self._log_path or 'the worker log'}"
                 ),
                 fatal=True,
             )

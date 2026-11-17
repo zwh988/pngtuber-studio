@@ -87,7 +87,10 @@ class WorkerLoop:
                 traceback.print_exc()
                 self._emit(
                     ErrorEvent(
-                        message=f"could not load the model: {describe_error(exc)}",
+                        message=(
+                            f"could not load the model: {describe_error(exc)}. If the "
+                            "GPU or driver changed, run install.bat again to check it."
+                        ),
                         fatal=True,
                     )
                 )

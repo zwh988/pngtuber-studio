@@ -34,6 +34,7 @@ from typing import Protocol
 import numpy as np
 import soundfile
 
+from backend.oserrors import describe_error
 from backend.project.schema import new_id
 from backend.project.session import SessionError
 from backend.voice.generation import GenerationPlan
@@ -459,7 +460,7 @@ class JobQueue:
         try:
             self._work_dir.mkdir(parents=True, exist_ok=True)
         except OSError as exc:
-            message = f"cannot create {self._work_dir}: {exc}"
+            message = f"cannot create {self._work_dir}: {describe_error(exc)}"
             self._finish(job, "failed", message=message)
             return _Step.FINISHED
         try:
@@ -551,7 +552,9 @@ class JobQueue:
             )
         except (OSError, RuntimeError, ValueError, SessionError) as exc:
             _remove(output)
-            self._finish(job, "failed", message=f"could not store the take: {exc}")
+            self._finish(
+                job, "failed", message=f"could not store the take: {describe_error(exc)}"
+            )
             return
         self._finish(
             job,

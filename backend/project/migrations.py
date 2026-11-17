@@ -79,7 +79,9 @@ def migrate(
         raise MigrationError(f"invalid schema_version: {version!r}")
     if version > target:
         raise ProjectTooNewError(
-            f"project schema version {version} is newer than supported ({target})"
+            f"this project was saved by a newer version of PNGtuber Studio (schema "
+            f"version {version}, this app reads up to {target}). Update the app to "
+            "open it; the project was not changed."
         )
 
     while version < target:

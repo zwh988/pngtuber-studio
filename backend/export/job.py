@@ -32,6 +32,7 @@ from backend.export.pipeline import (
 )
 from backend.export.preflight import PreflightReport
 from backend.export.voicetrack import VoiceCue
+from backend.oserrors import describe_error
 
 ExportState = Literal["idle", "running", "done", "failed", "cancelled"]
 ETA_MIN_FRACTION = 0.03  # below this the estimate is too wild to show
@@ -266,7 +267,7 @@ class ExportManager:
         except ExportCancelled:
             state, message = "cancelled", "Export cancelled."
         except Exception as exc:  # noqa: BLE001 - every failure is shown to the user
-            state, message = "failed", str(exc) or type(exc).__name__
+            state, message = "failed", describe_error(exc)
         if state != "done" and folder.exists():
             folder = mark_incomplete(folder)
         elapsed = self._clock() - self._started_at

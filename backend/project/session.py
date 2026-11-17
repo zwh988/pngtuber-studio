@@ -17,7 +17,13 @@ from typing import Any
 import numpy as np
 
 from backend.audio.chainspec import FxChainError, processing_spec
-from backend.audio.cleanup import run_cleanup
+from backend.audio.cleanup import (
+    ENVELOPE_FILE,
+    PREVIEW_FILE,
+    envelope_keep_names,
+    run_cache_cleanup,
+    run_cleanup,
+)
 from backend.audio.fxpresets import load_fx_presets_file
 from backend.audio.fxstate import FxProcessing, FxState, build_fx_state
 from backend.audio.prefetch import Prefetcher, plan_jobs
@@ -35,8 +41,18 @@ from backend.audio.trim import (
     validate_manual_trim,
 )
 from backend.avatar.art import AvatarArt
-from backend.avatar.envelope import Envelope, EnvelopeReport, envelope_for
-from backend.avatar.preview import PREVIEW_DIR_NAME, PreviewError, ensure_preview
+from backend.avatar.envelope import (
+    ENVELOPE_DIR_NAME,
+    Envelope,
+    EnvelopeReport,
+    envelope_for,
+)
+from backend.avatar.preview import (
+    PREVIEW_DIR_NAME,
+    PreviewError,
+    ensure_preview,
+    preview_name,
+)
 from backend.avatar.scan import (
     ArtFolderError,
     AvatarState,
@@ -59,6 +75,7 @@ from backend.edl.anchoring import check_references, check_voice_references
 from backend.export.job import EXPORTS_DIR, ExportDefaults
 from backend.export.pipeline import ExportInputs
 from backend.export.preflight import PreflightReport, preflight
+from backend.oserrors import describe_error
 from backend.project.avatar_commands import SetAvatarArtFolder
 from backend.project.clip_commands import AddClip
 from backend.project.commands import (
@@ -173,6 +190,23 @@ def clean_folder_name(name: str) -> str:
     if text.split(".")[0].upper() in _RESERVED:
         raise ValueError(f"'{text}' is a reserved Windows name")
     return text
+
+
+def _preview_keep_names(art_folder: str | None, project_folder: Path) -> set[str] | None:
+    """Preview file names of every sprite in the current art. Empty when no art
+    folder is set; None when the folder cannot be read (then nothing is deleted)."""
+    if art_folder is None:
+        return set()
+    root = resolve_art_folder(art_folder, project_folder)
+    try:
+        art = scan_art_folder(root)
+        return {
+            preview_name(root / Path(*rel.split("/")))
+            for expression in art.expressions
+            for rel in expression.sprites.values()
+        }
+    except (ArtFolderError, OSError):
+        return None
 
 
 class Session:
@@ -516,7 +550,10 @@ class Session:
                 or voice.reference_path is None
             ):
                 detail = "; ".join(voice.problems) or voice.status
-                raise SessionError(f"the voice reference is not ready: {detail}")
+                raise SessionError(
+                    f"the voice reference is not ready: {detail}. Choose a reference "
+                    "clip in the Voice section of the project screen."
+                )
             try:
                 return build_generation_plan(
                     stack.project,
@@ -1201,7 +1238,17 @@ class Session:
                 return  # an unusable chain wants nothing: delete nothing
             self._last_cleanup = now
             wanted = {job.dest.name for job in plan_jobs(folder, project)}
-        run_cleanup(folder / "media" / FX_DIR_NAME, folder / RAW_DIR, wanted)
+            art_folder = project.avatar.art_folder
+        media = folder / "media"
+        run_cleanup(media / FX_DIR_NAME, folder / RAW_DIR, wanted)
+        # M7 S4: envelopes of processed takes that are gone, and preview sprites of
+        # art that is no longer used (both re-created on demand).
+        run_cache_cleanup(
+            media / ENVELOPE_DIR_NAME, envelope_keep_names(media / FX_DIR_NAME), ENVELOPE_FILE
+        )
+        run_cache_cleanup(
+            media / PREVIEW_DIR_NAME, _preview_keep_names(art_folder, folder), PREVIEW_FILE
+        )
 
     def _line_bank_state(self) -> LineBankState:
         _, stack = self._require_open()
@@ -1272,7 +1319,7 @@ class Session:
         try:
             save_project(self._folder, self._stack.project)
         except (ProjectError, OSError) as exc:
-            self._save_error = str(exc)
+            self._save_error = describe_error(exc)
         else:
             self._save_error = None
         self._schedule_prefetch()
