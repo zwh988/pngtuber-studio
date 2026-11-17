@@ -11,6 +11,7 @@ it). Footage is only read. Prints how long each step took.
 """
 
 import argparse
+import json
 import sys
 import time
 from datetime import datetime
@@ -21,8 +22,9 @@ import numpy as np
 ROOT = Path(__file__).resolve().parents[2]
 sys.path.insert(0, str(ROOT))
 
+from backend.export.bundle import mark_incomplete
 from backend.export.errors import ExportError
-from backend.export.pipeline import run_export
+from backend.export.pipeline import ExportOptions, run_export
 from backend.export.tools import default_ffmpeg_path, encoder_problem
 from backend.export.voicetrack import VoiceCue
 from backend.project.session import Session, SessionError
@@ -33,6 +35,8 @@ def main() -> int:
     parser.add_argument("--project", required=True)
     parser.add_argument("--seconds", type=float, default=None, help="export only this much")
     parser.add_argument("--out", default=None, help="folder to write to (default: the project's exports)")
+    parser.add_argument("--overlay", action="store_true", help="also write the avatar PNG sequence")
+    parser.add_argument("--no-raw-link", action="store_true", help="no video_raw hard links")
     args = parser.parse_args()
 
     session = Session()
@@ -49,7 +53,6 @@ def main() -> int:
 
     stamp = datetime.now().strftime("%Y-%m-%d %H%M%S")
     out = Path(args.out) if args.out else Path(args.project) / "exports" / f"{stamp} (check)"
-    out.mkdir(parents=True, exist_ok=False)
     started = time.perf_counter()
     marks: dict[str, float] = {}
     last_print = [0.0]
@@ -83,10 +86,15 @@ def main() -> int:
             processed_for=processed_for,
             raw_for=raw_for,
             report=on_report,
-            limit_ms=limit,
+            options=ExportOptions(
+                include_overlay=args.overlay or inputs.project.export.include_avatar_overlay,
+                include_raw_links=not args.no_raw_link and inputs.project.export.include_raw_video_link,
+                limit_ms=limit,
+            ),
         )
     except (ExportError, SessionError) as exc:
         print(f"export failed: {exc}")
+        print(f"left in {mark_incomplete(out)}")
         return 1
     total = time.perf_counter() - started
     length_s = result.render.frames / float(result.fmt.fps)
@@ -100,6 +108,9 @@ def main() -> int:
         f"render {result.render.seconds:.1f} s; total {total:.1f} s "
         f"({length_s / max(result.render.seconds, 0.001):.2f}x realtime)"
     )
+    print(f"avatar PNG frames: {result.overlay_frames}; raw video linked: {result.raw.linked}, listed: {result.raw.listed}")
+    manifest = json.loads((out / "export.json").read_text(encoding="utf-8"))
+    print(f"step seconds: {manifest['seconds']}")
     for name in ("final_1080p.mp4", "video_edited.mp4", "voice_processed.wav", "voice_raw.wav"):
         path = out / name
         size = path.stat().st_size / 1e6 if path.exists() else 0

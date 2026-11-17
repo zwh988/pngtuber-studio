@@ -6,7 +6,9 @@ there is an avatar), the voice track (``voice_processed.wav``), then one input p
 ``video_edited.mp4`` (footage audio at its own level); the other gets the avatar
 overlaid (ffmpeg holds each avatar frame until the next one starts: the floor rule of
 decision 2) and the mix: game audio at ``game_audio_db`` plus the voice on both
-channels, summed without normalising, then limited at -1 dBFS (spec 7 "Mix").
+channels, summed without normalising, then limited at -1 dBFS (spec 7 "Mix"). When the
+transparent overlay is asked for, the avatar frames are also split to a third output, a
+PNG sequence written by ffmpeg's own (multi-threaded) PNG encoder in the same run.
 
 ``final_filters`` and ``final_args`` are pure; ``run_render`` runs the process (rule 14:
 argument lists), feeds the avatar pipe from a thread, reads ``-progress`` from stdout,
@@ -21,6 +23,7 @@ from dataclasses import dataclass
 from pathlib import Path
 
 from backend.audio.loudness import CEILING_DB, db_to_linear
+from backend.export.bundle import OVERLAY_DIR
 from backend.export.compositor import Compositor
 from backend.export.editgraph import (
     AUDIO_ENCODE_ARGS,
@@ -37,6 +40,10 @@ EDITED_NAME = "video_edited.mp4"
 GRAPH_NAME = "export_graph.txt"
 LOG_NAME = "export_ffmpeg.log"
 PROGRESS_PERIOD_S = "0.5"
+OVERLAY_PATTERN = "frame_%06d.png"  # same names as bundle.png_name
+# ffmpeg's PNG encoder: "sub" prediction and fast deflate measured 341 fps and about
+# 440 MB per minute on the real art (Pillow: about 40 fps, single-threaded).
+OVERLAY_ENCODE_ARGS: tuple[str, ...] = ("-c:v", "png", "-pred", "sub", "-compression_level", "1")
 
 
 @dataclass(frozen=True)
@@ -48,6 +55,11 @@ class RenderPlan:
     game_db: float
     avatar: Compositor | None
     out_dir: Path
+    overlay_frames: int = 0  # avatar frames to write as PNGs (0: no PNG sequence)
+
+    @property
+    def overlay_dir(self) -> Path:
+        return self.out_dir / OVERLAY_DIR
 
     @property
     def final_path(self) -> Path:
@@ -71,6 +83,7 @@ class RenderReport:
     frames: int
     avatar_frames: int
     seconds: float  # wall time of the ffmpeg run
+    overlay_frames: int = 0  # PNG files written
 
 
 def first_clip_input(with_avatar: bool) -> int:
@@ -87,6 +100,7 @@ def make_plan(
     voice_wav: Path,
     avatar: Compositor | None,
     out_dir: Path,
+    overlay_frames: int = 0,
 ) -> RenderPlan:
     graph = build_edit_graph(
         project, source_paths, fmt, first_input=first_clip_input(avatar is not None)
@@ -99,10 +113,18 @@ def make_plan(
         game_db=project.game_audio_db,
         avatar=avatar,
         out_dir=out_dir,
+        overlay_frames=overlay_frames if avatar is not None else 0,
     )
 
 
-def final_filters(graph: EditGraph, fmt: OutputFormat, *, with_avatar: bool, game_db: float) -> list[str]:
+def final_filters(
+    graph: EditGraph,
+    fmt: OutputFormat,
+    *,
+    with_avatar: bool,
+    game_db: float,
+    overlay_frames: int = 0,
+) -> list[str]:
     voice = 1 if with_avatar else 0
     limit = db_to_linear(CEILING_DB)
     filters = [
@@ -111,7 +133,11 @@ def final_filters(graph: EditGraph, fmt: OutputFormat, *, with_avatar: bool, gam
         f"[{graph.audio}]asplit=2[agame][aedit_out]",
     ]
     if with_avatar:
-        filters.append("[0:v]format=rgba[avatar]")
+        if overlay_frames > 0:
+            filters.append("[0:v]format=rgba,split=2[avatar][avpng]")
+            filters.append(f"[avpng]trim=end_frame={overlay_frames}[overlay_out]")
+        else:
+            filters.append("[0:v]format=rgba[avatar]")
         # The avatar track runs one frame past the end; trim keeps the exact frame count.
         filters.append(
             "[vmain][avatar]overlay=0:0:format=auto,format=yuv420p,"
@@ -149,6 +175,11 @@ def final_args(plan: RenderPlan) -> list[str]:
         "-map", "[vedit_out]", "-map", "[aedit_out]", "-r", fmt.fps_text,
         *VIDEO_ENCODE_ARGS, *AUDIO_ENCODE_ARGS, "-movflags", "+faststart", str(plan.edited_path),
     ]  # fmt: skip
+    if plan.avatar is not None and plan.overlay_frames > 0:
+        out += [
+            "-map", "[overlay_out]", "-fps_mode", "passthrough", *OVERLAY_ENCODE_ARGS,
+            "-f", "image2", "-start_number", "0", str(plan.overlay_dir / OVERLAY_PATTERN),
+        ]  # fmt: skip
     return [
         str(plan.ffmpeg), "-hide_banner", "-y", "-nostats",
         "-progress", "pipe:1", "-stats_period", PROGRESS_PERIOD_S,
@@ -184,8 +215,17 @@ def run_render(
 
     plan.out_dir.mkdir(parents=True, exist_ok=True)
     with_avatar = plan.avatar is not None
+    overlay = plan.overlay_frames if with_avatar else 0
+    if overlay:
+        plan.overlay_dir.mkdir(parents=True, exist_ok=True)  # image2 does not create folders
     script = ";\n".join(
-        final_filters(plan.graph, plan.fmt, with_avatar=with_avatar, game_db=plan.game_db)
+        final_filters(
+            plan.graph,
+            plan.fmt,
+            with_avatar=with_avatar,
+            game_db=plan.game_db,
+            overlay_frames=overlay,
+        )
     )
     plan.script_path.write_text(script + "\n", encoding="utf-8")
     flags = subprocess.CREATE_NO_WINDOW if sys.platform == "win32" else 0
@@ -262,4 +302,5 @@ def run_render(
         frames=plan.graph.frames,
         avatar_frames=fed[0],
         seconds=time.perf_counter() - started,
+        overlay_frames=len(list(plan.overlay_dir.glob("frame_*.png"))) if overlay else 0,
     )

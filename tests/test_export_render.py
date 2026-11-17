@@ -17,7 +17,7 @@ from backend.avatar.track import FrameTrack
 from backend.export.compositor import Compositor, SpriteBank
 from backend.export.editgraph import OutputFormat, build_edit_graph, sample_count
 from backend.export.errors import ExportCancelled, ExportError
-from backend.export.pipeline import ExportInputs, run_export
+from backend.export.pipeline import ExportInputs, ExportOptions, run_export
 from backend.export.runner import (
     EDITED_NAME,
     FINAL_NAME,
@@ -28,7 +28,7 @@ from backend.export.runner import (
     parse_progress,
     run_render,
 )
-from backend.export.voicetrack import PROCESSED_NAME, RAW_NAME, VoiceCue
+from backend.export.voicetrack import PROCESSED_NAME, RAW_NAME
 from backend.project.schema import Clip, Project, Source
 from backend.project.session import Session
 from backend.project.timeline import TimelineClip, TimelinePlacement, TimelineState
@@ -97,6 +97,25 @@ def test_args_order(tmp_path: Path) -> None:
     assert args[i + 3 : i + 9] == ["-ss", "0.000", "-t", "1.000", "-i", "r.mkv"]
     assert args[-1] == str(tmp_path / EDITED_NAME) and str(tmp_path / FINAL_NAME) in args
     assert "[2:v:0]" in plan.graph.filters[0]
+
+
+def test_overlay_output_is_a_third_output(tmp_path: Path) -> None:
+    plan = make_plan(
+        project(), {RED: Path("r.mkv"), BLUE: Path("b.mp4")}, FMT, ffmpeg=Path("ff.exe"),
+        voice_wav=tmp_path / "v.wav", avatar=compositor(tmp_path), out_dir=tmp_path, overlay_frames=91,
+    )  # fmt: skip
+    args = final_args(plan)
+    assert args[-1] == str(tmp_path / "avatar_overlay" / "frame_%06d.png")
+    i = args.index("[overlay_out]")
+    assert args[i + 1 : i + 9] == ["-fps_mode", "passthrough", "-c:v", "png", "-pred", "sub", "-compression_level", "1"]
+    filters = final_filters(plan.graph, FMT, with_avatar=True, game_db=0, overlay_frames=91)
+    assert "[0:v]format=rgba,split=2[avatar][avpng]" in filters
+    assert "[avpng]trim=end_frame=91[overlay_out]" in filters
+    no_avatar = make_plan(
+        project(), {RED: Path("r.mkv"), BLUE: Path("b.mp4")}, FMT, ffmpeg=Path("ff.exe"),
+        voice_wav=tmp_path / "v.wav", avatar=None, out_dir=tmp_path, overlay_frames=91,
+    )  # fmt: skip
+    assert no_avatar.overlay_frames == 0 and "[overlay_out]" not in final_args(no_avatar)
 
 
 def test_parse_progress() -> None:
@@ -285,16 +304,59 @@ def test_pipeline_writes_voice_then_renders(tmp_path: Path) -> None:
     sprite = tmp_path / "art" / "01_a" / "01a_a_oicm.png"
     sprite.parent.mkdir(parents=True)
     Image.new("RGBA", (100, 200), (0, 255, 0, 255)).save(sprite)
-    stages: list[str] = []
+    stages: list[tuple[str, float]] = []
     result = run_export(
         inputs, tmp_path / "bundle", ffmpeg=FFMPEG,
         processed_for=lambda cue: take,
         raw_for=lambda cue: (soundfile.read(str(take), dtype="float32")[0], 24_000),
-        report=lambda stage, fraction: stages.append(stage),
+        options=ExportOptions(include_overlay=True, include_raw_links=True),
+        report=lambda stage, fraction: stages.append((stage, fraction)),
     )  # fmt: skip
     assert result.with_avatar and result.voice.lines == 1 and result.render.frames == 180
+    assert result.overlay_frames == 91 and result.raw.linked == ["red.mkv", "blue.mp4"]
     bundle = tmp_path / "bundle"
-    for file in (PROCESSED_NAME, RAW_NAME, FINAL_NAME, EDITED_NAME):
+    for file in (PROCESSED_NAME, RAW_NAME, FINAL_NAME, EDITED_NAME, "project.json", "export.json"):
         assert (bundle / file).is_file(), file
-    assert stages[0] == "voice" and "render" in stages and stages[-1] == "done"
-    assert isinstance(VoiceCue, type)
+    assert len(list((bundle / "avatar_overlay").glob("frame_*.png"))) == 91
+    with Image.open(bundle / "avatar_overlay" / "frame_000045.png") as png:  # appears at 1.5 s
+        assert png.mode == "RGBA" and png.size == (1920, 1080)
+        assert png.getpixel((960, 800)) == (0, 255, 0, 255) and png.getpixel((10, 10))[3] == 0
+    with Image.open(bundle / "avatar_overlay" / "frame_000044.png") as png:
+        assert png.getextrema()[3] == (0, 0)  # nothing yet: fully transparent
+    assert "91 frames, 30 fps" in (bundle / "avatar_overlay" / "README.txt").read_text(encoding="utf-8")
+    assert (bundle / "video_raw" / "red.mkv").stat().st_nlink == 2
+    manifest = json.loads((bundle / "export.json").read_text(encoding="utf-8"))
+    assert manifest["video"]["frames"] == 180 and manifest["video"]["fps"] == "60/1"
+    assert manifest["ffmpeg"].startswith("ffmpeg version")
+    assert set(manifest["seconds"]) == {"voice", "render", "finish", "total"}
+    names = [s for s, _ in stages]
+    assert names[0] == "voice" and "render" in names and names[-1] == "done"
+    fractions = [f for _, f in stages]
+    assert fractions == sorted(fractions) and fractions[-1] == 1.0
+    with pytest.raises(ExportError, match="not empty"):
+        run_export(inputs, bundle, ffmpeg=FFMPEG, processed_for=lambda c: take, raw_for=lambda c: (np.zeros(1), 24_000))
+
+
+@needs_ffmpeg
+def test_pipeline_with_a_limit_exports_only_the_start(tmp_path: Path) -> None:
+    paths = footage(tmp_path / "footage")
+    take = voice_wav(tmp_path / "take.wav")
+    session = Session(probe=fake_probe)
+    session.new_project(str(tmp_path), "Rack")
+    stack = session._stack
+    assert stack is not None
+    stack.project.sources.extend(project().sources)
+    stack.project.clips.extend(project().clips)
+    inputs = session.export_inputs()
+    inputs = ExportInputs(
+        project=inputs.project, timeline=inputs.timeline, source_paths=paths,
+        track=None, art=None, art_root=None,
+    )  # fmt: skip
+    result = run_export(
+        inputs, tmp_path / "short", ffmpeg=FFMPEG, processed_for=lambda c: take,
+        raw_for=lambda c: (np.zeros(1, dtype=np.float32), 24_000),
+        options=ExportOptions(limit_ms=1500, include_raw_links=False),
+    )  # fmt: skip
+    assert result.render.frames == 90 and not result.with_avatar and result.overlay_frames == 0
+    assert not (tmp_path / "short" / "video_raw").exists()
+    assert soundfile.info(str(tmp_path / "short" / PROCESSED_NAME)).frames == 36_000  # 1.5 s
