@@ -165,3 +165,8 @@ body {
 .num {
   font-variant-numeric: tabular-nums;
 }
+
+/* error text used across the panels (was a :global rule in Editor.svelte before UI-2 S3) */
+:where(.error, .bad) {
+  color: var(--danger);
+}

@@ -208,6 +208,7 @@
   <ExportScreen onclose={() => (view = "editor")} />
 {:else if view === "editor" && current !== null}
   <Editor
+    projectName={current?.name ?? null}
     onclose={() => {
       view = "project";
       void refreshProject();

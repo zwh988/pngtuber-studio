@@ -49,8 +49,16 @@
   import { clipIndexAt, stepFrame } from "./timeline";
   import { formatBytes, isLive, jobText, newLineId, workerText } from "./voice";
   import { VoicePlayback } from "./voicePlayback";
+  import { ArrowLeft, Redo2, Undo2, Upload } from "@lucide/svelte";
+  import Banner from "./ui/Banner.svelte";
+  import Button from "./ui/Button.svelte";
+  import IconButton from "./ui/IconButton.svelte";
 
-  let { onclose, onexport }: { onclose: () => void; onexport: () => void } = $props();
+  let {
+    onclose,
+    onexport,
+    projectName = null,
+  }: { onclose: () => void; onexport: () => void; projectName?: string | null } = $props();
 
   let timeline = $state<TimelineState | null>(null);
   let sources = $state<FootageItem[]>([]);
@@ -714,38 +722,38 @@
 
 <div class="editor">
   <header>
-    <button type="button" onclick={onclose}>Back to project</button>
-    <h2>Editor</h2>
-    <div class="spacer"></div>
-    <button
-      type="button"
+    <IconButton icon={ArrowLeft} label="Back to project" onclick={onclose} />
+    <h2>{projectName ?? "Editor"}</h2>
+    {#if projectName !== null}<span class="crumb">/ Editor</span>{/if}
+    <span class="sep" aria-hidden="true"></span>
+    <IconButton
+      icon={Undo2}
+      label={timeline?.undo_label ? `Undo: ${timeline.undo_label} (Ctrl+Z)` : "Undo (Ctrl+Z)"}
       disabled={busy || timeline === null || !timeline.can_undo}
       onclick={undo}
-      title={timeline?.undo_label ?? ""}
-    >
-      Undo
-    </button>
-    <button
-      type="button"
+    />
+    <IconButton
+      icon={Redo2}
+      label={timeline?.redo_label ? `Redo: ${timeline.redo_label} (Ctrl+Y)` : "Redo (Ctrl+Y)"}
       disabled={busy || timeline === null || !timeline.can_redo}
       onclick={redo}
-      title={timeline?.redo_label ?? ""}
-    >
-      Redo
-    </button>
-    <button type="button" class="export" disabled={busy || timeline === null} onclick={onexport}>
-      Export...
-    </button>
+    />
+    <div class="spacer"></div>
+    <Button variant="primary" icon={Upload} disabled={busy || timeline === null} onclick={onexport}>
+      Export
+    </Button>
   </header>
 
   {#if error !== null}
-    <p class="error msg">{error}</p>
+    <div class="msg"><Banner kind="error">{error}</Banner></div>
   {/if}
   {#if notice !== null}
-    <p class="note msg">{notice}</p>
+    <div class="msg"><Banner kind="info">{notice}</Banner></div>
   {/if}
   {#if timeline !== null && timeline.save_error !== null}
-    <p class="error msg">Could not save the project: {timeline.save_error}</p>
+    <div class="msg">
+      <Banner kind="error">Could not save the project: {timeline.save_error}</Banner>
+    </div>
   {/if}
 
   {#if timeline === null}
@@ -1103,7 +1111,7 @@
       {#if storage !== null}
         <span>Takes on disk: {formatBytes(storage.total_bytes)} ({storage.take_count})</span>
         {#if storage.missing_file_count > 0}
-          <span class="missing">{storage.missing_file_count} take file(s) missing</span>
+          <span class="error">{storage.missing_file_count} take file(s) missing</span>
         {/if}
       {/if}
       <span
@@ -1129,15 +1137,25 @@
     flex: none;
     display: flex;
     align-items: center;
-    gap: 0.5rem;
-    padding: 0.4rem 0.75rem;
-    border-bottom: 1px solid var(--line);
-    background: var(--panel);
+    gap: 6px;
+    height: 44px;
+    padding: 0 10px;
+    border-bottom: 1px solid var(--border);
+    background: var(--surface-1);
   }
   header h2 {
-    margin: 0 0 0 0.5rem;
-    font-size: 1.05rem;
+    margin: 0 0 0 4px;
+    font-size: var(--fs-lg);
     font-weight: 600;
+  }
+  .crumb {
+    color: var(--text-3);
+  }
+  .sep {
+    width: 1px;
+    height: 18px;
+    margin: 0 4px;
+    background: var(--border-strong);
   }
   .spacer {
     flex: 1;
@@ -1145,7 +1163,7 @@
   .msg {
     flex: none;
     margin: 0;
-    padding: 0.35rem 0.75rem;
+    padding: 6px 10px 0;
   }
   .workspace {
     flex: 1;
@@ -1336,13 +1354,7 @@
     color: var(--text);
     font-weight: 600;
   }
-  .editor :global(.error),
-  .editor :global(.missing),
-  .editor :global(.bad) {
-    color: var(--danger);
-  }
-  .hint,
-  .note {
+  .hint {
     color: var(--muted);
   }
   .stretch {
