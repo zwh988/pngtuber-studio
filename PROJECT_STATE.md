@@ -2,8 +2,8 @@
 
 Living document: how the project works right now and where everything lives. **Update it at the end of every task** (see the checklist in `CLAUDE.md`). Keep it factual and short; link to files instead of copying code.
 
-- **Last updated:** 2026-11-17 (M6 S9: parity. `tests/test_export_parity.py` checks real export frames against the compositor over the edited footage (and fails when the avatar is one frame late). Preview against export on a scratch copy of `Rack 1`, measured by the agent in a browser: the avatar's box agrees within 0.2% of the frame at 0, 1.25, 2.5, 5.5 and 9 s. The user checked the export screen in the app (S8 committed as `8ca4bd7`). Agent session: `uv run pytest` 1473 passed, ruff clean)
-- **Current milestone:** M6 (export) on branch `m6-export`. Done: S1 to S9 (M6-1 to M6-8 ticked). Next: S10 wrap-up (spec sections 10 and 11, merge, tag `m6-done`).
+- **Last updated:** 2026-11-17 (M6 S10 wrap-up: spec sections 4.3, 10 and 11 rewritten to match the export; M6-1 to M6-8 ticked. S9 committed as `aab3fb3`. Agent session: `uv run pytest` 1473 passed, ruff clean, `npm run check` 0 errors, `npm test` 32 passed, `npm run build` ok. The user checked the export screen in the app and watched a test export)
+- **Current milestone:** M6 (export) done on branch `m6-export` (S1 to S10, M6-1 to M6-8 ticked); merge into `main` and tag `m6-done`. Next milestone: M7 (polish).
 - **Overall status:** M0 verdict GO (see "M0 findings"). The app runs: a pywebview window shows a Svelte project screen (create from template, open, Recent, footage scan, rescan, relink) and, new in M2, a **video editor screen** reached from "Open editor": add footage to the timeline, a player that plays across the cuts (segment hopping, clip speed with pitch preserved), a custom canvas timeline (ruler, clips, cut markers, speed badges, playhead, zoom and scroll), clip selection, drag to trim and reorder, the hotkeys from spec 4.2, and unlimited undo/redo. The backend behind it (time mapping, clip commands, orphan logic, reference check, timeline API, media server) is pure and tested (490 tests passing). Voice generation now works end to end (M3): a voice profile section on the project screen, a Line bank tab (write lines, emotion and slider overrides, generate, reroll, cancel, take picker), a status bar with the GPU queue and takes on disk, and a Storage tab with confirmed deletes. Lines can be placed on the footage (voice lane with waveform blocks), play in sync with the video through Web Audio, warn when they run into the next line (red block edge), and be fixed by Nudge earlier, Tighten (pitch-preserving speed-up up to +25 percent) or Reroll. There is no avatar or export yet. The voice chain exists in the backend (M4 chat B: processed takes with trim, EQ, compressor, effects, loudness and limiter, served through `/media/take/{id}?processed=1`, edited through `/api/fx`, rendered ahead in the background) but has no UI yet and nothing plays it; placed lines still play the raw take until chats C and D. No `install.bat` / `run.bat` yet.
 
 ## How to run / test
@@ -734,6 +734,7 @@ MyRack/
 | 2026-11-17 | M6 (S8): the screen offers a test export of the first N seconds (`limit_seconds`), the same as the check script's `--seconds` |
 | 2026-11-17 | M6 (S9): parity is checked in three layers: (1) the shared layout fixture keeps the browser's and the compositor's placement maths equal; (2) `test_export_parity.py` keeps the export equal to the compositor at the right frame; (3) a measured check of the real preview against a real export on `Rack 1` (below). Sprite choice cannot differ: both draw the same frame track |
 | 2026-11-17 | M6 (S9): preview against export on a scratch copy of `Rack 1` (agent, browser preview 591 x 333): the avatar's drawn box, as fractions of the frame, at 0, 1.25, 2.5, 5.5 and 9 s (track frames 0, 37, 75, 165, 270) differs from the exported overlay PNG of the same frame by at most 0.20% (about one preview pixel: the preview draws a 1000 px copy at a small size). The float motion between those times is visible in both |
+| 2026-11-17 | M6 (S10): spec 4.3 (export screen as built), 10 (export pipeline: pre-flight errors and warnings, voice tracks, edit graph, one ffmpeg run with the avatar pipe, the PNG overlay output and the mix, the bundle, polled progress, incomplete folders, rule 7 lockout) and 11 (no WebSocket: polling; background threads instead of a CPU worker pool; Pillow) were rewritten in `docs/DESIGN_SPEC.md` to match what was built |
 ## Known issues / open questions
 
 - Voice source not final: own voice or acted character (swappable via voice profile).
@@ -852,10 +853,16 @@ MyRack/
 - M5 S11: the lane rows show key values but not the curve between keys, and rotation has no handle on the preview (use the Avatar tab). Expression names offered come from the art loaded when the editor opens (reopen the editor after changing the art folder).
 - M5: every avatar number (mouth thresholds, blink gaps, bounce spring, reaction curves, default x 0.85 / y 0.75, height 0.6 of the frame) is a guess to tune by eye in `backend/avatar/tuning.py` and the template.
 - M5: if the mouth looks early or late against the sound in the preview (Web Audio output latency), add a fixed offset setting (task decision 16; not built).
-- M5: the export compositor (M6) must draw the same frame track with the full-size sprites and the same placement rules as `avatarTrack.ts` (bottom centre, height fraction, rotation about the anchor, squash).
+- M5/M6 (resolved in M6): the export compositor draws the same frame track with the same placement rules as the preview (shared fixture, parity test, measured on `Rack 1`).
+- M6: the export screen's choices (overlay, raw link, unload, folder) start from `Project.export` but are not saved back; each export sets them again.
+- M6: export speed depends on the GPU video encoder being free (2.7x realtime when free, 0.88x once while another program used NVENC). Sizes at `-cq 21`: about 138 MB per minute for the final video and 131 MB for the edited one; the PNG overlay adds about 421 MB per minute. `-cq 23` would be smaller if needed.
+- M6: a cancelled export leaves partly written MP4 files in the ` (incomplete)` folder; they may not play.
+- M6: transparent WebM (VP9 with alpha) would make the overlay about 20 times smaller, but DaVinci Resolve's support for its alpha was not confirmed, so it is not offered.
+- M6: the frame track and envelopes are rebuilt for an export from the open project; a take whose processed file cannot be rendered fails the export with its line named.
 
 ## Next up
 
-1. **M6 S10 wrap-up**: spec sections 10 and 11, final `PROJECT_STATE.md`, merge `m6-export`, tag `m6-done`; the step list is in `docs/tasks/M6-export.md`. M6-1 is ticked after the export screen shows the pre-flight (S8).
-2. **Still open from earlier milestones:** UI-1d (lane colours, a clearer selected state) and UI-1e (icon buttons; the collapsible parameter lanes were done in M5 S11), `takes_fx` sizes in the storage manager, clean-up of `media/envelopes/` and `media/avatar_preview/`.
-3. **Tuning by eye:** the avatar constants (see Known issues) once real footage is in the preview.
+1. **Merge and tag M6:** `git switch main`, `git merge m6-export`, `git push`, `git tag m6-done`, `git push --tags`.
+2. **M7 polish:** write `docs/tasks/M7-polish.md` from the plan (M7 items).
+3. **Still open from earlier milestones:** UI-1d (lane colours, a clearer selected state) and UI-1e (icon buttons), `takes_fx` sizes in the storage manager, clean-up of `media/envelopes/` and `media/avatar_preview/`.
+4. **Tuning by eye:** the avatar constants (see Known issues) and, if exports are too big, the video quality (`VIDEO_ENCODE_ARGS` in `backend/export/editgraph.py`).

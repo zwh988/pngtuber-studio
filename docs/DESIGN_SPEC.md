@@ -89,9 +89,10 @@ A one-stop local desktop app that turns a recorded pool rack into a finished PNG
 | Ctrl+Z / Ctrl+Y | Undo / redo |
 
 ### 4.3 Export screen
-- Output folder, resolution (1080p), frame rate (match footage), bundle toggles.
-- Pre-flight checklist: ungenerated lines, orphaned placements, overflow warnings, missing assets.
-- Progress bar with cancel.
+Opened with "Export..." in the editor.
+- Output folder (the project's `exports` by default), resolution (1080p), frame rate (match footage), bundle toggles (transparent avatar overlay, raw video link, unload the voice model first), and a test export of the first N seconds, with an estimate of the bundle size.
+- Pre-flight checklist: errors block (missing files, no clips, ffmpeg or NVENC not working); warnings (ungenerated lines, orphaned items, overflow, missing avatar art) need "Export anyway".
+- Progress bar with the step, time so far and time left, and cancel; then the files written and "Open folder".
 
 ### 4.4 Settings
 Voice profiles (reference clips), emotion presets, FX chain presets, avatar art mapping, channel template, hotkeys, take storage manager.
@@ -227,34 +228,35 @@ All randomness comes from a seeded generator keyed to the project seed and event
 
 ## 10. Export pipeline
 
-1. **Pre-flight:** check for ungenerated lines, orphaned items, unresolved overflow, and missing files.
-2. **Voice tracks:** place raw and processed takes at their mapped timeline times (overlaps mixed). Write `voice_raw.wav` and `voice_processed.wav`.
-3. **Edited video:** build one ffmpeg filter graph from the clip list (trim, speed, concat), encoded with NVENC to `video_edited.mp4` (no avatar, no voice).
-4. **Final render:** a single pass takes the edited video, the solver's frame states composited into an avatar layer, and the mixed audio, and encodes `final_1080p.mp4` with NVENC.
-5. **Bundle** (one folder per export):
-   - `final_1080p.mp4`
-   - `voice_raw.wav`, `voice_processed.wav`, and `lines/` with per-line processed takes
-   - `video_edited.mp4`
-   - `video_raw`: an NTFS hard link to the original recording (no extra disk used), or a path note if on another drive
-   - `avatar_overlay` (transparent, optional toggle)
-   - `project.json` snapshot
+The export screen (section 4.3) starts an export on a background thread; one runs at a time. While it runs, voice generation is refused, and an export does not start while a voice job is queued or running (rule 7). "Unload the voice model first" queues the unload job and waits for it. A test export can stop after the first N seconds.
 
-Progress streams to the UI over a WebSocket, with cancel support. Export unloads the TTS model first if that option is enabled.
+1. **Pre-flight:** errors block the export: no clips, a missing footage or take file, an unusable voice chain, an unknown clip effect, ffmpeg or NVENC not working. Warnings need a confirmation ("Export anyway"): a placed line with no take, orphaned placements, keys or reactions, overflow that is not allowed, no usable avatar art, art fallbacks. Each issue can carry a timeline time.
+2. **Voice tracks:** every playing placement is placed at its timeline start and overlaps are summed. `voice_processed.wav` uses the processed takes; `voice_raw.wav` uses the raw takes with the same cut, silence trim and stretch but no EQ, compressor, effects or loudness, so the two line up. Both are mono 32-bit float at the takes' rate, as long as the timeline. `lines/` holds one processed file per playing placement (`001_01-05_hello-there.wav`).
+3. **Edit graph:** one ffmpeg filter graph from the clip list. Each clip is its own input with input seeking; per clip: speed, the output frame rate, scale into 16:9 with black bars, clip effects from the registry, then padded or cut to exactly its frame count. Game audio keeps its pitch at any speed (`atempo`) and is cut to exactly its sample count; a source with no audio gives silence. Totals equal the timeline, so cuts never drift.
+4. **Final render:** one ffmpeg run (NVENC). Inputs: the avatar frames as raw RGBA from the Python compositor on a pipe at the track's 30 fps, the voice track, the clips. The edited video and game audio are split: one copy is encoded as `video_edited.mp4` (footage audio at its own level); the other gets the avatar overlaid (each avatar frame shows until the next starts: frame `floor(t * 30)`, as in the preview) and the mix: game audio at the project's level plus the voice on both channels, summed without normalising, limited at -1 dBFS. When the overlay is asked for, the avatar stream is also written as the PNG sequence in the same run. Output: 1080p at the footage's frame rate, H.264 (`h264_nvenc`, `-cq 21`), AAC 192k.
+5. **Bundle** (a dated folder `YYYY-MM-DD HHMM` in the project's `exports`, or in a chosen folder):
+   - `final_1080p.mp4`, `video_edited.mp4`
+   - `voice_raw.wav`, `voice_processed.wav`, and `lines/`
+   - `video_raw/`: NTFS hard links to the recordings the timeline uses (no extra disk), or `LINKS.txt` with their paths when a link is impossible (another drive)
+   - `avatar_overlay/` (optional): transparent 1920x1080 PNGs, one per avatar frame at 30 fps, plus a README (DaVinci Resolve reads the folder as one clip)
+   - `project.json` snapshot, `export.json` (settings, ffmpeg version, counts, time per step), `export_ffmpeg.log`, `export_graph.txt`
+
+Progress is polled (`GET /api/export/status`: stage, fraction, elapsed time and time left), with cancel. A cancelled or failed export's folder is renamed with " (incomplete)"; nothing is deleted. Footage is only read. Export speed depends on the GPU's video encoder being free: other recording or streaming programs slow it down.
 
 ## 11. Architecture
 
 **Processes**
 - **Shell:** pywebview window loading the local backend URL.
-- **Backend:** FastAPI with uvicorn on 127.0.0.1, WebSocket for events (job progress, status).
+- **Backend:** FastAPI with uvicorn on 127.0.0.1. The UI polls for job progress and status (voice jobs, processing, export); there is no WebSocket.
 - **GPU worker:** separate process holding Chatterbox, with a job queue and cancel.
-- **CPU worker pool:** audio FX, envelopes, waveforms, ffmpeg jobs.
+- **Background threads in the backend:** processed-take renders (prefetch), envelopes, the export (which runs ffmpeg as a subprocess and draws the avatar on a few threads).
 - **Media server:** HTTP range requests for footage and audio so seeking is smooth.
 
 **Frontend:** Svelte + TypeScript with Vite, built to static files and bundled (no Node needed at runtime). The timeline is a custom canvas component.
 
 **Bundled binaries:** ffmpeg and ffprobe with NVENC in `bin/`, from a pinned release-branch build (BtbN GPL 8.1.x). Do not use `master` or 9.0 builds: they need NVENC API 13.1 (driver 610+) and fail on older drivers (verified on driver 581.42).
 
-**Python dependencies:** torch (CUDA), chatterbox-tts, pedalboard, pyloudnorm, numpy, soundfile, opencv or Pillow, fastapi, uvicorn, pydantic, pywebview.
+**Python dependencies:** torch (CUDA), chatterbox-tts, pedalboard, pyloudnorm, numpy, soundfile, Pillow, fastapi, uvicorn, pydantic, pywebview.
 
 **Persistence:** `project.json` is the single source of truth with atomic writes (temp then replace), autosave on change, and a rotating backup. A `schema_version` field supports migrations. The per-user recent-projects list lives at `%APPDATA%\PNGtuberStudio\recent.json`, outside any project.
 
