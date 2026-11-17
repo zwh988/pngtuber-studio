@@ -2,6 +2,7 @@
   import {
     getAvatar,
     getFootage,
+    getModelStatus,
     getProject,
     getRecent,
     getVoice,
@@ -14,15 +15,18 @@
     rescanFootage,
     setAvatarFolder,
     setVoiceReference,
+    startModelDownload,
     type AvatarState,
     type FootageReport,
+    type ModelStatus,
     type ProjectSummary,
     type RecentItem,
     type VoiceState,
   } from "./api";
   import Editor from "./Editor.svelte";
   import ExportScreen from "./ExportScreen.svelte";
-  import { cleanPathInput, voiceStatusText } from "./voice";
+  import ModelSetup from "./ModelSetup.svelte";
+  import { cleanPathInput, formatBytes, voiceStatusText } from "./voice";
   import {
     ArrowRight,
     Clapperboard,
@@ -33,6 +37,7 @@
     Link,
     Mic,
     Plus,
+    AudioLines,
     RefreshCw,
     UserRound,
     X,
@@ -53,8 +58,12 @@
   let error = $state<string | null>(null);
   let busy = $state(false);
   let view = $state<"project" | "editor" | "export">("project");
-  /** Which page the project screen shows (UI-2 S4). */
-  let page = $state<"home" | "project" | "new" | "open">("home");
+  /** Which page the project screen shows (UI-2 S4; "model" is the voice model page, M7 S3). */
+  type Page = "home" | "project" | "new" | "open" | "model";
+  let page = $state<Page>("home");
+  /** The voice model's files (M7 S3); polled while a download runs. */
+  let model = $state<ModelStatus | null>(null);
+  let modelTimer: ReturnType<typeof setTimeout> | null = null;
 
   let newName = $state("");
   let newParent = $state("");
@@ -74,7 +83,7 @@
     return err instanceof Error ? err.message : String(err);
   }
 
-  function show(next: "home" | "project" | "new" | "open"): void {
+  function show(next: Page): void {
     error = null;
     page = next;
   }
@@ -225,6 +234,47 @@
     } catch (err) {
       error = message(err);
     }
+    await refreshModel();
+    // First run (M7 S3): with no project open, a missing model gets its page first.
+    if (model !== null && model.state !== "ready" && current === null) {
+      page = "model";
+    }
+  }
+
+  function scheduleModelPoll(): void {
+    if (modelTimer !== null) {
+      clearTimeout(modelTimer);
+      modelTimer = null;
+    }
+    if (model?.state === "downloading") {
+      modelTimer = setTimeout(() => void refreshModel(), 500);
+    }
+  }
+
+  async function refreshModel(): Promise<void> {
+    try {
+      model = await getModelStatus();
+    } catch (err) {
+      error = message(err);
+    }
+    scheduleModelPoll();
+  }
+
+  async function downloadModel(): Promise<void> {
+    error = null;
+    try {
+      model = await startModelDownload();
+    } catch (err) {
+      error = message(err);
+    }
+    scheduleModelPoll();
+  }
+
+  function modelTag(status: ModelStatus): string {
+    if (status.state === "downloading") {
+      return `${Math.floor((100 * status.bytes_done) / Math.max(1, status.bytes_total))}%`;
+    }
+    return status.state === "failed" ? "stopped" : "not set up";
   }
 
   function when(iso: string): string {
@@ -265,6 +315,13 @@
         <House size={16} strokeWidth={1.75} aria-hidden="true" />
         Home
       </button>
+      {#if model !== null}
+        <button type="button" class="nav-item" class:on={page === "model"} onclick={() => show("model")}>
+          <AudioLines size={16} strokeWidth={1.75} aria-hidden="true" />
+          <span class="nav-text">Voice model</span>
+          {#if model.state !== "ready"}<span class="nav-tag">{modelTag(model)}</span>{/if}
+        </button>
+      {/if}
       {#if current !== null}
         <button
           type="button"
@@ -322,7 +379,13 @@
         <Banner kind="error" onclose={() => (error = null)}>{error}</Banner>
       {/if}
 
-      {#if page === "project" && current !== null}
+      {#if page === "model" && model !== null}
+        <ModelSetup
+          status={model}
+          ondownload={() => void downloadModel()}
+          onleave={() => show(current === null ? "home" : "project")}
+        />
+      {:else if page === "project" && current !== null}
         {#if current.save_error !== null}
           <Banner kind="error">Could not save the project: {current.save_error}</Banner>
         {/if}
@@ -695,6 +758,23 @@
             <div class="muted">Open a recent project, or start a new one.</div>
           </div>
         </div>
+        {#if model !== null && model.state !== "ready"}
+          <Banner kind={model.state === "failed" ? "error" : "warning"}>
+            {#if model.state === "downloading"}
+              Downloading the voice model: {formatBytes(model.bytes_done)} of {formatBytes(model.bytes_total)}.
+            {:else if model.state === "failed"}
+              The voice model download stopped. Generating lines needs it.
+            {:else}
+              The voice model is not downloaded yet ({formatBytes(model.bytes_total)}). Generating lines
+              needs it.
+            {/if}
+            {#snippet action()}
+              <Button size="sm" onclick={() => show("model")}>
+                {model?.state === "missing" ? "Set up" : "Details"}
+              </Button>
+            {/snippet}
+          </Banner>
+        {/if}
         <section class="card">
           <div class="card-head"><h2>Recent projects</h2></div>
           {#if recent.length === 0}

@@ -32,6 +32,7 @@ from backend.voice.protocol import (
     ShutdownCommand,
     UnloadCommand,
     UnloadedEvent,
+    WarmingUpEvent,
     WorkerCommand,
     WorkerEvent,
 )
@@ -91,6 +92,7 @@ class WorkerLoop:
                     )
                 )
                 return False
+            self._emit(WarmingUpEvent())
             try:
                 self._engine.warm_up()
             except Exception:  # noqa: BLE001 - warm-up is optional

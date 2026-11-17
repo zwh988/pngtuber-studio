@@ -834,3 +834,30 @@ export function cancelExport(): Promise<ExportStatus> {
 export function openExportFolder(): Promise<{ folder: string }> {
   return post<{ folder: string }>("/api/export/open-folder");
 }
+
+// ---- voice model (M7 S3) ----------------------------------------------------
+
+export type ModelState = "missing" | "downloading" | "ready" | "failed";
+
+/** `GET /api/voice/model`: are the voice model's files on disk, and the download. */
+export type ModelStatus = {
+  state: ModelState;
+  repo: string;
+  revision: string;
+  files_total: number;
+  files_present: number;
+  bytes_total: number;
+  bytes_done: number;
+  current_file: string | null;
+  cache_dir: string;
+  message: string | null;
+};
+
+export function getModelStatus(): Promise<ModelStatus> {
+  return request<ModelStatus>("/api/voice/model");
+}
+
+/** Starts (or retries) the download; does nothing when ready or already running. */
+export function startModelDownload(): Promise<ModelStatus> {
+  return post<ModelStatus>("/api/voice/model/download");
+}

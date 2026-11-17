@@ -94,6 +94,9 @@ class SubprocessWorker:
             self._closing = False
             env = dict(os.environ)
             env.update(PYTHONUNBUFFERED="1", PYTHONUTF8="1", PYTHONIOENCODING="utf-8")
+            # Rule 8: the worker never connects. The model is downloaded by the
+            # app's first-run screen (backend/voice/model.py) and loaded from disk.
+            env.update(HF_HUB_OFFLINE="1", TRANSFORMERS_OFFLINE="1")
             with ExitStack() as stack:
                 log = self._open_log(stack)
                 try:

@@ -19,6 +19,7 @@ from backend.project.recent import default_recent_path
 from backend.project.session import Session
 from backend.voice.engine import chatterbox_model_version
 from backend.voice.jobqueue import JobQueue
+from backend.voice.model import ModelManager
 from backend.voice.subprocess_worker import SubprocessWorker, default_worker_log_path
 
 APP_ICON = Path(__file__).resolve().parents[1] / "assets" / "app.ico"
@@ -92,7 +93,7 @@ def main() -> None:
         model_version=chatterbox_model_version,
     )
     config = uvicorn.Config(
-        create_app(session=session, jobs=jobs),
+        create_app(session=session, jobs=jobs, model=ModelManager()),
         host="127.0.0.1",
         port=port,
         log_level="warning",

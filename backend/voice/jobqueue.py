@@ -57,6 +57,7 @@ from backend.voice.protocol import (
     ReadyEvent,
     UnloadCommand,
     UnloadedEvent,
+    WarmingUpEvent,
     WorkerEvent,
     build_generate_command,
 )
@@ -592,6 +593,9 @@ class JobQueue:
         deadline = time.monotonic() + self._load_timeout_s
         while True:
             event = self._worker.next_event(self._poll_s)
+            if isinstance(event, WarmingUpEvent):
+                self._set_phase(job, "warming_up")
+                continue
             if isinstance(event, ReadyEvent):
                 self._set_worker("ready", version=event.model_version)
                 return None

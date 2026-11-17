@@ -103,6 +103,13 @@ WorkerCommand = (
 # --------------------------------------------------------------------------
 
 
+class WarmingUpEvent(_Message):
+    """The model is loaded and the throwaway warm-up generation starts (M7 S3),
+    so the UI can say so instead of waiting silently. ``ready`` follows."""
+
+    type: Literal["warming_up"] = "warming_up"
+
+
 class ReadyEvent(_Message):
     """The model is loaded. ``model_version`` goes into every raw cache key."""
 
@@ -160,7 +167,8 @@ class ErrorEvent(_Message):
 
 
 WorkerEvent = (
-    ReadyEvent
+    WarmingUpEvent
+    | ReadyEvent
     | ProgressEvent
     | DoneEvent
     | CancelledEvent

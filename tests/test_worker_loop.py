@@ -21,6 +21,7 @@ from backend.voice.protocol import (
     ShutdownCommand,
     UnloadCommand,
     UnloadedEvent,
+    WarmingUpEvent,
     WorkerEvent,
 )
 from backend.voice.workerloop import WorkerLoop
@@ -137,7 +138,8 @@ def test_load_warms_up_then_reports_ready(harness: Harness) -> None:
     assert harness.loop.handle(LoadCommand(device="cuda"))
     assert harness.engine.warm_up_count == 1
     assert harness.events == [
-        ReadyEvent(model_version="rec-1", sample_rate=RATE, device="cuda")
+        WarmingUpEvent(),
+        ReadyEvent(model_version="rec-1", sample_rate=RATE, device="cuda"),
     ]
 
 
@@ -151,7 +153,8 @@ def test_a_second_load_does_not_load_again(harness: Harness) -> None:
 def test_a_failed_warm_up_still_gives_ready() -> None:
     harness = Harness(RecordingEngine(fail_warm_up=True))
     assert harness.loop.handle(LoadCommand())
-    assert isinstance(harness.events[0], ReadyEvent)
+    assert isinstance(harness.events[0], WarmingUpEvent)
+    assert isinstance(harness.events[1], ReadyEvent)
 
 
 def test_a_failed_load_is_fatal_and_stops_the_worker() -> None:

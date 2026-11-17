@@ -53,6 +53,7 @@ from backend.voice.engine import chatterbox_model_version
 from backend.voice.jobqueue import JobError, JobQueue
 from backend.voice.jobs import JobItem, JobStatus
 from backend.voice.linebank import LineBankState
+from backend.voice.model import ModelManager, ModelStatus
 from backend.voice.peaks import PeaksError, PeaksReport, read_take_peaks
 from backend.voice.profile import VoiceState
 from backend.voice.stretchrender import StretchError, ensure_stretched
@@ -126,11 +127,14 @@ def create_app(
     jobs: JobQueue | None = None,
     export_tools: Callable[[], str | None] | None = None,
     export_run: RunFn | None = None,
+    model: ModelManager | None = None,
 ) -> FastAPI:
     """``jobs`` is the voice generation queue. By default one is built around the
     real GPU worker; nothing starts until the first job is submitted. The caller
     that owns the app (``main.py``) closes it. ``export_tools`` and ``export_run``
-    replace the NVENC probe and the export steps in tests."""
+    replace the NVENC probe and the export steps in tests. ``model`` is the voice
+    model's files and first-run download (M7 S3); built by default only with the
+    real queue, so tests that pass their own queue need no model on disk."""
     app = FastAPI(title=APP_NAME)
     active = session if session is not None else Session()
     queue = (
@@ -142,6 +146,8 @@ def create_app(
             model_version=chatterbox_model_version,
         )
     )
+
+    model_files = model if model is not None else (ModelManager() if jobs is None else None)
 
     @app.get("/api/hello")
     def hello() -> dict[str, str | int]:
@@ -376,9 +382,29 @@ def create_app(
         if exports.running:
             raise HTTPException(status_code=400, detail="an export is running: generate after it")
 
+    def refuse_without_model() -> None:
+        if model_files is not None and not model_files.ready():
+            raise HTTPException(
+                status_code=400,
+                detail="the voice model is not downloaded yet: download it from the start page",
+            )
+
+    @app.get("/api/voice/model")
+    def get_model() -> ModelStatus:
+        if model_files is None:
+            return ModelStatus(state="ready")
+        return model_files.status()
+
+    @app.post("/api/voice/model/download")
+    def download_model() -> ModelStatus:
+        if model_files is None:
+            return ModelStatus(state="ready")
+        return model_files.start_download()
+
     @app.post("/api/voice/generate")
     def generate_line(request: LineIdRequest) -> JobItem:
         refuse_while_exporting()
+        refuse_without_model()
         try:
             return queue.submit(request.line_id)
         except _API_ERRORS as exc:
@@ -387,6 +413,7 @@ def create_app(
     @app.post("/api/voice/reroll")
     def reroll_line(request: LineIdRequest) -> JobItem:
         refuse_while_exporting()
+        refuse_without_model()
         try:
             return queue.submit(request.line_id, reroll=True)
         except _API_ERRORS as exc:
