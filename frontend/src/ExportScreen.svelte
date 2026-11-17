@@ -12,12 +12,25 @@
     type PreflightReport,
   } from "./api";
   import { clock } from "./format";
+  import {
+    ArrowLeft,
+    CircleAlert,
+    FolderOpen,
+    RefreshCw,
+    TriangleAlert,
+    Upload,
+    X,
+  } from "@lucide/svelte";
+  import Badge from "./ui/Badge.svelte";
+  import Banner from "./ui/Banner.svelte";
+  import Button from "./ui/Button.svelte";
+  import IconButton from "./ui/IconButton.svelte";
 
   /**
    * Export screen (M6-7, spec 4.3): the pre-flight checklist, the bundle choices, progress with
    * cancel, and the result. The export itself runs on the backend; this page polls its status.
    */
-  let { onclose }: { onclose: () => void } = $props();
+  let { onclose, projectName = null }: { onclose: () => void; projectName?: string | null } = $props();
 
   // Measured on the user's footage (M6 S6, S7): MB per minute of video.
   const MB_PER_MIN = { videos: 138 + 131, voice: 12, overlay: 421 };
@@ -174,295 +187,445 @@
 </script>
 
 <div class="screen">
-<main>
   <header>
-    <button type="button" onclick={onclose} disabled={busy}>Back to editor</button>
-    <h1>Export</h1>
+    <IconButton icon={ArrowLeft} label="Back to the editor" onclick={onclose} disabled={busy} />
+    <h1>{projectName ?? "Export"}</h1>
+    {#if projectName !== null}<span class="crumb">/ Export</span>{/if}
   </header>
 
-  {#if error !== null}<p class="error">{error}</p>{/if}
-
-  <section>
-    <h2>Pre-flight</h2>
-    {#if preflight === null}
-      <p>Checking...</p>
-    {:else}
-      {#if preflight.issues.length === 0}
-        <p class="ok">Everything is ready to export.</p>
-      {/if}
-      <ul class="issues">
-        {#each errors as issue, i (i)}
-          <li class="error-item">
-            <strong>Error</strong>
-            {#if issue.t_ms !== null}<span class="time">{clock(issue.t_ms)}</span>{/if}
-            {issue.message}
-          </li>
-        {/each}
-        {#each warnings as issue, i (i)}
-          <li class="warn-item">
-            <strong>Warning</strong>
-            {#if issue.t_ms !== null}<span class="time">{clock(issue.t_ms)}</span>{/if}
-            {issue.message}
-          </li>
-        {/each}
-      </ul>
-      {#if errors.length > 0}
-        <p class="hint">Fix the errors in the editor or on the project screen, then check again.</p>
-      {/if}
-      <button type="button" onclick={() => void recheck()} disabled={busy || running}>Check again</button>
+  <main>
+    {#if error !== null}
+      <Banner kind="error" onclose={() => (error = null)}>{error}</Banner>
     {/if}
-  </section>
 
-  <section>
-    <h2>Bundle</h2>
-    {#if status?.defaults}
-      <p class="hint">
-        {status.defaults.height}p, {status.defaults.fps === "match"
-          ? "at the footage's frame rate"
-          : `${status.defaults.fps} fps`}. Timeline length {seconds(durationMs / 1000)}.
-      </p>
-    {/if}
-    <div class="row">
-      <span>Folder:</span>
-      <code>{folder ?? status?.defaults?.folder ?? "the project's exports folder"}</code>
-    </div>
-    <div class="row">
-      <button type="button" onclick={() => void chooseFolder()} disabled={busy || running}>Choose...</button>
-      {#if folder !== null}
-        <button type="button" onclick={() => (folder = null)} disabled={busy || running}>Use the default</button>
-      {/if}
-    </div>
-    <p class="hint">Each export gets its own dated folder inside it.</p>
+    <div class="columns">
+      <div class="col">
+        <section class="card">
+          <div class="card-head">
+            <h2>Bundle</h2>
+            {#if status?.defaults}
+              <span class="muted small num">
+                {status.defaults.height}p · {status.defaults.fps === "match"
+                  ? "footage frame rate"
+                  : `${status.defaults.fps} fps`} · {seconds(durationMs / 1000)}
+              </span>
+            {/if}
+          </div>
+          <div class="card-body">
+            <div class="field">
+              <span class="label">Folder</span>
+              <code class="path">{folder ?? status?.defaults?.folder ?? "the project's exports folder"}</code>
+              <div class="row">
+                <Button size="sm" icon={FolderOpen} onclick={() => void chooseFolder()} disabled={busy || running}>
+                  Choose...
+                </Button>
+                {#if folder !== null}
+                  <Button size="sm" variant="ghost" onclick={() => (folder = null)} disabled={busy || running}>
+                    Use the default
+                  </Button>
+                {/if}
+                <span class="hint">Each export gets its own dated folder inside it.</span>
+              </div>
+            </div>
 
-    <label class="check">
-      <input type="checkbox" bind:checked={includeOverlay} disabled={running} />
-      <span>
-        Transparent avatar overlay (PNG sequence, 30 fps)
-        <span class="hint">
-          About {MB_PER_MIN.overlay} MB per minute of video. In DaVinci Resolve, add the folder to the Media
-          Pool: it shows up as one clip.
-        </span>
-      </span>
-    </label>
-    <label class="check">
-      <input type="checkbox" bind:checked={includeRawLinks} disabled={running} />
-      <span>
-        Link the raw recording
-        <span class="hint">A hard link: no extra disk space. On another drive, a text file with its path.</span>
-      </span>
-    </label>
-    <label class="check">
-      <input type="checkbox" bind:checked={unloadVoice} disabled={running} />
-      <span>
-        Unload the voice model first
-        <span class="hint">Frees about 3 GB of video memory; the next generation loads it again.</span>
-      </span>
-    </label>
-    <label class="check">
-      <input type="checkbox" bind:checked={testExport} disabled={running} />
-      <span>
-        Test export: only the first
-        <input class="num" type="number" min="1" step="1" bind:value={testSeconds} disabled={running || !testExport} />
-        seconds
-      </span>
-    </label>
-    <p class="hint">Estimated size: about {estimateGb < 0.1 ? "0.1" : estimateGb.toFixed(1)} GB.</p>
-  </section>
+            <label class="check">
+              <input type="checkbox" bind:checked={includeOverlay} disabled={running} />
+              <span>
+                Transparent avatar overlay (PNG sequence, 30 fps)
+                <span class="hint">
+                  About {MB_PER_MIN.overlay} MB per minute of video. In DaVinci Resolve, add the folder to the Media
+                  Pool: it shows up as one clip.
+                </span>
+              </span>
+            </label>
+            <label class="check">
+              <input type="checkbox" bind:checked={includeRawLinks} disabled={running} />
+              <span>
+                Link the raw recording
+                <span class="hint">A hard link: no extra disk space. On another drive, a text file with its path.</span>
+              </span>
+            </label>
+            <label class="check">
+              <input type="checkbox" bind:checked={unloadVoice} disabled={running} />
+              <span>
+                Unload the voice model first
+                <span class="hint">Frees about 3 GB of video memory; the next generation loads it again.</span>
+              </span>
+            </label>
+            <label class="check">
+              <input type="checkbox" bind:checked={testExport} disabled={running} />
+              <span>
+                Test export: only the first
+                <input
+                  class="secs num"
+                  type="number"
+                  min="1"
+                  step="1"
+                  aria-label="Seconds to export"
+                  bind:value={testSeconds}
+                  disabled={running || !testExport}
+                />
+                seconds
+              </span>
+            </label>
+            <p class="estimate">
+              Estimated size <strong class="num">about {estimateGb < 0.1 ? "0.1" : estimateGb.toFixed(1)} GB</strong>
+            </p>
+          </div>
+        </section>
 
-  <section>
-    <h2>Export</h2>
-    {#if warnings.length > 0 && !running}
-      <label class="check">
-        <input type="checkbox" bind:checked={acceptWarnings} />
-        <span>Export anyway, with the {warnings.length} warning{warnings.length === 1 ? "" : "s"} above</span>
-      </label>
-    {/if}
-    <div class="row">
-      <button type="button" class="primary" onclick={() => void begin()} disabled={!canStart}>Export</button>
-      {#if running}
-        <button type="button" onclick={() => void cancel()} disabled={busy}>Cancel</button>
-      {/if}
-    </div>
+        <section class="card">
+          <div class="card-head"><h2>Export</h2></div>
+          <div class="card-body">
+            {#if warnings.length > 0 && !running}
+              <label class="check">
+                <input type="checkbox" bind:checked={acceptWarnings} />
+                <span>Export anyway, with the {warnings.length} warning{warnings.length === 1 ? "" : "s"} in the pre-flight</span>
+              </label>
+            {/if}
+            <div class="row">
+              <Button variant="primary" icon={Upload} onclick={() => void begin()} disabled={!canStart}>
+                Export
+              </Button>
+              {#if running}
+                <Button variant="danger" icon={X} onclick={() => void cancel()} disabled={busy}>Cancel</Button>
+              {/if}
+            </div>
 
-    {#if status !== null && status.state !== "idle"}
-      <div class="progress">
-        <div class="bar"><div class="fill" style:width="{Math.round(status.fraction * 100)}%"></div></div>
-        <p>
-          {#if status.state === "running"}
-            {STAGES[status.stage] ?? status.stage}: {Math.round(status.fraction * 100)}%,
-            {seconds(status.elapsed_s)} so far{#if status.eta_s !== null}, about {seconds(status.eta_s)} left{/if}.
-          {:else if status.state === "done"}
-            Done in {seconds(status.elapsed_s)}{#if status.video_ms !== null}&nbsp;for {seconds(
-                status.video_ms / 1000,
-              )} of video{/if}.
-          {:else if status.state === "cancelled"}
-            Cancelled. What was written so far is kept in the folder below.
-          {:else}
-            Failed: {status.message}
-          {/if}
-        </p>
-        {#if status.state === "running"}
-          <p class="hint">
-            If it is slow, close programs that record or stream (Discord, NVIDIA Instant Replay, OBS): they use
-            the same video encoder.
-          </p>
-        {/if}
+            {#if status !== null && status.state !== "idle"}
+              <div class="progress">
+                <div
+                  class="bar"
+                  role="progressbar"
+                  aria-label="Export progress"
+                  aria-valuemin={0}
+                  aria-valuemax={100}
+                  aria-valuenow={Math.round(status.fraction * 100)}
+                >
+                  <div
+                    class="fill"
+                    class:done={status.state === "done"}
+                    class:failed={status.state === "failed" || status.state === "cancelled"}
+                    style:width="{Math.round(status.fraction * 100)}%"
+                  ></div>
+                </div>
+                <p class="progress-text num">
+                  {#if status.state === "running"}
+                    {STAGES[status.stage] ?? status.stage}: {Math.round(status.fraction * 100)}%,
+                    {seconds(status.elapsed_s)} so far{#if status.eta_s !== null}, about {seconds(status.eta_s)} left{/if}.
+                  {:else if status.state === "done"}
+                    Done in {seconds(status.elapsed_s)}{#if status.video_ms !== null}&nbsp;for {seconds(
+                        status.video_ms / 1000,
+                      )} of video{/if}.
+                  {:else if status.state === "cancelled"}
+                    Cancelled. What was written so far is kept in the folder below.
+                  {:else}
+                    <span class="error">Failed: {status.message}</span>
+                  {/if}
+                </p>
+                {#if status.state === "running"}
+                  <p class="hint">
+                    If it is slow, close programs that record or stream (Discord, NVIDIA Instant Replay, OBS): they use
+                    the same video encoder.
+                  </p>
+                {/if}
+              </div>
+              {#if status.folder !== null && status.state !== "running"}
+                <div class="result">
+                  <code class="path">{status.folder}</code>
+                  <Button size="sm" icon={FolderOpen} onclick={() => void reveal()} disabled={busy}>Open folder</Button>
+                </div>
+                {#if status.files.length > 0}
+                  <ul class="files">
+                    {#each status.files as file (file.name)}
+                      <li><span>{file.name}</span><span class="muted num">{size(file.bytes, file.files)}</span></li>
+                    {/each}
+                  </ul>
+                {/if}
+              {/if}
+            {/if}
+          </div>
+        </section>
       </div>
-      {#if status.folder !== null && status.state !== "running"}
-        <div class="row">
-          <code>{status.folder}</code>
-          <button type="button" onclick={() => void reveal()} disabled={busy}>Open folder</button>
+
+      <section class="card preflight">
+        <div class="card-head">
+          <h2>Pre-flight</h2>
+          {#if preflight !== null}
+            {#if errors.length > 0}<Badge kind="error">{errors.length} error{errors.length === 1 ? "" : "s"}</Badge>{/if}
+            {#if warnings.length > 0}<Badge kind="warning"
+                >{warnings.length} warning{warnings.length === 1 ? "" : "s"}</Badge
+              >{/if}
+          {/if}
+          <span class="spacer"></span>
+          <Button size="sm" icon={RefreshCw} onclick={() => void recheck()} disabled={busy || running || preflight === null}>
+            Check again
+          </Button>
         </div>
-        {#if status.files.length > 0}
-          <ul class="files">
-            {#each status.files as file (file.name)}
-              <li><span>{file.name}</span><span>{size(file.bytes, file.files)}</span></li>
-            {/each}
-          </ul>
-        {/if}
-      {/if}
-    {/if}
-  </section>
-</main>
+        <div class="card-body">
+          {#if preflight === null}
+            <p class="hint">Checking...</p>
+          {:else}
+            {#if preflight.issues.length === 0}
+              <Banner kind="success">Everything is ready to export.</Banner>
+            {/if}
+            {#if preflight.issues.length > 0}
+              <ul class="issues">
+                {#each errors as issue, i (i)}
+                  <li>
+                    <span class="ic err"><CircleAlert size={16} strokeWidth={1.75} aria-label="Error" /></span>
+                    <span class="msg">
+                      {#if issue.t_ms !== null}<span class="time num">{clock(issue.t_ms)}</span>{/if}
+                      {issue.message}
+                    </span>
+                  </li>
+                {/each}
+                {#each warnings as issue, i (i)}
+                  <li>
+                    <span class="ic warn"><TriangleAlert size={16} strokeWidth={1.75} aria-label="Warning" /></span>
+                    <span class="msg">
+                      {#if issue.t_ms !== null}<span class="time num">{clock(issue.t_ms)}</span>{/if}
+                      {issue.message}
+                    </span>
+                  </li>
+                {/each}
+              </ul>
+            {/if}
+            {#if errors.length > 0}
+              <p class="hint">Fix the errors in the editor or on the project screen, then check again.</p>
+            {/if}
+          {/if}
+        </div>
+      </section>
+    </div>
+  </main>
 </div>
 
 <style>
-  /* The editor's dark theme (Editor.svelte), so the screen matches where it opens from. */
+  /* Colours come from theme.css. */
   .screen {
-    --bg: #15161a;
-    --panel: #1d1f25;
-    --line: #353944;
-    --text: #e7e8ec;
-    --muted: #9ca0ab;
-    --accent: #4a90e2;
     position: fixed;
     inset: 0;
-    overflow: auto;
+    display: flex;
+    flex-direction: column;
     background: var(--bg);
-    color: var(--text);
-    color-scheme: dark;
-  }
-  main {
-    font-family: system-ui, sans-serif;
-    padding: 1.5rem 2rem;
-    max-width: 52rem;
-  }
-  button,
-  input {
-    background: var(--panel);
-    color: var(--text);
-    border: 1px solid var(--line);
-    border-radius: 4px;
-    padding: 0.3rem 0.7rem;
-    font: inherit;
-  }
-  button:disabled {
-    opacity: 0.5;
-  }
-  input[type="checkbox"] {
-    padding: 0;
-    margin-top: 0.2rem;
+    color: var(--text-1);
   }
   header {
+    flex: none;
     display: flex;
     align-items: center;
-    gap: 1rem;
+    gap: 6px;
+    height: 44px;
+    padding: 0 10px;
+    border-bottom: 1px solid var(--border);
+    background: var(--surface-1);
   }
   h1 {
-    margin: 0;
+    margin: 0 0 0 4px;
+    font-size: var(--fs-lg);
   }
-  section {
-    margin: 1.25rem 0;
+  .crumb {
+    color: var(--text-3);
+  }
+  main {
+    flex: 1;
+    min-height: 0;
+    overflow-y: auto;
+    padding: 20px 24px 32px;
+  }
+  main > :global(.banner) {
+    max-width: 1100px;
+    margin: 0 auto 12px;
+  }
+  .columns {
+    display: grid;
+    grid-template-columns: minmax(0, 3fr) minmax(0, 2fr);
+    gap: 16px;
+    align-items: start;
+    max-width: 1100px;
+    margin: 0 auto;
+  }
+  .col {
+    display: flex;
+    flex-direction: column;
+    gap: 16px;
+    min-width: 0;
+  }
+  .card {
+    border: 1px solid var(--border);
+    border-radius: var(--r-lg);
+    background: var(--surface-1);
+    min-width: 0;
+  }
+  .card-head {
+    display: flex;
+    align-items: center;
+    flex-wrap: wrap;
+    gap: 8px;
+    min-height: 44px;
+    padding: 8px 14px;
+    border-bottom: 1px solid var(--border);
   }
   h2 {
-    margin: 0 0 0.5rem;
-    font-size: 1.15rem;
+    margin: 0;
+    font-size: var(--fs-lg);
+  }
+  .card-body {
+    display: flex;
+    flex-direction: column;
+    gap: 12px;
+    padding: 12px 14px 14px;
+  }
+  .spacer {
+    flex: 1;
+  }
+  .muted {
+    color: var(--text-2);
+  }
+  .small {
+    font-size: var(--fs-sm);
+  }
+  .field {
+    display: flex;
+    flex-direction: column;
+    gap: 6px;
+  }
+  .label {
+    color: var(--text-2);
+    font-size: var(--fs-sm);
+  }
+  .path {
+    padding: 6px 8px;
+    border: 1px solid var(--border);
+    border-radius: var(--r-md);
+    background: var(--surface-2);
+    font-size: var(--fs-sm);
+    word-break: break-all;
   }
   .row {
     display: flex;
     flex-wrap: wrap;
     align-items: center;
-    gap: 0.5rem;
-    margin: 0.4rem 0;
-  }
-  code {
-    word-break: break-all;
+    gap: 8px;
   }
   .check {
     display: flex;
-    gap: 0.5rem;
+    gap: 10px;
     align-items: start;
-    margin: 0.5rem 0;
+  }
+  .check > input {
+    margin: 2px 0 0;
   }
   .check .hint {
     display: block;
   }
-  .num {
+  .secs {
     width: 4.5rem;
+    margin: 0 4px;
   }
   .hint {
-    font-size: 0.85rem;
-    color: var(--muted);
-    margin: 0.2rem 0;
+    margin: 0;
+    color: var(--text-3);
+    font-size: var(--fs-sm);
+  }
+  .estimate {
+    margin: 0;
+    padding-top: 10px;
+    border-top: 1px solid var(--border);
+    color: var(--text-2);
+  }
+  .estimate strong {
+    margin-left: 6px;
+    color: var(--text-1);
   }
   .issues {
-    list-style: none;
+    display: flex;
+    flex-direction: column;
+    margin: 0;
     padding: 0;
+    list-style: none;
   }
   .issues li {
-    padding: 0.3rem 0.5rem;
-    margin: 0.2rem 0;
-    border-left: 4px solid;
+    display: flex;
+    gap: 8px;
+    padding: 8px 0;
+    border-bottom: 1px solid var(--border);
   }
-  .error-item {
-    border-color: #ff7a7a;
-    background: #ff7a7a1a;
+  .issues li:last-child {
+    border-bottom: none;
   }
-  .warn-item {
-    border-color: #d9a441;
-    background: #d9a4411a;
+  .ic {
+    display: inline-flex;
+    flex: none;
+    padding-top: 1px;
+  }
+  .ic.err {
+    color: var(--danger);
+  }
+  .ic.warn {
+    color: var(--warning);
+  }
+  .msg {
+    min-width: 0;
+    overflow-wrap: anywhere;
   }
   .time {
-    font-variant-numeric: tabular-nums;
-    margin: 0 0.3rem;
-    opacity: 0.8;
-  }
-  .ok {
-    color: #6fcf97;
-  }
-  .error {
-    color: #ff7a7a;
-  }
-  .primary {
-    font-weight: 600;
-    padding: 0.4rem 1.2rem;
-    background: var(--accent);
-    border-color: var(--accent);
-    color: #fff;
+    margin-right: 6px;
+    padding: 1px 6px;
+    border-radius: 8px;
+    background: var(--surface-3);
+    color: var(--text-2);
+    font-size: var(--fs-xs);
   }
   .progress {
-    margin-top: 0.75rem;
+    display: flex;
+    flex-direction: column;
+    gap: 6px;
   }
   .bar {
-    height: 0.8rem;
-    background: var(--line);
-    border-radius: 0.4rem;
+    height: 8px;
+    border-radius: 4px;
+    background: var(--surface-3);
     overflow: hidden;
   }
   .fill {
     height: 100%;
-    background: #4a90e2;
+    background: var(--accent);
     transition: width 0.4s linear;
   }
+  .fill.done {
+    background: var(--success);
+  }
+  .fill.failed {
+    background: var(--danger);
+  }
+  .progress-text {
+    margin: 0;
+  }
+  .error {
+    color: var(--danger);
+  }
+  .result {
+    display: flex;
+    align-items: center;
+    gap: 8px;
+  }
+  .result .path {
+    flex: 1;
+    min-width: 0;
+  }
   .files {
-    list-style: none;
+    margin: 0;
     padding: 0;
-    max-width: 30rem;
+    list-style: none;
   }
   .files li {
     display: flex;
     justify-content: space-between;
-    border-bottom: 1px solid var(--line);
-    padding: 0.15rem 0;
+    gap: 12px;
+    padding: 4px 0;
+    border-bottom: 1px solid var(--border);
+    font-size: var(--fs-sm);
   }
 </style>

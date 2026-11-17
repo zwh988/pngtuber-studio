@@ -1,0 +1,476 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>UI-2 Mock</title>
+<!--
+  UI-2 S1 mock (static, for approval). The tokens in :root are the proposal for frontend/src/theme.css.
+  Icons are hand-drawn stand-ins in the style of the bundled icon package (Lucide-like, 1.75 stroke).
+-->
+<style>
+:root {
+  /* surfaces */
+  --bg: #0e1014;
+  --surface-1: #15181e;
+  --surface-2: #1b1f27;
+  --surface-3: #232833;
+  --hover: #2a303c;
+  --border: #272c36;
+  --border-strong: #363d4a;
+  /* text */
+  --text-1: #e7e9ee;
+  --text-2: #a6adba;
+  --text-3: #6d7482;
+  /* accent and states */
+  --accent: #4f8cff;
+  --accent-hover: #6a9dff;
+  --accent-soft: rgba(79, 140, 255, 0.16);
+  --success: #3dbb84;
+  --warning: #e8a93a;
+  --danger: #f0615f;
+  --danger-soft: rgba(240, 97, 95, 0.14);
+  --focus: 0 0 0 2px var(--bg), 0 0 0 4px var(--accent);
+  /* timeline lanes */
+  --lane-clip: #3a67a8;
+  --lane-voice: #2c8f72;
+  --lane-expression: #d9ad3c;
+  --lane-reaction: #9b72de;
+  --lane-motion: #4ea3c9;
+  --playhead: #f4f6fa;
+  --overflow: var(--danger);
+  --selected: #ffffff;
+  /* shape and type */
+  --r-sm: 4px;
+  --r-md: 6px;
+  --r-lg: 10px;
+  --font: "Segoe UI Variable Text", "Segoe UI", system-ui, sans-serif;
+  --fs-xs: 11px;
+  --fs-sm: 12px;
+  --fs-md: 13px;
+  --fs-lg: 15px;
+  --fs-xl: 20px;
+  color-scheme: dark;
+}
+* { box-sizing: border-box; }
+body { margin: 0; background: #08090b; color: var(--text-1); font: var(--fs-md)/1.45 var(--font); padding: 24px 16px 48px; }
+.page-title { max-width: 1280px; margin: 0 auto 8px; font-size: var(--fs-xl); font-weight: 600; }
+.page-sub { max-width: 1280px; margin: 0 auto 24px; color: var(--text-2); }
+h2.frame-label { max-width: 1280px; margin: 32px auto 10px; font-size: var(--fs-sm); text-transform: uppercase; letter-spacing: .08em; color: var(--text-3); font-weight: 600; }
+.frame { width: 1280px; height: 800px; margin: 0 auto; background: var(--bg); border: 1px solid var(--border-strong); border-radius: var(--r-lg); overflow: hidden; display: flex; flex-direction: column; position: relative; }
+.num { font-variant-numeric: tabular-nums; }
+svg.i { width: 16px; height: 16px; stroke: currentColor; fill: none; stroke-width: 1.75; stroke-linecap: round; stroke-linejoin: round; flex: none; }
+svg.i.sm { width: 14px; height: 14px; }
+
+/* buttons */
+.btn { display: inline-flex; align-items: center; gap: 6px; height: 28px; padding: 0 10px; border-radius: var(--r-md); border: 1px solid var(--border-strong); background: var(--surface-3); color: var(--text-1); font: 500 var(--fs-md) var(--font); cursor: pointer; white-space: nowrap; }
+.btn:hover { background: var(--hover); }
+.btn.primary { background: var(--accent); border-color: var(--accent); color: #fff; }
+.btn.primary:hover { background: var(--accent-hover); }
+.btn.ghost { background: transparent; border-color: transparent; color: var(--text-2); }
+.btn.ghost:hover { background: var(--surface-3); color: var(--text-1); }
+.btn.danger { background: transparent; color: var(--danger); border-color: rgba(240,97,95,.35); }
+.btn.focus { box-shadow: var(--focus); }
+.btn[disabled] { opacity: .4; cursor: default; }
+.btn.sm { height: 24px; padding: 0 8px; font-size: var(--fs-sm); }
+.ib { width: 28px; padding: 0; justify-content: center; }
+.ib.sm { width: 24px; height: 24px; }
+.kbd { display: inline-block; min-width: 18px; padding: 0 5px; height: 18px; line-height: 17px; border-radius: var(--r-sm); border: 1px solid var(--border-strong); background: var(--surface-2); color: var(--text-2); font-size: var(--fs-xs); text-align: center; }
+.badge { display: inline-flex; align-items: center; gap: 4px; height: 20px; padding: 0 7px; border-radius: 10px; font-size: var(--fs-xs); font-weight: 600; background: var(--surface-3); color: var(--text-2); }
+.badge.ok { background: rgba(61,187,132,.14); color: var(--success); }
+.badge.warn { background: rgba(232,169,58,.14); color: var(--warning); }
+.badge.err { background: var(--danger-soft); color: var(--danger); }
+.badge.acc { background: var(--accent-soft); color: var(--accent-hover); }
+.muted { color: var(--text-2); }
+.faint { color: var(--text-3); }
+.sep { width: 1px; height: 18px; background: var(--border-strong); margin: 0 4px; }
+
+/* editor shell */
+.topbar { height: 44px; flex: none; display: flex; align-items: center; gap: 6px; padding: 0 10px; background: var(--surface-1); border-bottom: 1px solid var(--border); }
+.topbar .title { font-weight: 600; font-size: var(--fs-lg); margin-left: 4px; }
+.topbar .crumb { color: var(--text-3); }
+.spacer { flex: 1; }
+.main { flex: 1; display: grid; grid-template-columns: 1fr 400px; min-height: 0; }
+.preview { display: flex; flex-direction: column; padding: 12px; gap: 8px; border-right: 1px solid var(--border); min-width: 0; min-height: 0; }
+.stage { flex: 1; min-height: 0; background: #000; border-radius: var(--r-md); position: relative; display: grid; place-items: center; overflow: hidden; }
+.video { height: 100%; aspect-ratio: 16/9; max-width: 100%;background: linear-gradient(160deg, #3a2a20 0%, #6b4a2c 30%, #b49a62 60%, #8c7848 100%); position: relative; }
+.video::after { content: ""; position: absolute; right: 12%; bottom: 8%; width: 13%; height: 62%; border-radius: 40% 40% 10% 10%; background: linear-gradient(#d9c6f0, #a98ad6); opacity: .9; }
+.transport { display: flex; align-items: center; gap: 4px; }
+.scrub { flex: 1; height: 4px; border-radius: 2px; background: var(--surface-3); position: relative; margin: 0 8px; }
+.scrub i { position: absolute; inset: 0 70% 0 0; background: var(--accent); border-radius: 2px; }
+.scrub b { position: absolute; left: 30%; top: 50%; width: 12px; height: 12px; margin: -6px 0 0 -6px; border-radius: 50%; background: var(--text-1); }
+.time { font-size: var(--fs-sm); color: var(--text-2); }
+.time strong { color: var(--text-1); font-weight: 600; }
+
+.side { display: flex; flex-direction: column; background: var(--surface-1); min-height: 0; }
+.tabs { display: flex; gap: 2px; padding: 0 8px; border-bottom: 1px solid var(--border); flex: none; }
+.tab { padding: 10px 10px 9px; color: var(--text-2); font-weight: 500; border-bottom: 2px solid transparent; cursor: pointer; }
+.tab.on { color: var(--text-1); border-bottom-color: var(--accent); }
+.panel { padding: 12px; overflow: hidden; display: flex; flex-direction: column; gap: 12px; }
+.panel > * { flex-shrink: 0; }
+.row { display: flex; align-items: center; gap: 8px; }
+.list { border: 1px solid var(--border); border-radius: var(--r-md); overflow: hidden; }
+.li { display: flex; align-items: center; gap: 8px; padding: 7px 10px; border-top: 1px solid var(--border); }
+.li:first-child { border-top: 0; }
+.li.sel { background: var(--accent-soft); box-shadow: inset 2px 0 0 var(--accent); }
+.li .t { flex: 1; min-width: 0; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+.section-h { display: flex; align-items: center; gap: 6px; font-size: var(--fs-xs); font-weight: 600; letter-spacing: .06em; text-transform: uppercase; color: var(--text-3); }
+.field label { display: block; font-size: var(--fs-sm); color: var(--text-2); margin-bottom: 4px; }
+.input { width: 100%; background: var(--surface-2); border: 1px solid var(--border-strong); border-radius: var(--r-md); color: var(--text-1); padding: 6px 8px; font: var(--fs-md) var(--font); }
+textarea.input { height: 52px; resize: none; }
+.select { display: inline-flex; align-items: center; justify-content: space-between; gap: 8px; height: 28px; padding: 0 8px; min-width: 130px; background: var(--surface-2); border: 1px solid var(--border-strong); border-radius: var(--r-md); }
+.slider { display: grid; grid-template-columns: 1fr auto auto; align-items: center; gap: 4px 8px; }
+.slider .lbl { font-size: var(--fs-sm); color: var(--text-2); }
+.slider .val { font-size: var(--fs-sm); font-weight: 600; }
+.slider .track { grid-column: 1 / 3; height: 4px; background: var(--surface-3); border-radius: 2px; position: relative; }
+.slider .track i { position: absolute; left: 0; top: 0; bottom: 0; background: var(--accent); border-radius: 2px; }
+.slider .track b { position: absolute; top: 50%; width: 12px; height: 12px; margin: -6px 0 0 -6px; border-radius: 50%; background: var(--text-1); }
+.slider .ib { grid-row: 1 / 3; grid-column: 3; }
+.take { display: flex; align-items: center; gap: 6px; padding: 6px 8px; border-top: 1px solid var(--border); }
+.take:first-child { border-top: 0; }
+.take .meta { flex: 1; min-width: 0; font-size: var(--fs-sm); }
+.take .meta div { white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+.star { color: var(--warning); }
+
+/* timeline */
+.bottom { height: 300px; flex: none; border-top: 1px solid var(--border); display: flex; flex-direction: column; background: var(--surface-1); }
+.tl-bar { height: 36px; display: flex; align-items: center; gap: 2px; padding: 0 8px; border-bottom: 1px solid var(--border); flex: none; }
+.tl { flex: 1; display: grid; grid-template-columns: 148px 1fr; min-height: 0; position: relative; }
+.heads { background: var(--surface-1); border-right: 1px solid var(--border); }
+.head { height: 28px; display: flex; align-items: center; gap: 6px; padding: 0 8px; font-size: var(--fs-sm); color: var(--text-2); border-bottom: 1px solid var(--border); }
+.head .sw { width: 8px; height: 8px; border-radius: 2px; flex: none; }
+.head.big { height: 44px; }
+.head.ruler { height: 24px; color: var(--text-3); font-size: var(--fs-xs); }
+.head .k { margin-left: auto; }
+.head.sub { padding-left: 24px; height: 22px; font-size: var(--fs-xs); }
+.lanes { position: relative; background: var(--bg); overflow: hidden; }
+.ruler { height: 24px; border-bottom: 1px solid var(--border); position: relative; background: var(--surface-1); }
+.ruler span { position: absolute; top: 4px; font-size: var(--fs-xs); color: var(--text-3); transform: translateX(4px); }
+.ruler span::before { content: ""; position: absolute; left: -4px; top: 10px; width: 1px; height: 10px; background: var(--border-strong); }
+.lane { border-bottom: 1px solid var(--border); position: relative; }
+.lane.big { height: 44px; }
+.lane.n { height: 28px; }
+.lane.sub { height: 22px; }
+.clip { position: absolute; top: 4px; bottom: 4px; border-radius: var(--r-sm); background: var(--lane-clip); padding: 3px 7px; font-size: var(--fs-xs); color: #eaf1ff; overflow: hidden; white-space: nowrap; }
+.clip.b { background: #2f4f7d; }
+.vblock { position: absolute; top: 4px; bottom: 4px; border-radius: var(--r-sm); background: var(--lane-voice); overflow: hidden; }
+.vblock span { position: absolute; left: 6px; top: 3px; font-size: var(--fs-xs); color: #e9fff7; white-space: nowrap; }
+.vblock svg { position: absolute; left: 0; right: 0; bottom: 2px; width: 100%; height: 18px; }
+.vblock.sel, .clip.sel { box-shadow: 0 0 0 2px var(--selected), 0 0 0 4px rgba(79,140,255,.6); filter: brightness(1.15); z-index: 2; }
+.vblock .over { position: absolute; right: 0; top: 0; bottom: 0; width: 4px; background: var(--overflow); }
+.diamond { position: absolute; top: 50%; width: 10px; height: 10px; margin: -5px 0 0 -5px; transform: rotate(45deg); background: var(--lane-expression); border-radius: 1px; }
+.diamond.sel { box-shadow: 0 0 0 2px var(--selected); }
+.klabel { position: absolute; top: 6px; font-size: var(--fs-xs); color: var(--lane-expression); }
+.react { position: absolute; top: 6px; bottom: 6px; border-radius: 3px; background: var(--lane-reaction); }
+.mkey { position: absolute; top: 50%; width: 7px; height: 7px; margin: -3.5px 0 0 -3.5px; transform: rotate(45deg); background: var(--lane-motion); }
+.hint { position: absolute; left: 10px; top: 50%; transform: translateY(-50%); font-size: var(--fs-xs); color: var(--text-3); }
+.playhead { position: absolute; top: 0; bottom: 0; width: 2px; background: var(--playhead); z-index: 3; }
+.playhead::before { content: ""; position: absolute; top: 0; left: -5px; border: 6px solid transparent; border-top: 8px solid var(--playhead); }
+.selbar { height: 32px; flex: none; display: flex; align-items: center; gap: 8px; padding: 0 12px; border-top: 1px solid var(--border); font-size: var(--fs-sm); }
+.status { height: 28px; flex: none; display: flex; align-items: center; gap: 16px; padding: 0 12px; background: var(--surface-1); border-top: 1px solid var(--border); font-size: var(--fs-sm); color: var(--text-2); }
+.status .seg { display: inline-flex; align-items: center; gap: 6px; }
+.dot { width: 7px; height: 7px; border-radius: 50%; background: var(--text-3); }
+.dot.ok { background: var(--success); }
+.meter { width: 90px; height: 6px; border-radius: 3px; background: var(--surface-3); overflow: hidden; }
+.meter i { display: block; height: 100%; width: 62%; background: linear-gradient(90deg, var(--success) 70%, var(--warning)); }
+.tip { position: absolute; z-index: 10; background: var(--surface-3); border: 1px solid var(--border-strong); border-radius: var(--r-md); padding: 4px 8px; font-size: var(--fs-sm); white-space: nowrap; box-shadow: 0 6px 18px rgba(0,0,0,.4); }
+
+/* project screen */
+.proj { flex: 1; display: grid; grid-template-columns: 260px 1fr; min-height: 0; }
+.nav { background: var(--surface-1); border-right: 1px solid var(--border); padding: 12px; display: flex; flex-direction: column; gap: 4px; }
+.nav .brand { display: flex; align-items: center; gap: 8px; font-weight: 600; font-size: var(--fs-lg); padding: 4px 6px 14px; }
+.nav .logo { width: 24px; height: 24px; border-radius: 6px; background: linear-gradient(135deg, var(--accent), var(--lane-reaction)); }
+.nav .item { display: flex; align-items: center; gap: 8px; padding: 7px 8px; border-radius: var(--r-md); color: var(--text-2); }
+.nav .item.on { background: var(--surface-3); color: var(--text-1); }
+.nav .item small { margin-left: auto; color: var(--text-3); }
+.content { padding: 24px 32px; overflow: hidden; display: flex; flex-direction: column; gap: 20px; }
+.phead { display: flex; align-items: center; gap: 12px; }
+.phead h1 { margin: 0; font-size: var(--fs-xl); font-weight: 600; }
+.path { font-size: var(--fs-sm); color: var(--text-3); font-family: "Cascadia Mono", Consolas, monospace; }
+.cards { display: grid; grid-template-columns: repeat(4, 1fr); gap: 12px; }
+.stat { background: var(--surface-1); border: 1px solid var(--border); border-radius: var(--r-lg); padding: 12px 14px; }
+.stat .k { font-size: var(--fs-sm); color: var(--text-2); display: flex; align-items: center; gap: 6px; }
+.stat .v { font-size: var(--fs-lg); font-weight: 600; margin-top: 4px; }
+.card { background: var(--surface-1); border: 1px solid var(--border); border-radius: var(--r-lg); }
+.card-h { display: flex; align-items: center; gap: 8px; padding: 10px 14px; border-bottom: 1px solid var(--border); }
+.card-h h3 { margin: 0; font-size: var(--fs-lg); font-weight: 600; }
+table { width: 100%; border-collapse: collapse; }
+th { text-align: left; font-size: var(--fs-xs); text-transform: uppercase; letter-spacing: .06em; color: var(--text-3); font-weight: 600; padding: 8px 14px; border-bottom: 1px solid var(--border); }
+td { padding: 8px 14px; border-bottom: 1px solid var(--border); }
+tr:last-child td { border-bottom: 0; }
+.two { display: grid; grid-template-columns: 1fr 1fr; gap: 12px; }
+.kv { padding: 12px 14px; display: grid; grid-template-columns: 110px 1fr; gap: 8px 12px; font-size: var(--fs-md); }
+.kv dt { color: var(--text-2); }
+.kv dd { margin: 0; }
+.chips { display: flex; flex-wrap: wrap; gap: 4px; }
+.help { display: flex; align-items: center; gap: 6px; padding: 0 14px 12px; color: var(--text-3); font-size: var(--fs-sm); }
+
+/* tokens */
+.tokens { width: 1280px; margin: 0 auto; display: grid; grid-template-columns: repeat(8, 1fr); gap: 8px; }
+.tok { border: 1px solid var(--border); border-radius: var(--r-md); overflow: hidden; background: var(--surface-1); font-size: var(--fs-xs); }
+.tok div { height: 36px; }
+.tok span { display: block; padding: 4px 6px; color: var(--text-2); }
+.demo { width: 1280px; margin: 12px auto 0; display: flex; flex-wrap: wrap; align-items: center; gap: 10px; padding: 14px; background: var(--bg); border: 1px solid var(--border); border-radius: var(--r-lg); }
+</style>
+</head>
+<body>
+<svg width="0" height="0" style="position:absolute">
+  <defs>
+    <symbol id="i-back" viewBox="0 0 24 24"><path d="M19 12H5M12 19l-7-7 7-7"/></symbol>
+    <symbol id="i-undo" viewBox="0 0 24 24"><path d="M9 14 4 9l5-5"/><path d="M4 9h10.5a5.5 5.5 0 0 1 0 11H11"/></symbol>
+    <symbol id="i-redo" viewBox="0 0 24 24"><path d="m15 14 5-5-5-5"/><path d="M20 9H9.5a5.5 5.5 0 0 0 0 11H13"/></symbol>
+    <symbol id="i-export" viewBox="0 0 24 24"><path d="M12 3v12M7 8l5-5 5 5"/><path d="M5 15v4a2 2 0 0 0 2 2h10a2 2 0 0 0 2-2v-4"/></symbol>
+    <symbol id="i-play" viewBox="0 0 24 24"><path d="M7 4v16l13-8z" fill="currentColor"/></symbol>
+    <symbol id="i-prev" viewBox="0 0 24 24"><path d="M15 6l-6 6 6 6"/></symbol>
+    <symbol id="i-next" viewBox="0 0 24 24"><path d="M9 6l6 6-6 6"/></symbol>
+    <symbol id="i-zin" viewBox="0 0 24 24"><circle cx="11" cy="11" r="7"/><path d="m20 20-3.5-3.5M11 8v6M8 11h6"/></symbol>
+    <symbol id="i-zout" viewBox="0 0 24 24"><circle cx="11" cy="11" r="7"/><path d="m20 20-3.5-3.5M8 11h6"/></symbol>
+    <symbol id="i-fit" viewBox="0 0 24 24"><path d="M8 3H5a2 2 0 0 0-2 2v3M21 8V5a2 2 0 0 0-2-2h-3M3 16v3a2 2 0 0 0 2 2h3M16 21h3a2 2 0 0 0 2-2v-3"/></symbol>
+    <symbol id="i-split" viewBox="0 0 24 24"><circle cx="6" cy="6" r="3"/><circle cx="6" cy="18" r="3"/><path d="M20 4 8.1 15.9M14.5 14.5 20 20M8.1 8.1 12 12"/></symbol>
+    <symbol id="i-help" viewBox="0 0 24 24"><circle cx="12" cy="12" r="9"/><path d="M9.5 9a2.5 2.5 0 0 1 5 .5c0 1.7-2.5 2-2.5 3.5M12 17h.01"/></symbol>
+    <symbol id="i-chev" viewBox="0 0 24 24"><path d="m6 9 6 6 6-6"/></symbol>
+    <symbol id="i-chevr" viewBox="0 0 24 24"><path d="m9 6 6 6-6 6"/></symbol>
+    <symbol id="i-star" viewBox="0 0 24 24"><path d="m12 3 2.8 5.8 6.2.9-4.5 4.4 1 6.3L12 17.5 6.5 20.4l1-6.3L3 9.7l6.2-.9z"/></symbol>
+    <symbol id="i-starf" viewBox="0 0 24 24"><path d="m12 3 2.8 5.8 6.2.9-4.5 4.4 1 6.3L12 17.5 6.5 20.4l1-6.3L3 9.7l6.2-.9z" fill="currentColor"/></symbol>
+    <symbol id="i-trim" viewBox="0 0 24 24"><path d="M6 4v16M18 4v16M6 12h12"/><path d="m9 9-3 3 3 3M15 9l3 3-3 3"/></symbol>
+    <symbol id="i-check" viewBox="0 0 24 24"><path d="M20 6 9 17l-5-5"/></symbol>
+    <symbol id="i-plus" viewBox="0 0 24 24"><path d="M12 5v14M5 12h14"/></symbol>
+    <symbol id="i-gen" viewBox="0 0 24 24"><path d="M12 3v3M12 18v3M3 12h3M18 12h3M5.6 5.6l2.1 2.1M16.3 16.3l2.1 2.1M5.6 18.4l2.1-2.1M16.3 7.7l2.1-2.1"/></symbol>
+    <symbol id="i-dice" viewBox="0 0 24 24"><rect x="3" y="3" width="18" height="18" rx="3"/><circle cx="8.5" cy="8.5" r="1" fill="currentColor"/><circle cx="15.5" cy="15.5" r="1" fill="currentColor"/><circle cx="12" cy="12" r="1" fill="currentColor"/></symbol>
+    <symbol id="i-trash" viewBox="0 0 24 24"><path d="M4 7h16M9 7V4h6v3M6 7l1 13h10l1-13"/></symbol>
+    <symbol id="i-key" viewBox="0 0 24 24"><path d="M12 3 21 12 12 21 3 12z"/></symbol>
+    <symbol id="i-cpu" viewBox="0 0 24 24"><rect x="5" y="5" width="14" height="14" rx="2"/><path d="M9 1v4M15 1v4M9 19v4M15 19v4M1 9h4M1 15h4M19 9h4M19 15h4"/></symbol>
+    <symbol id="i-disk" viewBox="0 0 24 24"><path d="M22 12H2M5.5 5h13L22 12v6a2 2 0 0 1-2 2H4a2 2 0 0 1-2-2v-6z"/><path d="M6 16h.01M10 16h.01"/></symbol>
+    <symbol id="i-mic" viewBox="0 0 24 24"><rect x="9" y="2" width="6" height="12" rx="3"/><path d="M5 11a7 7 0 0 0 14 0M12 18v4"/></symbol>
+    <symbol id="i-film" viewBox="0 0 24 24"><rect x="3" y="3" width="18" height="18" rx="2"/><path d="M7 3v18M17 3v18M3 8h4M3 16h4M17 8h4M17 16h4"/></symbol>
+    <symbol id="i-user" viewBox="0 0 24 24"><circle cx="12" cy="8" r="4"/><path d="M4 21a8 8 0 0 1 16 0"/></symbol>
+    <symbol id="i-folder" viewBox="0 0 24 24"><path d="M3 6a2 2 0 0 1 2-2h4l2 2h8a2 2 0 0 1 2 2v10a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2z"/></symbol>
+    <symbol id="i-refresh" viewBox="0 0 24 24"><path d="M21 12a9 9 0 0 1-15.5 6.2L3 16M3 12a9 9 0 0 1 15.5-6.2L21 8"/><path d="M21 3v5h-5M3 21v-5h5"/></symbol>
+    <symbol id="i-link" viewBox="0 0 24 24"><path d="M10 14a5 5 0 0 0 7 0l3-3a5 5 0 0 0-7-7l-1 1"/><path d="M14 10a5 5 0 0 0-7 0l-3 3a5 5 0 0 0 7 7l1-1"/></symbol>
+    <symbol id="i-home" viewBox="0 0 24 24"><path d="M3 11 12 3l9 8v9a1 1 0 0 1-1 1h-5v-6H9v6H4a1 1 0 0 1-1-1z"/></symbol>
+    <symbol id="i-settings" viewBox="0 0 24 24"><circle cx="12" cy="12" r="3"/><path d="M19.4 15a1.7 1.7 0 0 0 .3 1.8l.1.1a2 2 0 1 1-2.8 2.8l-.1-.1a1.7 1.7 0 0 0-2.8 1.2V21a2 2 0 1 1-4 0v-.1a1.7 1.7 0 0 0-2.8-1.2l-.1.1a2 2 0 1 1-2.8-2.8l.1-.1A1.7 1.7 0 0 0 3.1 14H3a2 2 0 1 1 0-4h.1a1.7 1.7 0 0 0 1.2-2.8l-.1-.1a2 2 0 1 1 2.8-2.8l.1.1A1.7 1.7 0 0 0 10 3.1V3a2 2 0 1 1 4 0v.1a1.7 1.7 0 0 0 2.8 1.2l.1-.1a2 2 0 1 1 2.8 2.8l-.1.1A1.7 1.7 0 0 0 20.9 10H21a2 2 0 1 1 0 4h-.1a1.7 1.7 0 0 0-1.5 1z"/></symbol>
+    <symbol id="i-warn" viewBox="0 0 24 24"><path d="M12 3 2 20h20z"/><path d="M12 10v4M12 17h.01"/></symbol>
+    <symbol id="i-open" viewBox="0 0 24 24"><path d="M5 12h14M13 6l6 6-6 6"/></symbol>
+  </defs>
+</svg>
+
+<div class="page-title">UI-2 mock: one dark theme</div>
+<div class="page-sub">A static proposal for approval (S1). Nothing here is wired up. Both frames are drawn at 1280 x 800, the smallest supported window plus a little headroom.</div>
+
+<h2 class="frame-label">Tokens and components</h2>
+<div class="tokens">
+  <div class="tok"><div style="background:var(--bg)"></div><span>bg #0e1014</span></div>
+  <div class="tok"><div style="background:var(--surface-1)"></div><span>surface-1</span></div>
+  <div class="tok"><div style="background:var(--surface-2)"></div><span>surface-2</span></div>
+  <div class="tok"><div style="background:var(--surface-3)"></div><span>surface-3</span></div>
+  <div class="tok"><div style="background:var(--accent)"></div><span>accent</span></div>
+  <div class="tok"><div style="background:var(--success)"></div><span>success</span></div>
+  <div class="tok"><div style="background:var(--warning)"></div><span>warning</span></div>
+  <div class="tok"><div style="background:var(--danger)"></div><span>danger / overflow</span></div>
+  <div class="tok"><div style="background:var(--lane-clip)"></div><span>lane: clip</span></div>
+  <div class="tok"><div style="background:var(--lane-voice)"></div><span>lane: voice</span></div>
+  <div class="tok"><div style="background:var(--lane-expression)"></div><span>lane: expression</span></div>
+  <div class="tok"><div style="background:var(--lane-reaction)"></div><span>lane: reaction</span></div>
+  <div class="tok"><div style="background:var(--lane-motion)"></div><span>lane: motion</span></div>
+  <div class="tok"><div style="background:var(--playhead)"></div><span>playhead</span></div>
+  <div class="tok"><div style="background:var(--text-2)"></div><span>text-2</span></div>
+  <div class="tok"><div style="background:var(--text-3)"></div><span>text-3</span></div>
+</div>
+<div class="demo">
+  <button class="btn primary"><svg class="i"><use href="#i-export"/></svg>Export</button>
+  <button class="btn">Secondary</button>
+  <button class="btn ghost">Ghost</button>
+  <button class="btn danger"><svg class="i"><use href="#i-trash"/></svg>Delete</button>
+  <button class="btn focus">Keyboard focus</button>
+  <button class="btn" disabled>Disabled</button>
+  <span class="sep"></span>
+  <button class="btn ib" title="Undo"><svg class="i"><use href="#i-undo"/></svg></button>
+  <button class="btn ghost ib" title="Zoom in"><svg class="i"><use href="#i-zin"/></svg></button>
+  <span class="sep"></span>
+  <span class="badge ok"><svg class="i sm"><use href="#i-check"/></svg>ok</span>
+  <span class="badge warn">warning</span>
+  <span class="badge err">missing</span>
+  <span class="badge acc">Active</span>
+  <span class="kbd">G</span><span class="kbd">Shift</span>
+  <span class="select" style="min-width:120px">excited <svg class="i sm"><use href="#i-chev"/></svg></span>
+</div>
+
+<h2 class="frame-label">Editor (Line bank tab, a voice block selected, lanes open)</h2>
+<div class="frame">
+  <div class="topbar">
+    <button class="btn ghost ib" title="Back to project"><svg class="i"><use href="#i-back"/></svg></button>
+    <span class="title">Rack 1</span><span class="crumb">/ Editor</span>
+    <span class="sep"></span>
+    <button class="btn ghost ib" title="Undo (Ctrl+Z): Move line"><svg class="i"><use href="#i-undo"/></svg></button>
+    <button class="btn ghost ib" title="Redo (Ctrl+Y)" disabled><svg class="i"><use href="#i-redo"/></svg></button>
+    <span class="spacer"></span>
+    <button class="btn ghost ib" title="Keyboard shortcuts (?)"><svg class="i"><use href="#i-help"/></svg></button>
+    <button class="btn primary"><svg class="i"><use href="#i-export"/></svg>Export</button>
+  </div>
+
+  <div class="main">
+    <div class="preview">
+      <div class="stage"><div class="video"></div></div>
+      <div class="transport">
+        <button class="btn ghost ib" title="Previous frame (,)"><svg class="i"><use href="#i-prev"/></svg></button>
+        <button class="btn primary ib" title="Play (Space)"><svg class="i"><use href="#i-play"/></svg></button>
+        <button class="btn ghost ib" title="Next frame (.)"><svg class="i"><use href="#i-next"/></svg></button>
+        <div class="scrub"><i></i><b></b></div>
+        <span class="time num"><strong>0:11.640</strong> / 0:38.783</span>
+        <span class="sep"></span>
+        <span class="badge">Clip 1 of 1 · 1x</span>
+      </div>
+    </div>
+
+    <div class="side">
+      <div class="tabs">
+        <div class="tab">Footage</div><div class="tab on">Line bank</div><div class="tab">Voice FX</div><div class="tab">Avatar</div><div class="tab">Storage</div>
+      </div>
+      <div class="panel">
+        <div class="row">
+          <button class="btn sm"><svg class="i sm"><use href="#i-plus"/></svg>Add line <span class="kbd">N</span></button>
+          <span class="spacer"></span><span class="faint" style="font-size:var(--fs-sm)">2 lines · 2 placed</span>
+        </div>
+        <div class="list">
+          <div class="li sel"><span class="faint num">1</span><span class="t">An open table! Let's try to run this out!</span><span class="badge">excited</span><span class="badge ok">placed</span></div>
+          <div class="li"><span class="faint num">2</span><span class="t">Hmm... kinda thin here. Gotta focus on this one.</span><span class="badge">nervous</span><span class="badge ok">placed</span></div>
+        </div>
+        <div class="field"><label>Text</label><textarea class="input">An open table! Let's try to run this out!</textarea></div>
+        <div class="row">
+          <div class="field" style="flex:1"><label>Emotion</label><span class="select">excited <svg class="i sm"><use href="#i-chev"/></svg></span></div>
+          <div style="padding-top:18px" class="row">
+            <button class="btn sm primary"><svg class="i sm"><use href="#i-gen"/></svg>Generate <span class="kbd" style="background:transparent;color:#fff;border-color:rgba(255,255,255,.4)">G</span></button>
+            <button class="btn sm" title="Reroll (Shift+G)"><svg class="i sm"><use href="#i-dice"/></svg>Reroll</button>
+          </div>
+        </div>
+        <div class="section-h">Takes <span class="badge">3</span></div>
+        <div class="list">
+          <div class="take">
+            <button class="btn ghost ib sm" title="Play"><svg class="i sm"><use href="#i-play"/></svg></button>
+            <div class="meta"><div class="num">3.0 s</div><div class="faint num">seed 938158003 · exag 0.75 · pacing 1.00</div></div>
+            <span class="badge acc">Active</span>
+            <button class="btn ghost ib sm" title="Trim"><svg class="i sm"><use href="#i-trim"/></svg></button>
+            <button class="btn ghost ib sm star" title="Unstar"><svg class="i sm"><use href="#i-starf"/></svg></button>
+          </div>
+          <div class="take">
+            <button class="btn ghost ib sm" title="Play"><svg class="i sm"><use href="#i-play"/></svg></button>
+            <div class="meta"><div class="num">3.3 s</div><div class="faint num">seed 938158003 · exag 0.75 · pacing 0.05</div></div>
+            <button class="btn sm">Use</button>
+            <button class="btn ghost ib sm" title="Trim"><svg class="i sm"><use href="#i-trim"/></svg></button>
+            <button class="btn ghost ib sm" title="Star"><svg class="i sm"><use href="#i-star"/></svg></button>
+          </div>
+        </div>
+      </div>
+    </div>
+  </div>
+
+  <div class="bottom">
+    <div class="tl-bar">
+      <button class="btn ghost ib" title="Zoom out"><svg class="i"><use href="#i-zout"/></svg></button>
+      <button class="btn ghost ib" title="Zoom in"><svg class="i"><use href="#i-zin"/></svg></button>
+      <button class="btn ghost ib" title="Fit"><svg class="i"><use href="#i-fit"/></svg></button>
+      <span class="sep"></span>
+      <button class="btn ghost ib" title="Split at playhead (S)"><svg class="i"><use href="#i-split"/></svg></button>
+      <span class="spacer"></span>
+      <span class="faint" style="font-size:var(--fs-sm)">Selected: line 1 · 0:10.240 to 0:13.240</span>
+      <button class="btn ghost ib" title="How the timeline works"><svg class="i"><use href="#i-help"/></svg></button>
+    </div>
+    <div class="tl">
+      <div class="heads">
+        <div class="head ruler num">0:11.640</div>
+        <div class="head big"><span class="sw" style="background:var(--lane-clip)"></span>Video</div>
+        <div class="head big"><span class="sw" style="background:var(--lane-voice)"></span>Voice</div>
+        <div class="head"><span class="sw" style="background:var(--lane-expression)"></span>Expression <span class="kbd k">E</span></div>
+        <div class="head"><span class="sw" style="background:var(--lane-reaction)"></span>Reactions <span class="kbd k">R</span></div>
+        <div class="head"><svg class="i sm"><use href="#i-chev"/></svg><span class="sw" style="background:var(--lane-motion)"></span>Motion</div>
+        <div class="head sub">Bounce</div>
+        <div class="head sub">Scale</div>
+      </div>
+      <div class="lanes">
+        <div class="ruler num">
+          <span style="left:0">0:00</span><span style="left:12.5%">0:05</span><span style="left:25%">0:10</span><span style="left:37.5%">0:15</span><span style="left:50%">0:20</span><span style="left:62.5%">0:25</span><span style="left:75%">0:30</span><span style="left:87.5%">0:35</span>
+        </div>
+        <div class="lane big"><div class="clip" style="left:0;width:96.9%">uncut_2025-10-13 13-19-03.mkv <span style="opacity:.7">· 0:38.783</span></div></div>
+        <div class="lane big">
+          <div class="vblock sel" style="left:25.6%;width:7.5%"><span>An open table! Let's…</span><svg viewBox="0 0 100 18" preserveAspectRatio="none"><path d="M0 9h100" stroke="rgba(255,255,255,.35)"/><path d="M4 9v-3v6M8 9v-6v12M12 9v-4v8M16 9v-7v14M20 9v-5v10M24 9v-8v16M28 9v-3v6M34 9v-6v12M38 9v-7v14M42 9v-4v8M48 9v-6v12M52 9v-3v6M58 9v-7v14M62 9v-5v10M66 9v-8v16M72 9v-4v8M76 9v-6v12M82 9v-3v6M86 9v-5v10M92 9v-2v4" stroke="rgba(255,255,255,.75)"/></svg></div>
+          <div class="vblock" style="left:41%;width:8.6%"><span>Hmm... kinda thin…</span><svg viewBox="0 0 100 18" preserveAspectRatio="none"><path d="M0 9h100" stroke="rgba(255,255,255,.35)"/><path d="M6 9v-4v8M10 9v-6v12M16 9v-3v6M22 9v-7v14M28 9v-5v10M34 9v-6v12M42 9v-3v6M50 9v-7v14M56 9v-4v8M64 9v-6v12M70 9v-3v6M78 9v-5v10M86 9v-4v8" stroke="rgba(255,255,255,.75)"/></svg><div class="over" title="Runs 0.4 s into the next line"></div></div>
+        </div>
+        <div class="lane n"><div class="diamond" style="left:25.6%"></div><span class="klabel" style="left:calc(25.6% + 9px)">smile</span><div class="diamond sel" style="left:41%"></div><span class="klabel" style="left:calc(41% + 9px)">thinking</span></div>
+        <div class="lane n"><div class="react" style="left:26%;width:1.6%"></div><span class="hint" style="left:30%">shake</span></div>
+        <div class="lane n"><div class="mkey" style="left:20%"></div><div class="mkey" style="left:44%"></div></div>
+        <div class="lane sub"><div class="mkey" style="left:20%"></div></div>
+        <div class="lane sub"><div class="mkey" style="left:44%"></div></div>
+        <div class="playhead" style="left:29.1%"></div>
+      </div>
+    </div>
+  </div>
+
+  <div class="status">
+    <span class="seg"><span class="dot"></span>Voice model not loaded</span>
+    <span class="seg"><svg class="i sm"><use href="#i-cpu"/></svg>GPU idle</span>
+    <span class="seg"><svg class="i sm"><use href="#i-disk"/></svg><span class="num">Takes 1.2 MB (4)</span></span>
+    <span class="spacer"></span>
+    <span class="seg">Mix <span class="meter"><i></i></span><span class="num">-16.2 LUFS</span></span>
+  </div>
+  <div class="tip" style="left:1004px; top:6px; transform: translateY(0)">Keyboard shortcuts <span class="kbd">?</span></div>
+</div>
+
+<h2 class="frame-label">Project screen (project open)</h2>
+<div class="frame">
+  <div class="proj">
+    <div class="nav">
+      <div class="brand"><span class="logo"></span>PNGtuber Studio</div>
+      <div class="item"><svg class="i"><use href="#i-home"/></svg>Home</div>
+      <div class="item on"><svg class="i"><use href="#i-folder"/></svg>Rack 1 <small>open</small></div>
+      <div class="section-h" style="margin:16px 8px 4px">Recent</div>
+      <div class="item"><svg class="i"><use href="#i-folder"/></svg>Rack 1</div>
+      <div class="item faint"><svg class="i"><use href="#i-folder"/></svg>Rack 0 (test) <small>missing</small></div>
+      <span class="spacer"></span>
+      <button class="btn" style="justify-content:center"><svg class="i"><use href="#i-plus"/></svg>New project</button>
+      <button class="btn ghost" style="justify-content:center"><svg class="i"><use href="#i-folder"/></svg>Open folder…</button>
+      <div class="item" style="margin-top:6px"><svg class="i"><use href="#i-settings"/></svg>Settings</div>
+    </div>
+
+    <div class="content">
+      <div class="phead">
+        <div>
+          <h1>Rack 1</h1>
+          <div class="path">D:\ZWH\PoolBuddy\Projects\Rack 1</div>
+        </div>
+        <span class="spacer"></span>
+        <button class="btn primary" style="height:34px;padding:0 14px">Open editor<svg class="i"><use href="#i-open"/></svg></button>
+      </div>
+
+      <div class="cards">
+        <div class="stat"><div class="k"><svg class="i sm"><use href="#i-film"/></svg>Footage</div><div class="v num">3 files</div><span class="badge err">2 missing</span></div>
+        <div class="stat"><div class="k"><svg class="i sm"><use href="#i-film"/></svg>Timeline</div><div class="v num">1 clip · 0:38</div><span class="badge ok">ok</span></div>
+        <div class="stat"><div class="k"><svg class="i sm"><use href="#i-mic"/></svg>Voice</div><div class="v">Ready</div><span class="badge ok">reference set</span></div>
+        <div class="stat"><div class="k"><svg class="i sm"><use href="#i-user"/></svg>Avatar</div><div class="v">nanairo miku</div><span class="badge ok">10 expressions</span></div>
+      </div>
+
+      <div class="card">
+        <div class="card-h"><h3>Footage</h3><span class="faint" style="font-size:var(--fs-sm)">in footage\</span><span class="spacer"></span><button class="btn sm"><svg class="i sm"><use href="#i-refresh"/></svg>Rescan</button></div>
+        <table>
+          <tr><th>File</th><th>Resolution</th><th>FPS</th><th>Length</th><th>Audio</th><th>Status</th><th></th></tr>
+          <tr><td>old/uncut_2025-10-13 13-19-03.mkv</td><td class="num">2560 x 1440</td><td class="num">60</td><td class="num">10:21</td><td class="num">1</td><td><span class="badge err">missing</span></td><td style="text-align:right"><button class="btn sm"><svg class="i sm"><use href="#i-link"/></svg>Relink</button></td></tr>
+          <tr><td>clipchamp cut video rack 1.mp4</td><td class="num">1920 x 1080</td><td class="num">30</td><td class="num">2:53</td><td class="num">1</td><td><span class="badge err">missing</span></td><td style="text-align:right"><button class="btn sm"><svg class="i sm"><use href="#i-link"/></svg>Relink</button></td></tr>
+          <tr><td>uncut_2025-10-13 13-19-03.mkv</td><td class="num">2560 x 1440</td><td class="num">60</td><td class="num">10:21</td><td class="num">1</td><td><span class="badge ok">ok</span></td><td></td></tr>
+        </table>
+      </div>
+
+      <div class="two">
+        <div class="card">
+          <div class="card-h"><h3>Voice</h3><span class="badge ok">ready</span><span class="spacer"></span><button class="btn sm">Change…</button></div>
+          <dl class="kv"><dt>Reference</dt><dd>media\voice\reference.wav</dd><dt>Length</dt><dd class="num">12.4 s · 48 kHz</dd></dl>
+        </div>
+        <div class="card">
+          <div class="card-h"><h3>Avatar</h3><span class="badge ok">10 expressions</span><span class="spacer"></span><button class="btn sm">Change…</button></div>
+          <dl class="kv"><dt>Art folder</dt><dd>avatars\nanairo miku</dd><dt>Expressions</dt><dd class="chips"><span class="badge acc">smile</span><span class="badge">cheeky</span><span class="badge">confident</span><span class="badge">focus</span><span class="badge">thinking</span><span class="badge">+5</span></dd></dl>
+          <div class="help"><svg class="i sm"><use href="#i-help"/></svg>How the art folder must be laid out</div>
+        </div>
+      </div>
+    </div>
+  </div>
+</div>
+</body>
+</html>

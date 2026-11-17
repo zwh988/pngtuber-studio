@@ -1,4 +1,6 @@
 <script lang="ts">
+  import { RotateCcw } from "@lucide/svelte";
+  import Button from "./ui/Button.svelte";
   import { show2, sliderValue } from "./voice";
 
   let {
@@ -50,7 +52,11 @@
 
 <div class="param">
   <label>
-    <span class="head">{label}: <strong>{show2(shown)}</strong> <span class="src">({source})</span></span>
+    <span class="head">
+      <span class="name">{label}</span>
+      <span class="src">{source}</span>
+      <strong class="val num">{show2(shown)}</strong>
+    </span>
     <input
       type="range"
       {min}
@@ -64,25 +70,39 @@
   <div class="foot">
     <span class="hint">{hint}</span>
     {#if override !== null}
-      <button type="button" onclick={() => void commit(null)}>Reset to preset</button>
+      <Button size="sm" variant="ghost" icon={RotateCcw} onclick={() => void commit(null)}>
+        Reset to preset
+      </Button>
     {/if}
   </div>
 </div>
 
 <style>
   .param {
-    margin-bottom: 0.75rem;
+    display: flex;
+    flex-direction: column;
+    gap: 2px;
   }
   label {
     display: block;
   }
   .head {
-    display: block;
-    margin-bottom: 0.2rem;
+    display: flex;
+    align-items: baseline;
+    gap: 8px;
+    margin-bottom: 2px;
+  }
+  .name {
+    color: var(--text-2);
+    font-size: var(--fs-sm);
   }
   .src {
-    opacity: 0.7;
-    font-size: 0.85rem;
+    flex: 1;
+    color: var(--text-3);
+    font-size: var(--fs-xs);
+  }
+  .val {
+    font-size: var(--fs-sm);
   }
   input {
     width: 100%;
@@ -90,11 +110,12 @@
   .foot {
     display: flex;
     align-items: center;
-    gap: 0.75rem;
+    gap: 8px;
+    min-height: 24px;
   }
   .hint {
     flex: 1;
-    font-size: 0.85rem;
-    opacity: 0.7;
+    color: var(--text-3);
+    font-size: var(--fs-xs);
   }
 </style>

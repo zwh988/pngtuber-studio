@@ -21,6 +21,11 @@
   } from "./api";
   import ParamSlider from "./ParamSlider.svelte";
   import TakeTrimmer from "./TakeTrimmer.svelte";
+  import { Dices, Pause, Play, Plus, Scissors, Sparkles, Star, Trash2, X } from "@lucide/svelte";
+  import Badge from "./ui/Badge.svelte";
+  import Banner from "./ui/Banner.svelte";
+  import Button from "./ui/Button.svelte";
+  import IconButton from "./ui/IconButton.svelte";
   import { LINE_DRAG_TYPE } from "./timeline";
   import {
     isBlank,
@@ -317,25 +322,35 @@
 </script>
 
 <div class="toolbar">
-  <button type="button" onclick={() => void addLine()}>Add line</button>
-  <span class="hint">Hotkey N.</span>
+  <Button size="sm" icon={Plus} onclick={() => void addLine()}>
+    Add line <span class="kbd">N</span>
+  </Button>
+  <span class="spacer"></span>
   {#if saving}<span class="hint">Saving...</span>{/if}
+  {#if bank !== null && bank.lines.length > 0}
+    <span class="hint num">
+      {bank.lines.length} line{bank.lines.length === 1 ? "" : "s"} ·
+      {bank.lines.filter((l) => l.placement_count > 0).length} placed
+    </span>
+  {/if}
 </div>
 
 {#if error !== null}
-  <p class="error">{error}</p>
+  <Banner kind="error">{error}</Banner>
 {/if}
 {#if bank !== null && bank.save_error !== null}
-  <p class="error">Could not save the project: {bank.save_error}</p>
+  <Banner kind="error">Could not save the project: {bank.save_error}</Banner>
 {/if}
 
 {#if bank === null}
-  <p>Loading...</p>
+  <p class="hint">Loading...</p>
 {:else}
   <div class="bank">
     <div>
       {#if bank.lines.length === 0}
-        <p>No lines yet. Add one, write what you want to say, then generate it in the voice.</p>
+        <p class="empty">
+          No lines yet. Add one, write what you want to say, then generate it in the voice.
+        </p>
       {:else}
         <ul class="list">
           {#each bank.lines as line, i (line.id)}
@@ -345,14 +360,15 @@
                 class="row"
                 class:selected={line.id === selectedId}
                 draggable="true"
+                title="Drag onto the voice lane to place it"
                 ondragstart={(e) => startDrag(e, line)}
                 onclick={() => (selectedId = line.id)}
               >
-                <span class="num">{i + 1}</span>
-                <span class="preview" class:empty={line.text.trim() === ""}>{preview(line)}</span>
-                <span class="tag" class:bad={!line.emotion_known}>{line.emotion}</span>
-                <span class="meta">{takeCountText(line.take_count)}</span>
-                {#if line.placement_count > 0}<span class="meta">placed</span>{/if}
+                <span class="idx num">{i + 1}</span>
+                <span class="preview" class:empty-text={line.text.trim() === ""}>{preview(line)}</span>
+                <Badge kind={line.emotion_known ? "neutral" : "error"}>{line.emotion}</Badge>
+                <span class="meta num">{takeCountText(line.take_count)}</span>
+                {#if line.placement_count > 0}<Badge kind="ok">placed</Badge>{/if}
               </button>
             </li>
           {/each}
@@ -366,11 +382,11 @@
       {:else}
         {@const line = selected}
         <label class="field">
-          Text
+          <span class="label">Text</span>
           {#key `${line.id}|${line.text}`}
             <textarea
               bind:this={textEl}
-              rows="4"
+              rows="3"
               value={line.text}
               onblur={(e) => void commitText(line, e.currentTarget.value)}
               onkeydown={(e) => {
@@ -387,28 +403,58 @@
           <span class="hint">Enter saves, Escape undoes your typing. Extra spaces are ignored.</span>
         </label>
 
-        <label class="field">
-          Emotion
-          <select
-            value={line.emotion}
-            onchange={(e) => {
-              const emotion = e.currentTarget.value;
-              e.currentTarget.blur();
-              void apply([{ op: "set_line_emotion", line_id: line.id, emotion }]);
-            }}
-          >
-            {#if !line.emotion_known}
-              <option value={line.emotion}>{line.emotion} (not in the presets)</option>
+        <div class="emotion-row">
+          <label class="field grow">
+            <span class="label">Emotion</span>
+            <select
+              value={line.emotion}
+              onchange={(e) => {
+                const emotion = e.currentTarget.value;
+                e.currentTarget.blur();
+                void apply([{ op: "set_line_emotion", line_id: line.id, emotion }]);
+              }}
+            >
+              {#if !line.emotion_known}
+                <option value={line.emotion}>{line.emotion} (not in the presets)</option>
+              {/if}
+              {#each bank.emotions as emotion}
+                <option value={emotion}>{emotion}</option>
+              {/each}
+            </select>
+          </label>
+          <div class="gen">
+            <Button
+              variant="primary"
+              icon={Sparkles}
+              title="Generate (G). Reuses an existing take when nothing has changed, so it costs no GPU time."
+              disabled={isBlank(line) || !line.emotion_known || liveJob !== undefined}
+              onclick={() => void startGenerate(line, false)}
+            >
+              Generate <span class="kbd on-primary">G</span>
+            </Button>
+            <Button
+              icon={Dices}
+              title="Reroll (Shift+G): always makes a new variation"
+              disabled={isBlank(line) || !line.emotion_known || liveJob !== undefined}
+              onclick={() => void startGenerate(line, true)}
+            >
+              Reroll
+            </Button>
+            {#if liveJob !== undefined}
+              {@const job = liveJob}
+              <Button variant="danger" icon={X} onclick={() => void cancel(job)}>Cancel</Button>
             {/if}
-            {#each bank.emotions as emotion}
-              <option value={emotion}>{emotion}</option>
-            {/each}
-          </select>
-        </label>
+          </div>
+        </div>
         {#if !line.emotion_known}
-          <p class="error">
+          <Banner kind="error">
             This emotion is not in the presets file any more. Pick another one before generating.
-          </p>
+          </Banner>
+        {/if}
+        {#if liveJob !== undefined}
+          <p class="job">{jobText(liveJob)}</p>
+        {:else if lastJob !== undefined}
+          <p class="hint" class:error={lastJob.state === "failed"}>Last job: {jobText(lastJob)}</p>
         {/if}
 
         <ParamSlider
@@ -451,73 +497,62 @@
           Allow this line to overlap the next one (no overflow warning)
         </label>
 
-        <div class="gen">
-          <button
-            type="button"
-            disabled={isBlank(line) || !line.emotion_known || liveJob !== undefined}
-            onclick={() => void startGenerate(line, false)}
-          >
-            Generate
-          </button>
-          <button
-            type="button"
-            disabled={isBlank(line) || !line.emotion_known || liveJob !== undefined}
-            onclick={() => void startGenerate(line, true)}
-          >
-            Reroll
-          </button>
-          {#if liveJob !== undefined}
-            {@const job = liveJob}
-            <button type="button" onclick={() => void cancel(job)}>Cancel</button>
-          {/if}
-        </div>
-        {#if liveJob !== undefined}
-          <p>{jobText(liveJob)}</p>
-        {:else if lastJob !== undefined}
-          <p class="hint" class:error={lastJob.state === "failed"}>Last job: {jobText(lastJob)}</p>
-        {/if}
-        <p class="hint">
-          Generate reuses an existing take when nothing has changed, so it costs no GPU time.
-          Reroll always makes a new variation.
-        </p>
-
-        <h4>Takes ({takes.length})</h4>
+        <h4>Takes <Badge>{takes.length}</Badge></h4>
         {#if takes.length === 0}
           <p class="hint">No takes yet. Generate this line to make one.</p>
         {:else}
           <ul class="takes">
             {#each takesNewestFirst as take (take.id)}
               <li class:active={take.active}>
-                <button type="button" disabled={!take.file_exists} onclick={() => togglePlay(take)}>
-                  {playingId === take.id ? "Stop" : "Play"}
-                </button>
+                <IconButton
+                  icon={playingId === take.id ? Pause : Play}
+                  size="sm"
+                  label={playingId === take.id ? "Stop" : "Play this take"}
+                  disabled={!take.file_exists}
+                  onclick={() => togglePlay(take)}
+                />
                 <span class="take-info">
-                  {(take.duration_ms / 1000).toFixed(1)} s, seed {take.seed}, exaggeration
-                  {show2(take.exaggeration)}, pacing {show2(take.cfg_weight)}
+                  <span class="take-len num">{(take.duration_ms / 1000).toFixed(1)} s</span>
+                  <span class="take-meta num">
+                    seed {take.seed} · exag {show2(take.exaggeration)} · pacing {show2(take.cfg_weight)}
+                  </span>
+                  {#if normalizeText(take.text) !== normalizeText(line.text) || trimText(take) !== null || !take.file_exists}
+                    <span class="take-tags">
+                      {#if normalizeText(take.text) !== normalizeText(line.text)}
+                        <Badge kind="warning">older text</Badge>
+                      {/if}
+                      {#if trimText(take) !== null}<Badge>{trimText(take)}</Badge>{/if}
+                      {#if !take.file_exists}<Badge kind="error">file missing</Badge>{/if}
+                    </span>
+                  {/if}
                 </span>
-                {#if normalizeText(take.text) !== normalizeText(line.text)}
-                  <span class="meta">older text</span>
+                {#if take.active}
+                  <Badge kind="accent">Active</Badge>
+                {:else}
+                  <Button size="sm" title="Use this take for the line" onclick={() => void useTake(line, take)}>
+                    Use
+                  </Button>
                 {/if}
-                {#if trimText(take) !== null}<span class="meta">{trimText(take)}</span>{/if}
-                {#if !take.file_exists}<span class="bad">file missing</span>{/if}
-                <button
-                  type="button"
+                <IconButton
+                  icon={Scissors}
+                  size="sm"
+                  label={trimmingId === take.id ? "Close the trimmer" : "Trim this take"}
+                  pressed={trimmingId === take.id}
                   disabled={!take.file_exists}
                   onclick={() => {
                     stopAudio();
                     trimmingId = trimmingId === take.id ? null : take.id;
                   }}
-                >
-                  {trimmingId === take.id ? "Close trim" : "Trim"}
-                </button>
-                <button type="button" onclick={() => void toggleStar(take)}>
-                  {take.starred ? "Starred" : "Star"}
-                </button>
-                {#if take.active}
-                  <strong>Active</strong>
-                {:else}
-                  <button type="button" onclick={() => void useTake(line, take)}>Use this take</button>
-                {/if}
+                />
+                <IconButton
+                  icon={Star}
+                  size="sm"
+                  class={take.starred ? "starred" : ""}
+                  iconFill={take.starred ? "currentColor" : "none"}
+                  label={take.starred ? "Starred (click to unstar)" : "Star this take"}
+                  pressed={take.starred}
+                  onclick={() => void toggleStar(take)}
+                />
                 {#if trimmingId === take.id}
                   <div class="trim-slot">
                     <TakeTrimmer
@@ -534,17 +569,19 @@
         {/if}
 
         <div class="actions">
-          <button
-            type="button"
+          <Button
+            size="sm"
+            variant="danger"
+            icon={Trash2}
             disabled={line.take_count > 0 || line.placement_count > 0}
             onclick={() => void removeSelected()}
           >
             Remove line
-          </button>
+          </Button>
           {#if line.take_count > 0 || line.placement_count > 0}
             <span class="hint">
               A line with takes or placements cannot be removed here. Takes are deleted in the
-              storage list.
+              Storage tab.
             </span>
           {/if}
         </div>
@@ -557,44 +594,59 @@
   .toolbar {
     display: flex;
     align-items: center;
-    gap: 0.75rem;
-    margin: 0.5rem 0;
+    gap: 8px;
+    margin: 0 0 10px;
+  }
+  .spacer {
+    flex: 1;
   }
   .bank {
     display: grid;
     grid-template-columns: minmax(16rem, 2fr) 3fr;
-    gap: 1.25rem;
+    gap: 14px;
     align-items: start;
+  }
+  .empty {
+    margin: 0;
+    color: var(--text-2);
   }
   .list {
     list-style: none;
     padding: 0;
     margin: 0;
-    border: 1px solid #8884;
+    border: 1px solid var(--border);
+    border-radius: var(--r-md);
     max-height: 26rem;
     overflow-y: auto;
   }
+  .list li + li .row {
+    border-top: 1px solid var(--border);
+  }
   .row {
     display: flex;
-    align-items: baseline;
-    gap: 0.6rem;
+    align-items: center;
+    gap: 8px;
     width: 100%;
     margin: 0;
-    padding: 0.4rem 0.5rem;
+    padding: 7px 10px;
     border: none;
-    border-bottom: 1px solid #8884;
+    border-radius: 0;
     background: none;
-    color: inherit;
+    color: var(--text-1);
     font: inherit;
     text-align: left;
     cursor: pointer;
   }
-  .row.selected {
-    background: #4a90e255;
+  .row:hover {
+    background: var(--surface-2);
   }
-  .num {
-    min-width: 1.5rem;
-    opacity: 0.6;
+  .row.selected {
+    background: var(--accent-soft);
+    box-shadow: inset 2px 0 0 var(--accent);
+  }
+  .idx {
+    min-width: 1.25rem;
+    color: var(--text-3);
   }
   .preview {
     flex: 1;
@@ -603,82 +655,145 @@
     text-overflow: ellipsis;
     white-space: nowrap;
   }
-  .preview.empty {
+  .preview.empty-text {
     font-style: italic;
-    opacity: 0.6;
+    color: var(--text-3);
   }
-  .tag,
   .meta {
-    font-size: 0.85rem;
-    opacity: 0.75;
+    color: var(--text-2);
+    font-size: var(--fs-sm);
+    white-space: nowrap;
   }
-  .tag.bad {
-    color: #b00020;
-    opacity: 1;
+  .inspector {
+    display: flex;
+    flex-direction: column;
+    gap: 12px;
+    min-width: 0;
   }
   .field {
-    display: block;
-    margin-bottom: 0.75rem;
+    display: flex;
+    flex-direction: column;
+    gap: 4px;
+  }
+  .label {
+    color: var(--text-2);
+    font-size: var(--fs-sm);
   }
   textarea,
   select {
     display: block;
     width: 100%;
     box-sizing: border-box;
-    margin-top: 0.2rem;
-    padding: 0.35rem;
     font: inherit;
   }
-  .check {
-    display: block;
-    margin-bottom: 0.75rem;
+  textarea {
+    resize: vertical;
+  }
+  .emotion-row {
+    display: flex;
+    flex-wrap: wrap;
+    align-items: flex-end;
+    gap: 8px 12px;
+  }
+  .grow {
+    flex: 1 1 140px;
   }
   .gen {
     display: flex;
-    gap: 0.5rem;
-    margin-bottom: 0.4rem;
+    flex-wrap: wrap;
+    gap: 6px;
+  }
+  .kbd.on-primary {
+    border-color: rgba(255, 255, 255, 0.45);
+    background: transparent;
+    color: var(--on-accent);
+  }
+  .job {
+    margin: 0;
+    color: var(--accent-hover);
+  }
+  .check {
+    display: flex;
+    align-items: flex-start;
+    gap: 8px;
+    color: var(--text-2);
+  }
+  .check input {
+    margin: 2px 0 0;
   }
   h4 {
-    margin: 0.75rem 0 0.35rem;
+    display: flex;
+    align-items: center;
+    gap: 6px;
+    margin: 4px 0 0;
+    color: var(--text-3);
+    font-size: var(--fs-xs);
+    font-weight: 600;
+    letter-spacing: 0.06em;
+    text-transform: uppercase;
   }
   .takes {
     list-style: none;
     padding: 0;
-    margin: 0 0 0.75rem;
-    border: 1px solid #8884;
+    margin: 0;
+    border: 1px solid var(--border);
+    border-radius: var(--r-md);
   }
   .takes li {
     display: flex;
     flex-wrap: wrap;
     align-items: center;
-    gap: 0.5rem;
-    padding: 0.35rem 0.5rem;
-    border-bottom: 1px solid #8884;
+    gap: 6px;
+    padding: 6px 8px;
+  }
+  .takes li + li {
+    border-top: 1px solid var(--border);
   }
   .takes li.active {
-    background: #4a90e233;
+    background: var(--accent-soft);
   }
   .trim-slot {
     flex-basis: 100%;
   }
   .take-info {
+    display: flex;
+    flex-direction: column;
     flex: 1;
-    min-width: 12rem;
+    min-width: 8rem;
   }
-  .bad {
-    color: #b00020;
-    font-size: 0.85rem;
+  .take-len {
+    font-weight: 600;
+  }
+  .take-meta {
+    overflow: hidden;
+    color: var(--text-3);
+    font-size: var(--fs-sm);
+    text-overflow: ellipsis;
+    white-space: nowrap;
+  }
+  .take-tags {
+    display: flex;
+    flex-wrap: wrap;
+    gap: 4px;
+    margin-top: 2px;
+  }
+  .takes :global(.starred) {
+    color: var(--warning);
+    background: none;
   }
   .actions {
     display: flex;
     align-items: center;
-    gap: 0.75rem;
+    gap: 10px;
   }
   .hint {
-    font-size: 0.85rem;
-    opacity: 0.7;
+    color: var(--text-2);
+    font-size: var(--fs-sm);
+  }
+  p.hint {
+    margin: 0;
   }
   .error {
-    color: #b00020;
+    color: var(--danger);
   }
 </style>

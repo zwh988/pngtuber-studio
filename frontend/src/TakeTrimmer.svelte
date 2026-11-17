@@ -1,5 +1,8 @@
 <script lang="ts">
   import { untrack } from "svelte";
+  import { Check, Play, RotateCcw, Square, X } from "@lucide/svelte";
+  import Button from "./ui/Button.svelte";
+  import IconButton from "./ui/IconButton.svelte";
   import {
     getTakePeaks,
     getTakeTrim,
@@ -126,15 +129,16 @@
       return;
     }
     const styles = getComputedStyle(el);
-    const accent = styles.getPropertyValue("--accent").trim() || "#4a90e2";
-    const text = styles.getPropertyValue("--text").trim() || "#ddd";
+    const wave = styles.getPropertyValue("--lane-voice").trim();
+    const text = styles.getPropertyValue("--text-1").trim();
+    const playhead = styles.getPropertyValue("--playhead").trim();
     ctx.clearRect(0, 0, WIDTH, HEIGHT);
-    ctx.fillStyle = "#0004";
+    ctx.fillStyle = styles.getPropertyValue("--surface-2").trim();
     ctx.fillRect(0, 0, WIDTH, HEIGHT);
 
     const mid = HEIGHT / 2;
     if (peaks !== null && peaks.buckets > 0) {
-      ctx.fillStyle = accent;
+      ctx.fillStyle = wave;
       const step = WIDTH / peaks.buckets;
       for (let i = 0; i < peaks.buckets; i++) {
         const hi = peaks.highs[i] ?? 0;
@@ -148,17 +152,17 @@
     const sx = msToX(cuts.start, duration, WIDTH);
     const ex = msToX(cuts.end, duration, WIDTH);
     // Removed by the manual cut.
-    ctx.fillStyle = "#000b";
+    ctx.fillStyle = "rgba(0, 0, 0, 0.72)";
     ctx.fillRect(0, 0, sx, HEIGHT);
     ctx.fillRect(ex, 0, WIDTH - ex, HEIGHT);
     // Also removed by the automatic trim (inside the cut).
     if (info !== null) {
-      ctx.fillStyle = "#0007";
+      ctx.fillStyle = "rgba(0, 0, 0, 0.45)";
       const ax = msToX(info.auto_start_ms, duration, WIDTH);
       const bx = msToX(info.auto_end_ms, duration, WIDTH);
       if (ax > sx) ctx.fillRect(sx, 0, ax - sx, HEIGHT);
       if (bx < ex) ctx.fillRect(bx, 0, ex - bx, HEIGHT);
-      ctx.strokeStyle = "#fff6";
+      ctx.strokeStyle = "rgba(255, 255, 255, 0.4)";
       ctx.setLineDash([3, 3]);
       ctx.beginPath();
       ctx.moveTo(ax + 0.5, 0);
@@ -177,7 +181,7 @@
     }
     if (playMs !== null) {
       const px = msToX(playMs, duration, WIDTH);
-      ctx.fillStyle = "#ff5252";
+      ctx.fillStyle = playhead;
       ctx.fillRect(Math.round(px), 0, 1, HEIGHT);
     }
   });
@@ -317,8 +321,10 @@
 <div class="trimmer">
   <div class="head">
     <strong>Trim take</strong>
-    <span class="hint">{(duration / 1000).toFixed(2)} s recorded</span>
-    <button type="button" class="close" onclick={() => { stop(); onclose(); }}>Close</button>
+    <span class="hint num">{(duration / 1000).toFixed(2)} s recorded</span>
+    <span class="close">
+      <IconButton icon={X} size="sm" label="Close the trimmer" onclick={() => { stop(); onclose(); }} />
+    </span>
   </div>
   <canvas
     bind:this={canvas}
@@ -353,29 +359,48 @@
       />
     </label>
     {#if keptMs !== null}
-      <span class="hint">
+      <span class="hint num">
         plays {(keptMs / 1000).toFixed(2)} s{info?.silent ? " (nothing loud found: kept whole)" : ""}
       </span>
     {/if}
   </div>
   <div class="buttons">
-    <button type="button" onclick={playRaw} disabled={!take.file_exists}>
+    <Button
+      size="sm"
+      icon={playMode === "raw" ? Square : Play}
+      onclick={playRaw}
+      disabled={!take.file_exists}
+      title="The raw take between the handles"
+    >
       {playMode === "raw" ? "Stop" : "Play cut"}
-    </button>
-    <button
-      type="button"
+    </Button>
+    <Button
+      size="sm"
+      icon={playMode === "processed" ? Square : Play}
       onclick={playProcessed}
       disabled={!take.file_exists || changed || fxVersion === "" || fxVersion === "invalid"}
       title={changed ? "Apply first" : "The saved trim through the voice chain"}
     >
       {playMode === "processed" ? "Stop" : "Play result"}
-    </button>
-    <button type="button" onclick={reset} disabled={cuts.start === 0 && cuts.end === duration}>
+    </Button>
+    <Button
+      size="sm"
+      variant="ghost"
+      icon={RotateCcw}
+      onclick={reset}
+      disabled={cuts.start === 0 && cuts.end === duration}
+    >
       Reset
-    </button>
-    <button type="button" class="primary" onclick={() => void apply()} disabled={!changed || busy}>
+    </Button>
+    <Button
+      size="sm"
+      variant="primary"
+      icon={Check}
+      onclick={() => void apply()}
+      disabled={!changed || busy}
+    >
       Apply
-    </button>
+    </Button>
     {#if changed}<span class="hint">Not applied yet.</span>{/if}
   </div>
   <p class="hint">
@@ -387,16 +412,20 @@
 
 <style>
   .trimmer {
-    border: 1px solid #8886;
-    padding: 0.5rem;
-    margin: 0.25rem 0 0.75rem;
-    background: #0002;
+    margin: 4px 0 6px;
+    padding: 8px 10px 10px;
+    border: 1px solid var(--border-strong);
+    border-radius: var(--r-md);
+    background: var(--surface-1);
   }
   .head {
     display: flex;
-    align-items: baseline;
-    gap: 0.75rem;
-    margin-bottom: 0.35rem;
+    align-items: center;
+    gap: 10px;
+    margin-bottom: 6px;
+  }
+  canvas {
+    border-radius: var(--r-sm);
   }
   .close {
     margin-left: auto;
@@ -413,21 +442,26 @@
     display: flex;
     flex-wrap: wrap;
     align-items: center;
-    gap: 0.6rem;
-    margin-top: 0.4rem;
+    gap: 6px 10px;
+    margin-top: 8px;
+  }
+  .fields label {
+    color: var(--text-2);
+    font-size: var(--fs-sm);
   }
   .fields input {
-    width: 6rem;
-    margin-left: 0.25rem;
-  }
-  .primary {
-    font-weight: bold;
+    width: 5.5rem;
+    margin-left: 4px;
+    font-variant-numeric: tabular-nums;
   }
   .hint {
-    font-size: 0.85rem;
-    opacity: 0.7;
+    color: var(--text-2);
+    font-size: var(--fs-sm);
+  }
+  p.hint {
+    margin: 8px 0 0;
   }
   .error {
-    color: var(--danger, #b00020);
+    color: var(--danger);
   }
 </style>

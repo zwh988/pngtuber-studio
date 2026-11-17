@@ -1,11 +1,11 @@
 # UI-2: UI/UX overhaul and polish (shared theme, components, every existing screen)
 
-> Written 2026-11-17 after M6, before M7's UI steps. Sources: `docs/DESIGN_SPEC.md` section 4 (screens, layout, hotkeys), `PROJECT_STATE.md` (UI-1 decisions, known issues, "Next up" item 3), `docs/tasks/M7-polish.md` and the frontend as of `m6-done`. Nothing here has been built. The questions under "Decisions" are for the user at the start; the answers go into the decisions log in `PROJECT_STATE.md`.
+> Written 2026-11-17 after M6, before M7's UI steps. Sources: `docs/DESIGN_SPEC.md` section 4 (screens, layout, hotkeys), `PROJECT_STATE.md` (UI-1 decisions, known issues, "Next up" item 3), `docs/tasks/M7-polish.md` and the frontend as of `m6-done`. Built 2026-11-17; see the status line. The questions under "Decisions" are for the user at the start; the answers go into the decisions log in `PROJECT_STATE.md`.
 
 - **Spec sections:** 4.1 to 4.3 (layout and behaviour stay as written; this task changes how they look and feel).
 - **Branch:** `ui-2-overhaul` (from `main` after M7 S1 is settled and logged).
 - **Where it sits:** after M7 S1 (decisions), before M7 S3 to S6 (first-run screen, empty states, Settings, hotkey map, templates), so those are built on the new theme. M7 S2 (`install.bat`) does not touch the frontend and can go before or alongside it. M7 S7 (clean install) stays last.
-- **Status:** not started.
+- **Status:** done 2026-11-17 on `ui-2-overhaul` (S1 to S8; each step checked by the user in the app). Results are in `PROJECT_STATE.md` (decisions log, UI-2 rows).
 - **Done when:** every existing screen uses one shared theme and a small set of shared components, UI-1d and UI-1e are done, and every feature that worked at `m6-done` still works.
 
 ## Facts already established (do not re-ask)
@@ -62,3 +62,45 @@
 - **Removing `:global` blocks can drop a style without any error.** Compare screenshots before and after S3.
 - **Scope creep:** "polish" never ends. Anything not in the S1 audit list goes to the backlog in `IMPLEMENTATION_PLAN.md`.
 - **The icon package adds a dependency.** Pin the version, commit `package-lock.json`, and check it is bundled (rule 8).
+
+## S1 audit (2026-11-17)
+
+The agent drove the real frontend in a browser at 1280 x 760, against a hard-linked copy of `Rack 1` (`scripts/spike/out/ui_audit/`, git-ignored). It covered: the empty project screen, the project screen with a project open, the editor with each tab (Footage, Line bank with a line selected, Storage, Voice FX, Avatar), the timeline with the lanes open and a voice block selected, and the export screen before an export. Not covered: the export screen during and after an export, and `TakeTrimmer` (open it in S5).
+
+**Cross-cutting**
+- C1 Three unrelated button styles: native light buttons on the project screen, small grey ones in the editor, large ones on the export screen.
+- C2 No type scale. Headings are a different size on each screen, and help text ranges from tiny to body size.
+- C3 Native checkboxes, selects and number inputs are unstyled. A select shows light-on-dark in the Voice FX tab.
+- C4 No shared focus ring, and hover, disabled and selected states differ per component.
+- C5 4 a11y warnings: the two pane dividers (`Editor.svelte` lines 780 and 906) are focusable `div`s with key handlers.
+
+**Project screen (`App.svelte`)**
+- P1 Still light with browser defaults. It does not look like the same app as the editor.
+- P2 One long page: the open project, Footage, Voice, Avatar, then Recent, New and Open below the fold. Proposal: a Home state (the recent list as the main content, with New and Open as actions) and a Project state (a header with the name and a primary "Open editor" button, then Footage, Voice and Avatar as cards).
+- P3 Statuses are plain words ("path set", red "missing"). Use status badges (ok, warning, missing) and show Relink next to the badge.
+- P4 Long help paragraphs (art folder naming, "the art stays in its own folder") are always visible. Collapse them behind a help line.
+
+**Editor shell (`Editor.svelte`, `Player.svelte`)**
+- E1 The header says "Editor", not the project name. Back, Undo and Redo are text buttons; make them icon buttons with tooltips. Make Export the one primary button.
+- E2 Player: a "Play" text button, a plain scrub bar, and "Clip 1 of 1 (1x)" floating under it. Use an icon play/pause, frame-step buttons, and tabular-number time.
+- E3 Status bar: fine content, flat text. Use compact segments with icons (voice model, GPU queue, takes on disk, loudness).
+
+**Side panel tabs**
+- T1 Tab strip: the selected tab is only a lighter box. Use one tab style with a clear accent underline.
+- T2 Line bank: each take row wraps onto two or three lines ("3.3 s, seed ..., exaggeration 0.75, pacing 0.05") with up to four text buttons. Use a one-line row: icon buttons (play, trim, star, use), the details as muted small text, and Active as a badge. "Hotkey N." next to Add line becomes a keyboard chip or tooltip.
+- T3 Voice FX: presets as small buttons (use a segmented control); each slider takes two rows (label and value above, slider below). Use a compact row: label left, value right, slider under, with tighter spacing.
+- T4 Avatar: the ◆ key-here buttons are tiny grey squares with no visible meaning. Use an icon button ("Key at playhead") with a tooltip. Sliders as in T3.
+- T5 Storage: a repeated grey "Delete take" on every row. Use a trash icon button that keeps the inline confirm, and group each line as a card.
+- T6 Each tab keeps its own scroll position (the Avatar tab opened half-scrolled). Keep that, but give section headers that stay readable.
+
+**Timeline (`Timeline.svelte`)**
+- L1 The toolbar's "Zoom out", "Zoom in", "Fit" and "▸ Lanes" wrap onto two lines, and a long help sentence takes the rest of the row. Use icon buttons, with the help behind a "?" tooltip.
+- L2 Lane names are tiny dim text drawn inside the canvas, with no header column. Add a fixed lane header column (name, collapse toggle) (UI-1e).
+- L3 Colours: a blue clip and a green voice block. The selected voice block only gets a thin white outline. Give one consistent selected state for clips, blocks, keys and reactions, and a colour per lane (UI-1d).
+- L4 The playhead red and the overflow red are the same colour; separate them.
+- L5 Empty Expression and Reactions rows give no hint of how to add something (E and R).
+- L6 At 760 px high the open lanes are cut off below Blink rate, and the pane scrolls on its own. The lane header column must scroll with the rows.
+
+**Export screen (`ExportScreen.svelte`)**
+- X1 Dark, but with its own button and heading sizes. Content hugs the left edge with an empty right half. Use a centred column, or two columns: options left, pre-flight right.
+- X2 Pre-flight is a line of text. Use a status list with icons, and errors and warnings as badges.

@@ -57,11 +57,12 @@ A one-stop local desktop app that turns a recorded pool rack into a finished PNG
 - Voice profile and avatar art show as "not configured" or "path set" until real validation arrives (voice profile with M3, avatar art with M5).
 - Relink: a missing footage file is relinked by picking the moved file. It must be inside the project's `footage/` folder and is re-probed; it is refused unless resolution, frame rate and audio track count match and length is within 100 ms.
 - A failed save is shown as a banner; edits are never lost silently.
+- Layout (UI-2): a sidebar (logo, Home, the open project, Recent, New project, Open folder) and pages. Home lists the recent projects; the Project page has a header with the name and "Open editor", four summary cards (footage, timeline, voice, avatar) with status badges, the footage table, and Voice and Avatar cards with their path fields; long help texts are folded away.
 
 ### 4.2 Editor (95% of the user's time)
 
 - **Top left:** video player with the avatar drawn on a canvas over it (the preview frame is 16:9, fitted inside the player). While paused, drag the avatar to move it (keys x and y at the playhead) and drag its corner handle to resize it (keys scale); each gesture is one undo step.
-- **Top right:** tabs for **Line bank**, **Inspector** (selected line or clip), **Voice FX**, and **Avatar** (the base motion and placement used wherever a lane has no keys, the expression and reaction tools behind `E` and `R`, and an inspector for the selected keyframe or reaction).
+- **Top right:** tabs for **Footage** (add a recording to the timeline), **Line bank** (the line list, the selected line's settings and its takes), **Voice FX**, **Avatar**, and **Storage** (takes on disk, deletes) (the base motion and placement used wherever a lane has no keys, the expression and reaction tools behind `E` and `R`, and an inspector for the selected keyframe or reaction).
 - **Bottom:** timeline with a ruler and these lanes:
   - Video strip (clips, cut markers, speed badges)
   - Voice lane (placed lines as blocks with waveform; red edge on overflow)
@@ -69,6 +70,7 @@ A one-stop local desktop app that turns a recorded pool rack into a finished PNG
   - Reaction lane (one-shot events as bars)
   - Parameter lanes: one collapsed "Motion keys" row by default; "Lanes" opens one row per lane: bounce, float amplitude, float speed, blink rate, mouth sensitivity, scale, x, y, rotation. Keys and reactions are selected and dragged in time here; values are edited in the Avatar tab
   - Game audio level
+- Timeline chrome (UI-2): a lane-name column left of the canvas (the Motion row collapses and expands the per-lane rows), an icon toolbar (zoom out, zoom in, fit, lanes, help), one colour per lane, one selected look for every item, and a white playhead distinct from the red overflow edge. Below the timeline: the selected clip or line bar and the clip table.
 - **Status bar:** GPU queue, loudness meter, disk usage of takes.
 
 **Default hotkeys**

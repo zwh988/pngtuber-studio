@@ -60,7 +60,7 @@
 </script>
 
 <label class="slider" class:off={disabled}>
-  <span class="head">{label}: <strong>{text(shown)}</strong></span>
+  <span class="head"><span class="name">{label}</span><strong class="num">{text(shown)}</strong></span>
   <input
     type="range"
     {min}
@@ -76,14 +76,21 @@
 <style>
   .slider {
     display: block;
-    margin-bottom: 0.5rem;
+    margin-bottom: 8px;
   }
   .slider.off {
     opacity: 0.55;
   }
   .head {
-    display: block;
-    margin-bottom: 0.15rem;
+    display: flex;
+    align-items: baseline;
+    justify-content: space-between;
+    gap: 8px;
+    margin-bottom: 2px;
+    font-size: var(--fs-sm);
+  }
+  .name {
+    color: var(--text-2);
   }
   input {
     width: 100%;

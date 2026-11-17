@@ -1,0 +1,230 @@
+/*
+ * PNGtuber Studio theme (UI-2). One dark theme for every screen.
+ * Tokens come from the approved mock (docs/design/ui2-mock.html).
+ * Base element styles use :where() so they have zero specificity: any component style wins.
+ */
+
+:root {
+  /* surfaces */
+  --bg: #0e1014;
+  --surface-1: #15181e;
+  --surface-2: #1b1f27;
+  --surface-3: #232833;
+  --hover: #2a303c;
+  --border: #272c36;
+  --border-strong: #363d4a;
+
+  /* text */
+  --text-1: #e7e9ee;
+  --text-2: #a6adba;
+  --text-3: #6d7482;
+
+  /* accent and states */
+  --accent: #4f8cff;
+  --accent-hover: #6a9dff;
+  --on-accent: #ffffff;
+  --accent-soft: rgba(79, 140, 255, 0.16);
+  --accent-strong-soft: rgba(79, 140, 255, 0.32);
+  --success: #3dbb84;
+  --success-soft: rgba(61, 187, 132, 0.14);
+  --warning: #e8a93a;
+  --warning-soft: rgba(232, 169, 58, 0.14);
+  --danger: #f0615f;
+  --danger-soft: rgba(240, 97, 95, 0.14);
+  --focus-ring: 0 0 0 2px var(--bg), 0 0 0 4px var(--accent);
+
+  /* timeline lanes (Timeline.svelte reads these through timelineTheme.ts in S6) */
+  --lane-clip: #3a67a8;
+  --lane-clip-alt: #2f5285;
+  --lane-motion-hold: #9fcbe0;
+  --lane-voice: #2c8f72;
+  --lane-expression: #d9ad3c;
+  --lane-reaction: #9b72de;
+  --lane-motion: #4ea3c9;
+  --playhead: #f4f6fa;
+  --video-bg: #000000;
+  --overflow: var(--danger);
+  --selected: #ffffff;
+
+  /* shape and type */
+  --r-sm: 4px;
+  --r-md: 6px;
+  --r-lg: 10px;
+  --font: "Segoe UI Variable Text", "Segoe UI", system-ui, sans-serif;
+  --font-mono: "Cascadia Mono", Consolas, monospace;
+  --fs-xs: 11px;
+  --fs-sm: 12px;
+  --fs-md: 13px;
+  --fs-lg: 15px;
+  --fs-xl: 20px;
+
+  /*
+   * Old names from UI-1, kept so components restyle one at a time (S3 to S7).
+   * Remove each once nothing uses it.
+   */
+  --panel: var(--surface-1);
+  --panel-2: var(--surface-3);
+  --line: var(--border-strong);
+  --text: var(--text-1);
+  --muted: var(--text-2);
+
+  color-scheme: dark;
+}
+
+/* The base size sits on body, not html, so rem stays 16px and component sizes in rem keep their size. */
+html {
+  background: var(--bg);
+}
+body {
+  margin: 0;
+  background: var(--bg);
+  color: var(--text-1);
+  font: var(--fs-md) / 1.45 var(--font);
+}
+
+::selection {
+  background: var(--accent-strong-soft);
+}
+
+:where(h1, h2, h3, h4) {
+  font-weight: 600;
+  line-height: 1.25;
+}
+
+:where(a) {
+  color: var(--accent-hover);
+}
+
+:where(code, kbd, samp, pre) {
+  font-family: var(--font-mono);
+  font-size: 0.95em;
+}
+
+/* buttons */
+:where(button) {
+  padding: 4px 10px;
+  border: 1px solid var(--border-strong);
+  border-radius: var(--r-md);
+  background: var(--surface-3);
+  color: var(--text-1);
+  font: 500 var(--fs-md) var(--font);
+  cursor: pointer;
+}
+:where(button:hover:not(:disabled)) {
+  background: var(--hover);
+}
+:where(button:disabled) {
+  opacity: 0.45;
+  cursor: default;
+}
+
+/* text inputs */
+:where(input:not([type="checkbox"], [type="radio"], [type="range"], [type="color"], [type="file"]), textarea, select) {
+  padding: 5px 8px;
+  border: 1px solid var(--border-strong);
+  border-radius: var(--r-md);
+  background: var(--surface-2);
+  color: var(--text-1);
+  font: var(--fs-md) var(--font);
+}
+:where(input, textarea)::placeholder {
+  color: var(--text-3);
+}
+:where(select option) {
+  background: var(--surface-2);
+  color: var(--text-1);
+}
+:where(input[type="checkbox"], input[type="radio"], input[type="range"], progress) {
+  accent-color: var(--accent);
+}
+
+/* one focus ring for everything focusable by keyboard */
+:where(button, input, textarea, select, summary, [tabindex]):focus-visible {
+  outline: none;
+  box-shadow: var(--focus-ring);
+}
+
+/* scrollbars (WebView2 is Chromium) */
+::-webkit-scrollbar {
+  width: 10px;
+  height: 10px;
+}
+::-webkit-scrollbar-track {
+  background: transparent;
+}
+::-webkit-scrollbar-thumb {
+  background: var(--border-strong);
+  border: 2px solid transparent;
+  border-radius: 6px;
+  background-clip: padding-box;
+}
+::-webkit-scrollbar-thumb:hover {
+  background-color: var(--text-3);
+}
+::-webkit-scrollbar-corner {
+  background: transparent;
+}
+
+/* utilities */
+.num {
+  font-variant-numeric: tabular-nums;
+}
+
+/* error text used across the panels (was a :global rule in Editor.svelte before UI-2 S3) */
+:where(.error, .bad) {
+  color: var(--danger);
+}
+
+/* keyboard key chip, for hotkey hints next to buttons */
+.kbd {
+  display: inline-block;
+  min-width: 18px;
+  height: 18px;
+  padding: 0 5px;
+  border: 1px solid var(--border-strong);
+  border-radius: var(--r-sm);
+  background: var(--surface-2);
+  color: var(--text-2);
+  font: 500 var(--fs-xs) / 16px var(--font);
+  text-align: center;
+  box-sizing: border-box;
+}
+
+/* range sliders: thin track, round thumb (WebView2 is Chromium) */
+:where(input[type="range"]) {
+  -webkit-appearance: none;
+  appearance: none;
+  height: 16px;
+  margin: 0;
+  background: transparent;
+  cursor: pointer;
+}
+:where(input[type="range"])::-webkit-slider-runnable-track {
+  height: 4px;
+  border-radius: 2px;
+  background: var(--surface-3);
+}
+:where(input[type="range"])::-webkit-slider-thumb {
+  -webkit-appearance: none;
+  width: 12px;
+  height: 12px;
+  margin-top: -4px;
+  border: none;
+  border-radius: 50%;
+  background: var(--text-1);
+  box-shadow: 0 0 0 3px var(--accent-soft);
+}
+:where(input[type="range"]):hover::-webkit-slider-thumb {
+  background: #fff;
+  box-shadow: 0 0 0 4px var(--accent-strong-soft);
+}
+:where(input[type="range"]):focus-visible {
+  box-shadow: none;
+}
+:where(input[type="range"]):focus-visible::-webkit-slider-thumb {
+  box-shadow: var(--focus-ring);
+}
+:where(input[type="range"]:disabled) {
+  cursor: default;
+  opacity: 0.5;
+}
