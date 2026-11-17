@@ -243,7 +243,7 @@
 </script>
 
 {#if view === "export" && current !== null}
-  <ExportScreen onclose={() => (view = "editor")} />
+  <ExportScreen projectName={current?.name ?? null} onclose={() => (view = "editor")} />
 {:else if view === "editor" && current !== null}
   <Editor
     projectName={current?.name ?? null}
