@@ -17,7 +17,9 @@
 - **Settings that already have a home:** the voice reference (project screen), the art folder (project screen), FX presets (Voice FX tab), takes and storage (Storage tab), avatar base motion (Avatar tab). Emotion presets live in `templates/emotion_presets.json` with no UI. Export choices start from `Project.export` but are not saved back (M6 known issue).
 - **Carried over from earlier milestones (Next up item 3):** UI-1d (lane colours, a clearer selected state), UI-1e (icon buttons), `takes_fx` sizes in the storage manager, clean-up of `media/envelopes/` and `media/avatar_preview/`.
 
-## Decisions (ask the user at the start of M7)
+## Decisions (settled 2026-11-17, see the decisions log in `PROJECT_STATE.md`)
+
+> **Settled:** decisions 2 to 5 as recommended. Decision 1 changed: only the user installs, but on any of their own machines with one double-click. `install.bat` bootstraps `uv`, a portable pinned Node (`tools\node\`) and ffmpeg without admin rights, then creates `run.bat` and a desktop shortcut. Decision 6: UI-1d and UI-1e moved to UI-2 (`docs/tasks/UI-overhaul.md`), which runs before S2. The clean-ups and storage sizes stay in S4.
 
 1. **Who installs it?** Only the user, on this machine and maybe a second one of their own, or other people too? This decides whether `install.bat` builds the frontend (needs Node) or the repo ships a built `frontend/dist`, whether ffmpeg is downloaded by the script, and whether licences matter (Pedalboard is GPL: only relevant if the app is given to others). **Recommendation:** only the user; `install.bat` checks for `uv` and Node, runs `uv sync`, builds the frontend, downloads the pinned ffmpeg 8.1 build into `bin/`, and creates `run.bat`.
 2. **Weights download:** in `install.bat` (a console with a progress bar, before the app ever opens) or on first run inside the app (a "Download the voice model (about N GB)" screen)? **Recommendation:** in the app, as the first-run screen, with progress and a retry; after it finishes the worker always runs with `HF_HUB_OFFLINE=1` (rule 8). `install.bat` can offer to do it too.
