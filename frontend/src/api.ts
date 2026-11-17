@@ -760,3 +760,77 @@ export function processedTakeUrl(
     (trim === "" ? "" : `&t=${encodeURIComponent(trim)}`)
   );
 }
+
+// ---------------------------------------------------------------------------
+// Export (M6): pre-flight, start, progress, cancel. Shapes in docs/API_MODELS.md.
+// ---------------------------------------------------------------------------
+
+export type PreflightIssue = {
+  severity: "error" | "warning";
+  kind: string;
+  message: string;
+  item_id: string | null;
+  t_ms: number | null;
+};
+
+export type PreflightReport = {
+  ok: boolean;
+  error_count: number;
+  warning_count: number;
+  issues: PreflightIssue[];
+};
+
+export type ExportDefaults = {
+  folder: string;
+  include_overlay: boolean;
+  include_raw_links: boolean;
+  unload_voice: boolean;
+  height: number;
+  fps: string;
+};
+
+export type ExportFile = { name: string; bytes: number | null; files: number | null };
+
+export type ExportState = "idle" | "running" | "done" | "failed" | "cancelled";
+
+export type ExportStatus = {
+  state: ExportState;
+  stage: string;
+  fraction: number;
+  elapsed_s: number;
+  eta_s: number | null;
+  folder: string | null;
+  message: string | null;
+  files: ExportFile[];
+  video_ms: number | null;
+  defaults: ExportDefaults | null;
+};
+
+export type ExportRequest = {
+  folder: string | null;
+  include_overlay: boolean;
+  include_raw_links: boolean;
+  unload_voice: boolean;
+  limit_seconds: number | null;
+  accept_warnings: boolean;
+};
+
+export function getExportPreflight(): Promise<PreflightReport> {
+  return request<PreflightReport>("/api/export/preflight");
+}
+
+export function getExportStatus(): Promise<ExportStatus> {
+  return request<ExportStatus>("/api/export/status");
+}
+
+export function startExport(body: ExportRequest): Promise<ExportStatus> {
+  return post<ExportStatus>("/api/export/start", body);
+}
+
+export function cancelExport(): Promise<ExportStatus> {
+  return post<ExportStatus>("/api/export/cancel");
+}
+
+export function openExportFolder(): Promise<{ folder: string }> {
+  return post<{ folder: string }>("/api/export/open-folder");
+}

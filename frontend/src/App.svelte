@@ -21,6 +21,7 @@
     type VoiceState,
   } from "./api";
   import Editor from "./Editor.svelte";
+  import ExportScreen from "./ExportScreen.svelte";
   import { cleanPathInput, voiceStatusText } from "./voice";
 
   let current = $state<ProjectSummary | null>(null);
@@ -32,7 +33,7 @@
   let referencePath = $state("");
   let error = $state<string | null>(null);
   let busy = $state(false);
-  let view = $state<"project" | "editor">("project");
+  let view = $state<"project" | "editor" | "export">("project");
 
   let newName = $state("");
   let newParent = $state("");
@@ -203,12 +204,15 @@
   void restore();
 </script>
 
-{#if view === "editor" && current !== null}
+{#if view === "export" && current !== null}
+  <ExportScreen onclose={() => (view = "editor")} />
+{:else if view === "editor" && current !== null}
   <Editor
     onclose={() => {
       view = "project";
       void refreshProject();
     }}
+    onexport={() => (view = "export")}
   />
 {:else}
 <main>

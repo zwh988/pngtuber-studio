@@ -12,8 +12,18 @@ from backend.audio.fxstate import FxState
 from backend.avatar.envelope import EnvelopeReport
 from backend.avatar.scan import AvatarState
 from backend.avatar.track import FrameTrack
+from backend.export.errors import ExportError
+from backend.export.job import (
+    ExportDefaults,
+    ExportManager,
+    ExportRequest,
+    ExportStatus,
+    RunFn,
+    open_folder,
+)
+from backend.export.pipeline import run_export
 from backend.export.preflight import PreflightReport
-from backend.export.tools import encoder_problem
+from backend.export.tools import default_ffmpeg_path, encoder_problem
 from backend.media.serve import range_response
 from backend.project.edit_ops import (
     AddPlacementOp,
@@ -51,7 +61,7 @@ from backend.voice.takes import StorageReport, TakeDeleteReport, TakeItem, TakeT
 
 APP_NAME = "PNGtuber Studio"
 
-_API_ERRORS = (SessionError, ProjectError, TemplateError, FootageError, JobError)
+_API_ERRORS = (SessionError, ProjectError, TemplateError, FootageError, JobError, ExportError)
 
 _MISSING_FRONTEND_HTML = (
     "<!doctype html><title>PNGtuber Studio</title>"
@@ -115,10 +125,12 @@ def create_app(
     session: Session | None = None,
     jobs: JobQueue | None = None,
     export_tools: Callable[[], str | None] | None = None,
+    export_run: RunFn | None = None,
 ) -> FastAPI:
     """``jobs`` is the voice generation queue. By default one is built around the
     real GPU worker; nothing starts until the first job is submitted. The caller
-    that owns the app (``main.py``) closes it."""
+    that owns the app (``main.py``) closes it. ``export_tools`` and ``export_run``
+    replace the NVENC probe and the export steps in tests."""
     app = FastAPI(title=APP_NAME)
     active = session if session is not None else Session()
     queue = (
@@ -222,6 +234,25 @@ def create_app(
 
     check_tools = export_tools if export_tools is not None else encoder_problem
 
+    def unload_voice() -> None:
+        job = queue.submit_unload()
+        queue.wait(job.id, timeout_s=120.0)
+
+    exports = ExportManager(
+        active,
+        ffmpeg=default_ffmpeg_path,
+        tools_problem=check_tools,
+        voice_busy=lambda: queue.status().active,
+        unload_voice=unload_voice,
+        run=export_run if export_run is not None else run_export,
+    )
+
+    def export_defaults() -> ExportDefaults | None:
+        try:
+            return active.export_defaults()
+        except SessionError:
+            return None
+
     @app.get("/api/export/preflight")
     def get_export_preflight() -> PreflightReport:
         # M6-1: what blocks or needs confirming before an export (probes ffmpeg once).
@@ -229,6 +260,44 @@ def create_app(
             return active.export_preflight(tools_problem=check_tools())
         except _API_ERRORS as exc:
             raise HTTPException(status_code=400, detail=str(exc)) from exc
+
+    @app.get("/api/export/status")
+    def get_export_status() -> ExportStatus:
+        # M6-7: polled by the export screen (progress, time left, result files).
+        return exports.status(defaults=export_defaults())
+
+    @app.post("/api/export/start")
+    def start_export(request: ExportRequest) -> ExportStatus:
+        defaults = export_defaults()
+        if defaults is None:
+            raise HTTPException(status_code=400, detail="no project is open")
+        try:
+            exports.start(request, Path(defaults.folder))
+        except _API_ERRORS as exc:
+            raise HTTPException(status_code=400, detail=str(exc)) from exc
+        return exports.status(defaults=defaults)
+
+    @app.post("/api/export/cancel")
+    def cancel_export() -> ExportStatus:
+        try:
+            exports.cancel()
+        except _API_ERRORS as exc:
+            raise HTTPException(status_code=400, detail=str(exc)) from exc
+        return exports.status(defaults=export_defaults())
+
+    @app.post("/api/export/open-folder")
+    def open_export_folder() -> dict[str, str]:
+        # Only the last export's folder, or the project's exports folder: never a path
+        # from the request.
+        status = exports.status()
+        defaults = export_defaults()
+        target = Path(status.folder) if status.folder else None
+        if (target is None or not target.is_dir()) and defaults is not None:
+            target = Path(defaults.folder)
+        if target is None or not target.is_dir():
+            raise HTTPException(status_code=404, detail="no export folder yet")
+        open_folder(target)
+        return {"folder": str(target)}
 
     @app.get("/api/avatar/track")
     def get_avatar_track() -> FrameTrack:
@@ -302,8 +371,14 @@ def create_app(
         except _API_ERRORS as exc:
             raise HTTPException(status_code=400, detail=str(exc)) from exc
 
+    def refuse_while_exporting() -> None:
+        # Rule 7: one GPU job at a time. NVENC and the voice model share the GPU.
+        if exports.running:
+            raise HTTPException(status_code=400, detail="an export is running: generate after it")
+
     @app.post("/api/voice/generate")
     def generate_line(request: LineIdRequest) -> JobItem:
+        refuse_while_exporting()
         try:
             return queue.submit(request.line_id)
         except _API_ERRORS as exc:
@@ -311,6 +386,7 @@ def create_app(
 
     @app.post("/api/voice/reroll")
     def reroll_line(request: LineIdRequest) -> JobItem:
+        refuse_while_exporting()
         try:
             return queue.submit(request.line_id, reroll=True)
         except _API_ERRORS as exc:

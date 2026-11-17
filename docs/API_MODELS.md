@@ -177,3 +177,31 @@ Lanes (`backend/avatar/lanes.py`): `expression` (name), `bounce` 0-3 (1), `float
 - A preset is applied by sending its `chain` in `set_fx_chain`. Commit one edit per slider release or short rest: each is an undo step.
 - **After undo or redo** (`POST /api/timeline/undo`, `/redo`, which return `EditResult {label, timeline}`) the chain is not in the timeline: re-fetch `GET /api/fx`. `timeline.fx_version` and `timeline.game_audio_db` are there so decoded audio can be dropped at once.
 - Audition and playback of a take through the chain: `GET /media/take/{id}?processed=1&stretch=<1.0 to 1.25>&v=<fx_version>` (WAV through `range_response`). Slider changes cost no GPU; the backend re-renders in the background after every change, about 25 ms per spoken line.
+
+# Export (M6: `backend/export/preflight.py`, `backend/export/job.py`)
+
+## `GET /api/export/preflight` : `PreflightReport`
+
+- `{ok, error_count, warning_count, issues: PreflightIssue[]}`; `ok` is true when there is no error (warnings may remain).
+- `PreflightIssue`: `{severity: "error" | "warning", kind, message, item_id: string | null, t_ms: number | null}`. `t_ms` is a timeline time to jump to when the issue has one.
+- Error kinds: `tools` (ffmpeg or NVENC), `fx_chain_invalid`, `no_clips`, `source_missing`, `clip_effect_unknown`, `reference_clip_missing_source`, `take_file_missing`. Warning kinds: `other_tracks`, other `reference_*`, `orphan_placement`, `placement_off_timeline`, `no_take`, `overflow` (only when `allow_overlap` is off), `orphan_keyframes`, `orphan_reactions`, `no_avatar`, `art_warning`. HTTP 400 when no project is open. The first call probes NVENC (about half a second).
+
+## `GET /api/export/status` : `ExportStatus`
+
+- `{state: "idle" | "running" | "done" | "failed" | "cancelled", stage, fraction (0..1), elapsed_s, eta_s: number | null, folder: string | null, message: string | null, files: ExportFile[], video_ms: number | null, defaults: ExportDefaults | null}`.
+- `stage` while running: `prepare`, `unload`, `voice`, `render`, `finish`, then `done`. `eta_s` is null until 3% is done. Poll about every 500 ms while `state` is `running`.
+- `ExportFile`: `{name, bytes: number | null, files: number | null}`; folders end with `/` and have `files`.
+- `ExportDefaults` (null when no project is open): `{folder (the project's exports folder), include_overlay, include_raw_links, unload_voice, height, fps}` from `Project.export`.
+- After a cancel or a failure, `folder` is the renamed `... (incomplete)` folder (nothing deleted), or null when nothing was written.
+
+## `POST /api/export/start` : `ExportStatus`
+
+- Body `ExportRequest`: `{folder: string | null (parent folder; null: the project's exports), include_overlay, include_raw_links, unload_voice, limit_seconds: number | null (> 0: export only the start), accept_warnings}`. Each export gets its own `YYYY-MM-DD HHMM` folder inside the parent (` (2)` when taken).
+- HTTP 400 `{detail}` when: no project is open, an export is already running, voice generation is busy, the pre-flight has errors, it has warnings and `accept_warnings` is false, or `folder` does not exist. 422 for a bad body.
+- While an export runs, `POST /api/voice/generate` and `/reroll` answer 400 (rule 7).
+
+## `POST /api/export/cancel` : `ExportStatus`, `POST /api/export/open-folder` : `{folder}`
+
+- Cancel: 400 when nothing runs; the export stops within a second or two.
+- Open folder: shows the last export's folder in Explorer (else the project's exports folder); 404 when there is none. It never takes a path from the request.
+

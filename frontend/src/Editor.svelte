@@ -50,7 +50,7 @@
   import { formatBytes, isLive, jobText, newLineId, workerText } from "./voice";
   import { VoicePlayback } from "./voicePlayback";
 
-  let { onclose }: { onclose: () => void } = $props();
+  let { onclose, onexport }: { onclose: () => void; onexport: () => void } = $props();
 
   let timeline = $state<TimelineState | null>(null);
   let sources = $state<FootageItem[]>([]);
@@ -732,6 +732,9 @@
       title={timeline?.redo_label ?? ""}
     >
       Redo
+    </button>
+    <button type="button" class="export" disabled={busy || timeline === null} onclick={onexport}>
+      Export...
     </button>
   </header>
 

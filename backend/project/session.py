@@ -56,6 +56,7 @@ from backend.avatar.track import (
     sprite_path_for_key,
 )
 from backend.edl.anchoring import check_references, check_voice_references
+from backend.export.job import EXPORTS_DIR, ExportDefaults
 from backend.export.pipeline import ExportInputs
 from backend.export.preflight import PreflightReport, preflight
 from backend.project.avatar_commands import SetAvatarArtFolder
@@ -686,6 +687,21 @@ class Session:
             track=track,
             art=art,
             art_root=art_root,
+        )
+
+    def export_defaults(self) -> ExportDefaults:
+        """The export screen's starting choices: the project's ``exports`` folder and
+        its export settings (M6-7)."""
+        with self._lock:
+            folder, stack = self._require_open()
+            settings = stack.project.export
+        return ExportDefaults(
+            folder=str(folder / EXPORTS_DIR),
+            include_overlay=settings.include_avatar_overlay,
+            include_raw_links=settings.include_raw_video_link,
+            unload_voice=settings.unload_tts_before_export,
+            height=settings.height,
+            fps=str(settings.fps),
         )
 
     def export_preflight(self, tools_problem: str | None = None) -> PreflightReport:
