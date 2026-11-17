@@ -3,9 +3,12 @@
 Run from the repo root: ``uv run python -m backend.main``
 """
 
+import ctypes
 import socket
+import sys
 import threading
 import time
+from pathlib import Path
 from typing import Any
 
 import uvicorn
@@ -17,6 +20,11 @@ from backend.project.session import Session
 from backend.voice.engine import chatterbox_model_version
 from backend.voice.jobqueue import JobQueue
 from backend.voice.subprocess_worker import SubprocessWorker, default_worker_log_path
+
+APP_ICON = Path(__file__).resolve().parents[1] / "assets" / "app.ico"
+# Windows taskbar identity: without it the window groups under python.exe and
+# the taskbar shows python.exe's icon instead of the window's.
+APP_USER_MODEL_ID = "PNGtuberStudio.App"
 
 VIDEO_FILE_TYPES = (
     "Video files (*.mkv;*.mp4;*.mov;*.avi;*.webm;*.m4v;*.flv;*.ts)",
@@ -62,7 +70,18 @@ def _free_port() -> int:
         return int(sock.getsockname()[1])
 
 
+def _set_app_user_model_id() -> None:
+    """Give the process its own taskbar identity (Windows only; no-op elsewhere)."""
+    if sys.platform != "win32":
+        return
+    try:
+        ctypes.windll.shell32.SetCurrentProcessExplicitAppUserModelID(APP_USER_MODEL_ID)
+    except (AttributeError, OSError):
+        pass
+
+
 def main() -> None:
+    _set_app_user_model_id()
     port = _free_port()
     session = Session(recent_path=default_recent_path())
     # Renders the processed takes in the background (CPU only) after every change.
@@ -95,7 +114,9 @@ def main() -> None:
         height=800,
         js_api=Api(),
     )
-    webview.start()
+    # pywebview's docs say "GTK/QT only", but its WinForms backend uses this icon
+    # for the window (and so the taskbar); without it, python.exe's icon shows.
+    webview.start(icon=str(APP_ICON) if APP_ICON.is_file() else None)
 
     server.should_exit = True
     jobs.close()  # cancels a running job and stops the GPU worker

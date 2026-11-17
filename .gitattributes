@@ -1,0 +1,4 @@
+# Windows batch files need CRLF line endings (cmd.exe mis-reads labels and blocks with LF).
+# Stored as CRLF in the repo, so GitHub "Download ZIP" gives CRLF too.
+*.bat -text
+*.ps1 text eol=crlf

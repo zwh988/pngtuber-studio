@@ -36,3 +36,8 @@ Thumbs.db
 
 # Avatar art (large PNGs, rule 9)
 avatars/
+
+# Installer (M7): portable uv, Node and downloads; generated launcher and log
+tools/
+run.bat
+install.log

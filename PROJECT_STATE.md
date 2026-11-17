@@ -2,8 +2,8 @@
 
 Living document: how the project works right now and where everything lives. **Update it at the end of every task** (see the checklist in `CLAUDE.md`). Keep it factual and short; link to files instead of copying code.
 
-- **Last updated:** 2026-11-17 (UI-2 S8 wrap-up: the UI overhaul is done on branch `ui-2-overhaul`, S1 to S7 each checked by the user in the app. Agent session: `uv run pytest` 1473 passed, ruff clean, `npm run check` 0 errors and 0 warnings, `npm test` 35 passed, `npm run build` ok; a scripted regression pass on a hard-linked copy of `Rack 1` passed (see the UI-2 S8 row in the decisions log))
-- **Current milestone:** UI-2 (UI overhaul) done on branch `ui-2-overhaul`; merge into `main` and tag `ui-2-done`. M7 (polish): S1 decisions settled on 2026-11-17; S2 to S8 come next, built on the new theme.
+- **Last updated:** 2026-11-17 (M7 S2: `install.bat` and `run.bat`, licence, third-party notices, README install section, on branch `m7-polish`. Agent session: two full `install.bat` runs on the dev machine (the first downloaded uv and Node and rebuilt the frontend; the second skipped those and downloaded the pinned ffmpeg with its checksum), all four install checks OK, `run.bat` opened the app; ruff clean)
+- **Current milestone:** M7 (polish) on branch `m7-polish`: S1 decisions settled, UI-2 merged and tagged `ui-2-done`, S2 (install) built and dry-run by the agent, waiting for the user's own double-click check; S3 (first run and model download) is next.
 - **Overall status:** M0 verdict GO (see "M0 findings"). The app runs: a pywebview window shows a Svelte project screen (create from template, open, Recent, footage scan, rescan, relink) and, new in M2, a **video editor screen** reached from "Open editor": add footage to the timeline, a player that plays across the cuts (segment hopping, clip speed with pitch preserved), a custom canvas timeline (ruler, clips, cut markers, speed badges, playhead, zoom and scroll), clip selection, drag to trim and reorder, the hotkeys from spec 4.2, and unlimited undo/redo. The backend behind it (time mapping, clip commands, orphan logic, reference check, timeline API, media server) is pure and tested (490 tests passing). Voice generation now works end to end (M3): a voice profile section on the project screen, a Line bank tab (write lines, emotion and slider overrides, generate, reroll, cancel, take picker), a status bar with the GPU queue and takes on disk, and a Storage tab with confirmed deletes. Lines can be placed on the footage (voice lane with waveform blocks), play in sync with the video through Web Audio, warn when they run into the next line (red block edge), and be fixed by Nudge earlier, Tighten (pitch-preserving speed-up up to +25 percent) or Reroll. There is no avatar or export yet. The voice chain exists in the backend (M4 chat B: processed takes with trim, EQ, compressor, effects, loudness and limiter, served through `/media/take/{id}?processed=1`, edited through `/api/fx`, rendered ahead in the background) but has no UI yet and nothing plays it; placed lines still play the raw take until chats C and D. No `install.bat` / `run.bat` yet.
 
 ## How to run / test
@@ -11,7 +11,13 @@ Living document: how the project works right now and where everything lives. **U
 **Always run commands from the repo root**, not from `docs\`.
 
 ```powershell
-# setup (manual, until install.bat exists)
+# setup: double-click install.bat (or run it from a console). It writes install.log, is safe to run again, and creates run.bat
+.\install.bat
+.\run.bat                    # starts the app (uv run --frozen python -m backend.main); the desktop shortcut runs it with the console minimized
+# install.bat puts uv 0.13.0 in tools\uv\ and Node 24.21.0 in tools\node\ (both git-ignored); use them when they are not on PATH:
+#   .\tools\uv\uv.exe run pytest        $env:Path = "$PWD\tools\node;$env:Path"   (then npm works in frontend\)
+
+# manual setup (what install.bat does)
 uv sync                      # Python 3.11, torch 2.6.0+cu126, chatterbox-tts, fastapi, uvicorn, pywebview, pydantic, pytest, ruff, httpx (dev); `pedalboard` (M3) and `pyloudnorm` (M4) were added with `uv add`
 
 # tests and lint (from repo root)
@@ -29,12 +35,17 @@ cd ..
 # run the app (window titled "PNGtuber Studio"); rebuild the frontend first after any frontend change
 uv run python -m backend.main
 
-# ffmpeg (not committed, bin/ is git-ignored): BtbN 8.1 release branch, NOT master or 9.0 (see M0 findings)
+# ffmpeg (not committed, bin/ is git-ignored): BtbN 8.1 release branch, NOT master or 9.0 (see M0 findings).
+# install.bat downloads the pinned month-end build n8.1.3-27-g8dca1586f4 (tag autobuild-2026-10-31-12-59, SHA-256 checked) and falls back to
+# the "latest" 8.1 URL below only when the pinned one is gone. Manual fallback:
 $zip = "$env:TEMP\ffmpeg-n81.zip"; $dir = "$env:TEMP\ffmpeg-n81"
 Invoke-WebRequest -Uri "https://github.com/BtbN/FFmpeg-Builds/releases/download/latest/ffmpeg-n8.1-latest-win64-gpl-8.1.zip" -OutFile $zip
 Expand-Archive -Path $zip -DestinationPath $dir -Force
 Copy-Item "$dir\*\bin\ffmpeg.exe" bin\ -Force
 Copy-Item "$dir\*\bin\ffprobe.exe" bin\ -Force
+
+# install check alone (CUDA torch, GPU and VRAM, ffmpeg NVENC, ffprobe; exit 1 on a failure)
+uv run python scripts\install\check_install.py
 
 # spike scripts
 uv run python scripts\spike\check_cuda.py
@@ -73,7 +84,7 @@ Status values: `empty` (placeholder only), `partial`, `done`.
 | `scripts/spike/out/` | spike output, git-ignored | n/a |
 | `backend/__init__.py` | package marker | done |
 | `backend/app.py` | FastAPI app factory `create_app(static_dir=None, session=None, jobs=None)`, `/api/*` routes (project, footage, recent, timeline and edits, voice, lines, takes, storage, voice jobs, placements, take peaks), `/media/source/{source_id}`, `/media/take/{take_id}`, serves `frontend/dist`. `jobs` is the generation queue; by default one is built around the real worker and nothing starts until the first job | done (M1-6, M2-S6, S7); voice and job routes done (pytest passed; used from the S5 UI) (M3); placement and peaks routes done (S6a, pytest passed); S8c: `POST /api/timeline/stretch`, and `GET /media/take/{id}?stretch=1.083` serves a stretched copy (rendered once, then kept); M4 S3: `GET /media/take/{id}?processed=1&stretch=1.083&v=<fx_version>` serves the take through the voice chain (rendered once per key), `GET /api/fx`, `POST /api/fx/edit` (written, user confirmed); M5 S3: `GET /api/takes/{id}/trim[?preview=1&start_ms=&end_ms=]` (`TakeTrimInfo`, read only); M5 S5: `GET /api/avatar`, `POST /api/avatar/folder {path}`; M5 S6: `GET /api/takes/{id}/envelope?stretch=` (`EnvelopeReport`, 404 without a file); M5 S10a: `GET /api/avatar/track` (`FrameTrack`), `GET /media/avatar/{expression}/{state}` (preview sprite, looked up through the loader, 404 otherwise) |
-| `backend/main.py` | app shell: uvicorn in a thread on a free 127.0.0.1 port plus pywebview window; `Api` class with `pick_folder` / `pick_file`; builds the `JobQueue` around a `SubprocessWorker` and calls `jobs.close()` after the window closes, which stops the GPU worker | done (M1-6); queue wiring done (pytest passed; used from the S5 UI) (M3-3); M4 S3d: calls `session.enable_prefetch()` at start and `session.shutdown_prefetch()` at exit (user confirmed) |
+| `backend/main.py` | app shell: uvicorn in a thread on a free 127.0.0.1 port plus pywebview window; `Api` class with `pick_folder` / `pick_file`; builds the `JobQueue` around a `SubprocessWorker` and calls `jobs.close()` after the window closes, which stops the GPU worker | done (M1-6); queue wiring done (pytest passed; used from the S5 UI) (M3-3); M4 S3d: calls `session.enable_prefetch()` at start and `session.shutdown_prefetch()` at exit (user confirmed); M7 S2: window icon `assets/app.ico` and the taskbar AppUserModelID `PNGtuberStudio.App` |
 | `backend/project/schema.py` | pydantic v2 schema, `SCHEMA_VERSION = 3`, `new_id()`, `STRETCH_MIN` / `STRETCH_MAX` (1.0 to 1.25), `Placement.stretch`, `Take.trim_start_ms` / `trim_end_ms` (v3) | done (M1-1, extended M1-5; v2 in M3 S8c; v3 in M5 S3); M5 S5: `AnyPath` (relative or absolute POSIX) for `AvatarSettings.art_folder`, no schema bump; M5 S11: `SCHEMA_VERSION = 4`, `AvatarSettings` gains `bounce`, `float_amp`, `float_speed`, `float_angle_deg`, `blink_rate`, `mouth_sensitivity` |
 | `backend/project/store.py` | folder layout, create/load/save, atomic write, `.bak` rotation | done (M1-2) |
 | `backend/project/migrations.py` | `migrate()` chain, `MIGRATIONS` registry (`{1: _v1_to_v2, 2: _v2_to_v3}`: adds `stretch: 1.0` to every placement; adds `trim_start_ms` / `trim_end_ms` = null to every take) | done (M1-2; v1 to v2 in M3 S8c; v2 to v3 in M5 S3); `3: _v3_to_v4` adds the six base motion settings (`AVATAR_V4_DEFAULTS`) |
@@ -191,7 +202,15 @@ Status values: `empty` (placeholder only), `partial`, `done`.
 | `templates/default_channel.json` | default channel template (no bookends, "Default voice" without reference clips, FX/avatar/export defaults) | done (M1-5) |
 | `templates/emotion_presets.json` | the five emotion presets from spec 6 (exaggeration, cfg_weight, default avatar expression); tune by ear | done (M3-2, user confirmed) |
 | `templates/fx_presets.json` | four voice FX presets (Clean, Warm, Radio, Podcast), each a full `FxChain`; guesses, tune by ear | written (M4 chat A S2) |
-| `scripts/` | install/run helpers | spike only |
+| `install.bat` | M7-2: one double-click installer; runs `scripts\install\install.ps1` with `-ExecutionPolicy Bypass`, then pauses. Stored with CRLF (`.gitattributes` `*.bat -text`) | done (M7 S2, dry-run by the agent) |
+| `scripts/install/install.ps1` | M7-2: the installer (Windows PowerShell 5.1, ASCII only). Pins at the top (uv 0.13.0, Node 24.21.0, ffmpeg n8.1.3-27, each with its SHA-256; minimum driver 570). Steps: 64-bit Windows and free space (warns under 15 GB), NVIDIA GPU and driver (nvidia-smi, else WMI; stops with a message without one), portable uv into `tools\uv\`, `uv sync --frozen`, portable Node into `tools\node\`, `npm ci` (skipped when the stamp in `node_modules` matches `package-lock.json`) and `npm run build` (skipped when `dist\.pngtuber-build-stamp` matches the hash of the frontend sources), ffmpeg and ffprobe into `bin\` (skipped when both are 8.1; licence copied to `bin\ffmpeg-LICENSE.txt`), `check_install.py`, then writes `run.bat` and the desktop shortcut (`assets\app.ico`, console minimized). Downloads go to `tools\downloads\` through `curl.exe`, extraction through `tar.exe`. Log in `install.log`. Exit 0 done, 1 an expected stop, 2 a bug | done (M7 S2, dry-run by the agent) |
+| `scripts/install/check_install.py` | M7-2: post-install checks, one line each: torch and CUDA, GPU and VRAM (warns under 6 GiB), `encoder_problem` (NVENC), ffprobe `-version`; exit 1 on a FAIL | done (M7 S2) |
+| `run.bat` | written by `install.bat` (git-ignored): `tools\uv\uv.exe run --frozen python -m backend.main`, pauses on an error | generated |
+| `tools/` | git-ignored: `uv\`, `node\`, `downloads\` (kept so a rerun needs no download) | generated |
+| `LICENSE` | GPL-3.0 text (the project is GPL-3.0-or-later) | done (M7 S2) |
+| `THIRD_PARTY_NOTICES.md` | what `install.bat` and the first run download and their licences (FFmpeg GPL build, uv, Node, Python, the Chatterbox weights MIT), the main Python and frontend packages, the voice-cloning rule | done (M7 S2) |
+| `README.md` | what the app is, status, Install (needs, three steps, Unblock and SmartScreen hints), voice-cloning consent (rule 15), licence | done (M7 S2) |
+| `scripts/` | install helpers (`scripts/install/`) and spike scripts | partial |
 | `tests/test_schema.py` | schema tests (29) | done |
 | `tests/test_persistence.py` | migrations, autosave tracker, store tests (28) | done |
 | `tests/test_footage.py` | ffprobe parsing (canned JSON), scan planning, folder scan with fake probe (25) | done |
@@ -759,6 +778,11 @@ MyRack/
 | 2026-11-17 | UI-2 (S7): the export screen has the editor's header (icon Back, "Rack 1 / Export"; `ExportScreen` gained a `projectName` prop) and two columns, at most 1100 px wide: Bundle and Export cards on the left, Pre-flight on the right (error and warning count badges, issues as an icon list with time chips, "Everything is ready" as a success banner, Check again in the card header). The progress bar turns green when done and red when failed or cancelled. Every screen was checked at 1280 x 720 and 1920 x 1080 with no page overflow. A 5 s test export of the audit copy ran from the new screen (3 s, done state and file list shown) |
 | 2026-11-17 | UI-2 (S8): acceptance. No colour literals in any `.svelte` file (the last ones became `--on-accent`, `--video-bg`, and theme reads for the avatar overlay's hover box and handle; the sprite drawing is unchanged, rule 5). The only `:global` rules in `Editor.svelte` are layout. Automated: pytest 1473 (unchanged), ruff clean, svelte-check 0 errors and 0 warnings, vitest 35, build ok. Scripted regression on the hard-linked `Rack 1` copy, each followed by undo: split (S), expression key (E), reaction (R), new line (N), add clip, drag a voice block; plus selection, seeking, lanes, the trimmer, Storage's delete confirm (cancelled) and a 5 s test export. The user checked every step in the app. Not covered by the agent: generation, audio playback and audition (GPU and sound) |
 | 2026-11-17 | UI-2: spec 4.1 and 4.2 updated where they describe the look (the project screen's sidebar and pages; the editor's tab order Footage, Line bank, Voice FX, Avatar, Storage, and the timeline's lane-name column and icon toolbar). Behaviour is unchanged |
+| 2026-11-17 | M7 (S2): licence GPL-3.0-or-later (user's choice; Pedalboard is GPL-3.0). `LICENSE` holds the GPL-3.0 text, `THIRD_PARTY_NOTICES.md` lists the downloaded components and main packages, and the README has the install steps and the voice-cloning rule. Nothing third-party is committed: `install.bat` downloads it on the user's machine |
+| 2026-11-17 | M7 (S2): `install.bat` uses a portable, pinned uv in `tools\uv\` (official GitHub release zip, SHA-256 checked) instead of uv's install script, so it changes nothing outside the app folder (no PATH edit) and every machine gets the same uv. `run.bat` calls that uv. Node 24.21.0 is pinned the same way in `tools\node\`. Dependencies install with `uv sync --frozen` (the lock as committed, dev group included so tests run on any copy) |
+| 2026-11-17 | M7 (S2): ffmpeg pin is BtbN's month-end tag `autobuild-2026-10-31-12-59` (n8.1.3-27-g8dca1586f4, SHA-256 401dffcf...): BtbN keeps month-end builds long term and prunes the dailies. Only when that file is gone does the installer take the "latest" 8.1 build, with a warning that it is not checksum-verified. An existing `bin\ffmpeg.exe` is kept when it is any 8.1 build. The minimum NVIDIA driver is 570 (NVENC API 13.0 for ffmpeg 8.1; CUDA 12.6 needs 560); the dev machine has 581.42 |
+| 2026-11-17 | M7 (S2): the installer skips finished steps by version (uv, Node, ffmpeg) or by stamp files (`node_modules\.pngtuber-install-stamp` = Node version plus the `package-lock.json` hash; `dist\.pngtuber-build-stamp` = hash of the frontend sources), so a rerun takes about 15 s. The weights download stays in the app (decision 2, S3); `install.bat` does not offer it yet |
+| 2026-11-17 | M7 (S2): the window and taskbar show the app logo. `backend/main.py` passes `assets/app.ico` to `webview.start(icon=...)` (pywebview's docs say GTK/QT only, but its WinForms backend uses it; without it the window took the venv `python.exe` icon) and sets `SetCurrentProcessExplicitAppUserModelID("PNGtuberStudio.App")` so the taskbar groups the app apart from python.exe. Checked by the agent: the window's icon handle shows the logo |
 
 ## Known issues / open questions
 
@@ -778,8 +802,10 @@ MyRack/
 - `RelinkSource` itself is still path-only; the metadata check is in `Session.relink_source`. M2 code that relinks must go through the session or repeat the check.
 - Save per change (no debounce) is fine for M1; drag edits in M2 may need the `AutosaveTracker` after all.
 - `scan_footage` probes files one after another (sync, 60 s timeout each) inside the request. Fine for a few recordings; a big batch would make Rescan wait.
-- `default_ffprobe_path()` assumes `bin/ffprobe.exe` at the repo root. Revisit when `install.bat`/packaging lands (M7).
-- The built frontend (`frontend/dist`) is git-ignored; `install.bat` (M7) must build it or ship it.
+- `default_ffprobe_path()` and `default_ffmpeg_path()` assume `bin\` at the repo root; `install.bat` puts them there (M7 S2), so this is by design now.
+- M7 S2: not yet tried: the failure paths of `install.bat` (no NVIDIA GPU, a driver under 570, the ffmpeg fallback URL, no internet), a first install where `uv sync` downloads Python and the 3 GB of packages, and a GitHub "Download ZIP" copy. All are for S7 (clean install).
+- M7 S2: `npm ci` (npm 11) prints "1 package has install scripts not yet covered by allowScripts: esbuild". The build works without that script (esbuild's binary comes from its platform package), so the warning is harmless.
+- M7 S2: `run.bat` keeps a console window (minimized from the shortcut) so a crash stays readable. Hiding it (`pythonw`, logs to a file) can come later.
 - (Fixed in M3 chat B, untested) A command whose `revert` fails during undo used to drop the entry; the stack now keeps the step and restores the project. See the decisions log.
 - ffprobe reports a 12.8 s duration for a nominal 10 s `-c copy` clip (probably keyframe alignment; not verified).
 - No file watcher for `footage/` (by design for M1): rescan on open plus the Rescan button.
@@ -888,7 +914,7 @@ MyRack/
 
 ## Next up
 
-1. **Merge and tag UI-2:** `git switch main`, `git merge ui-2-overhaul`, `git push`, `git tag ui-2-done`, `git push --tags`.
-2. **M7 polish** (`docs/tasks/M7-polish.md`, branch `m7-polish` from `main` after the merge): S1 decisions done; S2 (install, with the licence question) is next.
+1. **M7 S2 user check:** double-click `install.bat` (it should skip almost everything and end "Install finished"), start the app from the new desktop shortcut, and read `README.md` and `THIRD_PARTY_NOTICES.md`.
+2. **M7 S3** (`docs/tasks/M7-polish.md`): first-run model download screen, `HF_HUB_OFFLINE=1` afterwards, warm-up shown as a phase.
 3. **Still open from earlier milestones (M7 S4):** `takes_fx` sizes in the storage manager, clean-up of `media/envelopes/` and `media/avatar_preview/`.
 4. **Tuning by eye:** the avatar constants (see Known issues) and, if exports are too big, the video quality (`VIDEO_ENCODE_ARGS` in `backend/export/editgraph.py`).
