@@ -603,6 +603,8 @@ export type StorageReport = {
   missing_file_count: number;
   unreferenced: UnreferencedFile[];
   unreferenced_bytes: number;
+  /** M7 S4: re-creatable files in media/ (processed takes, envelopes, previews). */
+  cache_bytes: number;
 };
 
 export type JobKind = "generate" | "unload";

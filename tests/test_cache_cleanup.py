@@ -96,3 +96,17 @@ def test_preview_keep_names_cover_every_sprite_of_the_art(tmp_path: Path) -> Non
 def test_no_art_folder_wants_no_previews_and_a_missing_one_is_unknown(tmp_path: Path) -> None:
     assert _preview_keep_names(None, tmp_path) == set()
     assert _preview_keep_names((tmp_path / "gone").as_posix(), tmp_path) is None
+
+
+def test_storage_reports_the_media_cache_size(tmp_path: Path) -> None:
+    from backend.project.session import Session
+
+    session = Session(probe=lambda p: {})
+    session.new_project(str(tmp_path), "Rack")
+    media = tmp_path / "Rack" / "media"
+    touch(media / "takes_fx" / "aaaaaaaaaaaaaaaa.wav", NOW)
+    touch(media / "envelopes" / ENV_A, NOW)
+    touch(media / "avatar_preview" / "0123456789abcdef.png", NOW)
+    report = session.storage()
+    assert report.cache_bytes == 12  # three 4-byte files
+    assert report.total_bytes == 0  # takes only

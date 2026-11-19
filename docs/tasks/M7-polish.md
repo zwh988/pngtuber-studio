@@ -54,7 +54,7 @@ Empty states (what the screen shows with no data). "OK" means it already says wh
 | Editor, Footage tab with no sources | "No footage in this project yet. Go back to the project screen and Rescan." | OK |
 | Line bank, no lines / no takes / nothing selected | "No lines yet. Add one ..." / "No takes yet. Generate this line ..." / "Select a line to edit it." | OK |
 | Avatar tab, no art | warning banner "No usable avatar art: choose the art folder on the project screen." | OK |
-| Storage tab, no lines | "No lines yet." (no next step) | after the Line bank and Storage merge (other session) |
+| Storage tab, no lines | "No lines yet." (no next step) | gone: the Storage tab is part of the Line bank, whose empty state says what to do |
 | Export, pre-flight | errors and warnings with "Fix the errors ... then check again" | OK |
 
 Errors the UI can show:
@@ -73,7 +73,7 @@ Errors the UI can show:
 | Backend error without a reason (HTTP 500) | "HTTP 500" | "Something went wrong inside the app (HTTP 500). The console window shows the details." |
 | GPU out of memory | already "the GPU ran out of memory (close other GPU programs and retry)" | OK |
 
-Carry-overs: clean-up of `media/envelopes/` and `media/avatar_preview/` is done (on idle, same ten-minute rule as `takes_fx`). The `takes_fx` sizes in the storage manager wait for the Line bank and Storage merge.
+Carry-overs: clean-up of `media/envelopes/` and `media/avatar_preview/` is done (on idle, same ten-minute rule as `takes_fx`). The re-creatable files (processed takes, envelopes, preview sprites) are shown as "cache" beside the takes total in the Line bank toolbar.
 
 ## Acceptance checks (user runs these)
 

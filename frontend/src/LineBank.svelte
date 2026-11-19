@@ -388,6 +388,14 @@
     <span class="hint num" title="Takes on disk">
       · {takeCountText(storage.take_count)}, {formatBytes(storage.total_bytes)}
     </span>
+    {#if storage.cache_bytes > 0}
+      <span
+        class="hint num"
+        title="Processed takes, mouth envelopes and avatar preview sprites: made again when needed, and cleaned up automatically when no longer used"
+      >
+        · cache {formatBytes(storage.cache_bytes)}
+      </span>
+    {/if}
     {#if storage.missing_file_count > 0}
       <Badge kind="error">{storage.missing_file_count} take file(s) missing</Badge>
     {/if}

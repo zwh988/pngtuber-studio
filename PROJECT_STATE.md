@@ -2,8 +2,8 @@
 
 Living document: how the project works right now and where everything lives. **Update it at the end of every task** (see the checklist in `CLAUDE.md`). Keep it factual and short; link to files instead of copying code.
 
-- **Last updated:** 2026-11-19 (M7 S6: channel templates, Save as template and a template picker for New project, on branch `m7-polish`. Agent session: `uv run pytest` 1535 passed, ruff clean, `npm run check` 0 errors and 0 warnings, `npm test` 38 passed, `npm run build` ok; in the browser against a scratch project: Save as template, then New project from it (voice reference copied and ready))
-- **Current milestone:** M7 (polish) on branch `m7-polish`: S1, UI-2, S2 (`4012bcd`), S3 (`5c1f4df`), S4 (`287fa5f`) and S5 (`5069a8f`) done; S6 (channel templates) built, waiting for the user's check; S7 (clean-install test) is next. The Line bank and Storage merge (separate session) is in this folder, uncommitted, waiting for the user's check.
+- **Last updated:** 2026-11-19 (M7: S6 committed (`9c84c6c`), the Line bank and Storage merge committed (`414d703`), the S4 leftovers done (media cache size in the Line bank). Agent session: `uv run pytest` 1537 passed, ruff clean, `npm run check` 0 errors and 0 warnings, `npm test` 38 passed, `npm run build` ok)
+- **Current milestone:** M7 (polish) on branch `m7-polish`: S1 to S6 done and committed; S7 (clean-install test on a fresh Windows user account, run by the user) is next, then S8 (wrap-up, merge, tag `m7-done`).
 - **Overall status:** M0 verdict GO (see "M0 findings"). The app runs: a pywebview window shows a Svelte project screen (create from template, open, Recent, footage scan, rescan, relink) and, new in M2, a **video editor screen** reached from "Open editor": add footage to the timeline, a player that plays across the cuts (segment hopping, clip speed with pitch preserved), a custom canvas timeline (ruler, clips, cut markers, speed badges, playhead, zoom and scroll), clip selection, drag to trim and reorder, the hotkeys from spec 4.2, and unlimited undo/redo. The backend behind it (time mapping, clip commands, orphan logic, reference check, timeline API, media server) is pure and tested (490 tests passing). Voice generation now works end to end (M3): a voice profile section on the project screen, a Line bank tab (write lines, emotion and slider overrides, generate, reroll, cancel, take picker), a status bar with the GPU queue and takes on disk, and a Storage tab with confirmed deletes. Lines can be placed on the footage (voice lane with waveform blocks), play in sync with the video through Web Audio, warn when they run into the next line (red block edge), and be fixed by Nudge earlier, Tighten (pitch-preserving speed-up up to +25 percent) or Reroll. There is no avatar or export yet. The voice chain exists in the backend (M4 chat B: processed takes with trim, EQ, compressor, effects, loudness and limiter, served through `/media/take/{id}?processed=1`, edited through `/api/fx`, rendered ahead in the background) but has no UI yet and nothing plays it; placed lines still play the raw take until chats C and D. No `install.bat` / `run.bat` yet.
 
 ## How to run / test
@@ -21,7 +21,7 @@ Living document: how the project works right now and where everything lives. **U
 uv sync                      # Python 3.11, torch 2.6.0+cu126, chatterbox-tts, fastapi, uvicorn, pywebview, pydantic, pytest, ruff, httpx (dev); `pedalboard` (M3) and `pyloudnorm` (M4) were added with `uv add`
 
 # tests and lint (from repo root)
-uv run pytest                # 1535 passed, 1 warning (M7 S6, 2026-11-19; 1524 after M7 S5, 2026-11-18; 1505 after M7 S4; 1491 after M7 S3; 1473 after M6 S9; 1472 after M6 S8; 1461 after M6 S7; 1449 after M6 S6; 1440 after M6 S5; 1425 after M6 S4; 1414 after M6 S3; 1393 at the end of M5; M5 S10b had 1390; 1389 after S10a, 1380 after S9, 1368 after S8, 1340 after S5, 1315 after S3/S4, 2026-11-16, run by the agent; the baseline at the start of M5 was 1291). Earlier history: 490 at the end of M2, about 963 after M3 chat C
+uv run pytest                # 1537 passed, 1 warning (M7 S4 leftovers, 2026-11-19; 1535 after M7 S6; 1524 after M7 S5, 2026-11-18; 1505 after M7 S4; 1491 after M7 S3; 1473 after M6 S9; 1472 after M6 S8; 1461 after M6 S7; 1449 after M6 S6; 1440 after M6 S5; 1425 after M6 S4; 1414 after M6 S3; 1393 at the end of M5; M5 S10b had 1390; 1389 after S10a, 1380 after S9, 1368 after S8, 1340 after S5, 1315 after S3/S4, 2026-11-16, run by the agent; the baseline at the start of M5 was 1291). Earlier history: 490 at the end of M2, about 963 after M3 chat C
 uv run ruff check .
 
 # frontend (needs Node.js LTS: node v24.21.0 / npm 11.19.0 on the dev machine; build-time only)
@@ -807,6 +807,7 @@ MyRack/
 | 2026-11-19 | M7 (S6): `reference_filename` keeps a single `-<hash8>` tag when the source file is already a copy (`me-d857f105.wav` stays that name), so a clip copied from a template into a project is not named `me-d857f105-d857f105.wav`. Names of new imports are unchanged |
 | 2026-11-19 | Logo: the page reads the logo from `assets/logo-512.png` through `GET /app/logo.png` (no-cache) instead of a copy in `frontend/public/` that only a rebuild picked up; the copy is removed. Changing the logo = replace `assets/logo-512.png` (512 px PNG) and `assets/app.ico` (16 to 256 px), then restart the app; run `install.bat` once to refresh the desktop shortcut if Windows keeps the old icon |
 | 2026-11-19 | M8 scope (user): recording audio in the app is out of scope; a video keeps its own sound; dropped audio files go on several audio lanes; extra video lanes are required. `docs/tasks/M8-tracks-and-media.md` revised |
+| 2026-11-19 | M7 (S4 leftovers): `StorageReport.cache_bytes` is the size of `media/takes_fx`, `media/envelopes` and `media/avatar_preview` (re-creatable, cleaned on idle, not part of the takes total); the Line bank toolbar shows it as "cache" with a tooltip. The Storage tab's own empty state went away with the merge |
 
 ## Known issues / open questions
 
@@ -873,7 +874,6 @@ MyRack/
 - M3 chat C: `crossfade_join` is called as `crossfade_join(list_of_arrays, sample_rate)` per the description in this file; `chunking.py` itself was not shown to chat C.
 - M3 chat C: the warm-up assumes `ChatterboxTTS.from_pretrained` loads built-in conditionals so `generate(text)` works without a reference; if it does not, the warm-up error is only logged and the first real job pays the cost.
 - M3 chat C (fixed in M7 S3): the worker now always runs with `HF_HUB_OFFLINE=1` and loads the pinned folder; the only network use is the Voice model page's download (rule 8).
-- M7 S4: still open from the audit: the Storage tab's "No lines yet." has no next step, and the `takes_fx` sizes are not in the storage manager. Both wait for the Line bank and Storage merge (separate session), so the two changes do not collide.
 - M7 S4: `tests/test_export_render.py::test_pipeline_writes_voice_then_renders` failed once in a full run while another session was busy, and passed in every rerun. Watch for it.
 - M7 S3: the Hugging Face cache on the dev machine holds three copies of the same model files (about 8.9 GB: revisions `1b475dff`, `05e904af`, `5bb1f6ee`; no symlinks on Windows without Developer Mode). Only `5bb1f6ee` is used; the other two snapshot folders can be deleted by hand. A fresh install downloads one copy (about 3.0 GB).
 - M7 S3: download progress comes from huggingface_hub's tqdm updates; the last update of a file can fall short of its size, so the bar jumps to the full size when the file is finished. Not yet seen on a real 3 GB download.
@@ -942,7 +942,6 @@ MyRack/
 
 ## Next up
 
-1. **Line bank and Storage merge** (separate session, uncommitted in this folder): the user checks it in the app, then it is committed. After that: the S4 leftovers in the merged tab (`takes_fx` sizes, empty state).
-2. **M7 S6 user check:** on a project page, Save as template; then New project and pick it: the new project has the same voice reference (ready), Voice FX, avatar art and placement, and export defaults. Then commit S6.
-3. **M7 S7** (`docs/tasks/M7-polish.md`): the clean-install test on a fresh Windows user account (the milestone's "done when").
-4. **After M7: M8 tracks and media** (`docs/tasks/M8-tracks-and-media.md`, drafted 2026-11-19, nothing built): audio lanes (music and sound effects dragged onto the timeline), extra video lanes (required), then optional PNG sequences. Recording audio in the app is out of scope. Decisions to settle at its start are listed in the file.
+1. **M7 S7 clean-install test** (user): a new Windows user account, the repo as a GitHub "Download ZIP", `install.bat`, the first-run model download, then one short project from footage to export. Paste back `install.log` and anything that went wrong.
+2. **M7 S8** wrap-up: spec 4.4 and 11 as built, tick M7-1 to M7-5, merge `m7-polish`, tag `m7-done`.
+3. **After M7: M8 tracks and media** (`docs/tasks/M8-tracks-and-media.md`, drafted 2026-11-19, nothing built): audio lanes (music and sound effects dragged onto the timeline), extra video lanes (required), then optional PNG sequences. Recording audio in the app is out of scope. Decisions to settle at its start are listed in the file.

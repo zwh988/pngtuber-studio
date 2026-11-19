@@ -6,6 +6,7 @@ change made through the command stack is saved straight away (``on_change``).
 Pass ``recent_path`` to record opened projects; ``None`` records nothing.
 """
 
+import os
 import re
 import threading
 import time
@@ -218,6 +219,22 @@ def clean_folder_name(name: str) -> str:
     if text.split(".")[0].upper() in _RESERVED:
         raise ValueError(f"'{text}' is a reserved Windows name")
     return text
+
+
+def _folder_bytes(folder: Path) -> int:
+    """Total size of the files directly in ``folder`` (0 when it is missing)."""
+    total = 0
+    try:
+        with os.scandir(folder) as scan:
+            for item in scan:
+                try:
+                    if item.is_file(follow_symlinks=False):
+                        total += item.stat(follow_symlinks=False).st_size
+                except OSError:
+                    continue
+    except OSError:
+        return 0
+    return total
 
 
 def _preview_keep_names(art_folder: str | None, project_folder: Path) -> set[str] | None:
@@ -873,9 +890,15 @@ class Session:
             sizes = {
                 take.raw_file: store.size(take.raw_file) for take in stack.project.takes
             }
-            return build_storage_report(
+            report = build_storage_report(
                 stack.project, sizes, store.unreferenced(set(sizes))
             )
+        media = folder / "media"
+        cache = sum(
+            _folder_bytes(media / name)
+            for name in (FX_DIR_NAME, ENVELOPE_DIR_NAME, PREVIEW_DIR_NAME)
+        )
+        return report.model_copy(update={"cache_bytes": cache})
 
     def project_key(self) -> str | None:
         """Identifies the open project (its folder), or None when none is open.
