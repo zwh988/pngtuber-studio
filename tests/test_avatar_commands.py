@@ -341,14 +341,14 @@ def test_v3_projects_get_the_base_motion_settings() -> None:
     from backend.project.migrations import migrate
     from backend.project.schema import SCHEMA_VERSION
 
-    assert SCHEMA_VERSION == 4
+    assert SCHEMA_VERSION >= 4
     data = {"schema_version": 3, "name": "x", "avatar": {"x": 0.5}}
-    result = migrate(data)
+    result = migrate(data, target=4)
     assert result["schema_version"] == 4
     assert result["avatar"]["bounce"] == 1.0 and result["avatar"]["float_angle_deg"] == 0.0
     assert "bounce" not in data["avatar"]  # input untouched
     assert Project.model_validate(result).avatar.x == 0.5
-    assert migrate({"schema_version": 3, "name": "x"})["schema_version"] == 4
+    assert migrate({"schema_version": 3, "name": "x"}, target=4)["schema_version"] == 4
 
 
 def test_settings_for_motion_and_float_direction() -> None:

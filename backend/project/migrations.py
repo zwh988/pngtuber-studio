@@ -8,7 +8,7 @@ import copy
 from collections.abc import Callable, Mapping
 from typing import Any
 
-from backend.project.schema import SCHEMA_VERSION
+from backend.project.schema import SCHEMA_VERSION, new_id
 
 Migration = Callable[[dict[str, Any]], dict[str, Any]]
 
@@ -49,8 +49,19 @@ def _v3_to_v4(data: dict[str, Any]) -> dict[str, Any]:
     return data
 
 
+def _v4_to_v5(data: dict[str, Any]) -> dict[str, Any]:
+    """v5 adds audio files, audio lanes (one empty "Audio 1") and audio clips (M8-1)."""
+    data.setdefault("audio_files", [])
+    data.setdefault(
+        "audio_lanes",
+        [{"id": new_id(), "name": "Audio 1", "gain_db": 0.0, "mute": False, "solo": False}],
+    )
+    data.setdefault("audio_clips", [])
+    return data
+
+
 # Maps "from version" -> function upgrading that version to version + 1.
-MIGRATIONS: dict[int, Migration] = {1: _v1_to_v2, 2: _v2_to_v3, 3: _v3_to_v4}
+MIGRATIONS: dict[int, Migration] = {1: _v1_to_v2, 2: _v2_to_v3, 3: _v3_to_v4, 4: _v4_to_v5}
 
 
 class MigrationError(Exception):

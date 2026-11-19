@@ -13,6 +13,17 @@ from typing import Annotated, Literal
 
 from pydantic import BaseModel, ConfigDict, Field
 
+from backend.project.audio_commands import (
+    AddAudioClip,
+    AddAudioLane,
+    MoveAudioClip,
+    MoveAudioLane,
+    RemoveAudioClip,
+    RemoveAudioLane,
+    SetAudioClip,
+    SetAudioLane,
+    TrimAudioClip,
+)
 from backend.project.avatar_commands import (
     AddKeyframe,
     AddReaction,
@@ -224,6 +235,73 @@ class SetExportSettingsOp(_Op):
     unload_tts_before_export: bool | None = None
 
 
+# ---- audio lanes and clips (M8-1, schema v5) --------------------------------
+
+
+class AddAudioLaneOp(_Op):
+    op: Literal["add_audio_lane"] = "add_audio_lane"
+    name: str | None = None
+    position: int | None = None
+    lane_id: str | None = Field(default=None, pattern=r"^[0-9a-f]{12}$")
+
+
+class RemoveAudioLaneOp(_Op):
+    op: Literal["remove_audio_lane"] = "remove_audio_lane"
+    lane_id: str
+
+
+class MoveAudioLaneOp(_Op):
+    op: Literal["move_audio_lane"] = "move_audio_lane"
+    lane_id: str
+    new_position: int
+
+
+class SetAudioLaneOp(_Op):
+    op: Literal["set_audio_lane"] = "set_audio_lane"
+    lane_id: str
+    name: str | None = None
+    gain_db: float | None = None
+    mute: bool | None = None
+    solo: bool | None = None
+
+
+class AddAudioClipOp(_Op):
+    op: Literal["add_audio_clip"] = "add_audio_clip"
+    file_id: str
+    lane_id: str
+    timeline_ms: int
+    in_ms: int = 0
+    out_ms: int | None = None
+    clip_id: str | None = Field(default=None, pattern=r"^[0-9a-f]{12}$")
+
+
+class RemoveAudioClipOp(_Op):
+    op: Literal["remove_audio_clip"] = "remove_audio_clip"
+    clip_id: str
+
+
+class MoveAudioClipOp(_Op):
+    op: Literal["move_audio_clip"] = "move_audio_clip"
+    clip_id: str
+    timeline_ms: int
+    lane_id: str | None = None
+
+
+class TrimAudioClipOp(_Op):
+    op: Literal["trim_audio_clip"] = "trim_audio_clip"
+    clip_id: str
+    edge: Literal["start", "end"]
+    timeline_ms: int
+
+
+class SetAudioClipOp(_Op):
+    op: Literal["set_audio_clip"] = "set_audio_clip"
+    clip_id: str
+    gain_db: float | None = None
+    fade_in_ms: int | None = None
+    fade_out_ms: int | None = None
+
+
 EditOp = Annotated[
     AddClipOp
     | RemoveClipOp
@@ -248,7 +326,16 @@ EditOp = Annotated[
     | SetReactionOp
     | RemoveReactionOp
     | SetAvatarSettingsOp
-    | SetExportSettingsOp,
+    | SetExportSettingsOp
+    | AddAudioLaneOp
+    | RemoveAudioLaneOp
+    | MoveAudioLaneOp
+    | SetAudioLaneOp
+    | AddAudioClipOp
+    | RemoveAudioClipOp
+    | MoveAudioClipOp
+    | TrimAudioClipOp
+    | SetAudioClipOp,
     Field(discriminator="op"),
 ]
 
@@ -283,7 +370,43 @@ def build_command(op: EditOp) -> Command:
         return RemovePlacement(op.placement_id)
     if isinstance(op, SetPlacementStretchOp):
         return SetPlacementStretch(op.placement_id, op.stretch)
+    audio = _build_audio_command(op)
+    if audio is not None:
+        return audio
     return _build_avatar_command(op)
+
+
+def _build_audio_command(op: EditOp) -> Command | None:
+    if isinstance(op, AddAudioLaneOp):
+        return AddAudioLane(op.name, position=op.position, lane_id=op.lane_id)
+    if isinstance(op, RemoveAudioLaneOp):
+        return RemoveAudioLane(op.lane_id)
+    if isinstance(op, MoveAudioLaneOp):
+        return MoveAudioLane(op.lane_id, op.new_position)
+    if isinstance(op, SetAudioLaneOp):
+        return SetAudioLane(
+            op.lane_id, name=op.name, gain_db=op.gain_db, mute=op.mute, solo=op.solo
+        )
+    if isinstance(op, AddAudioClipOp):
+        return AddAudioClip(
+            op.file_id,
+            op.lane_id,
+            op.timeline_ms,
+            in_ms=op.in_ms,
+            out_ms=op.out_ms,
+            clip_id=op.clip_id,
+        )
+    if isinstance(op, RemoveAudioClipOp):
+        return RemoveAudioClip(op.clip_id)
+    if isinstance(op, MoveAudioClipOp):
+        return MoveAudioClip(op.clip_id, op.timeline_ms, op.lane_id)
+    if isinstance(op, TrimAudioClipOp):
+        return TrimAudioClip(op.clip_id, op.edge, op.timeline_ms)
+    if isinstance(op, SetAudioClipOp):
+        return SetAudioClip(
+            op.clip_id, gain_db=op.gain_db, fade_in_ms=op.fade_in_ms, fade_out_ms=op.fade_out_ms
+        )
+    return None
 
 
 def _build_avatar_command(op: EditOp) -> Command:

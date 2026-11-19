@@ -1,4 +1,4 @@
-"""Pydantic v2 schema for ``project.json`` (schema version 2).
+"""Pydantic v2 schema for ``project.json`` (see ``SCHEMA_VERSION``).
 
 Conventions (see PROJECT_STATE.md decisions log):
 - All times are integer milliseconds. Anchor times are in *source* time.
@@ -24,7 +24,11 @@ from pydantic import (
     model_validator,
 )
 
-SCHEMA_VERSION = 4
+SCHEMA_VERSION = 5
+
+# Level range of audio lanes and audio clips (schema v5, M8-1), in dB.
+AUDIO_GAIN_MIN_DB = -60.0
+AUDIO_GAIN_MAX_DB = 12.0
 
 # Placement.stretch is a speed-up factor for a placed line (Tighten, M3-9):
 # 1.0 plays the take as it is, 1.25 plays it 25 percent faster (shorter).
@@ -236,6 +240,73 @@ class Reaction(_Model):
     orphaned: bool = False
 
 
+AudioGain = Annotated[float, Field(ge=AUDIO_GAIN_MIN_DB, le=AUDIO_GAIN_MAX_DB)]
+
+
+class AudioFile(_Model):
+    """A music or sound-effect file copied into the project's ``audio/`` folder (v5).
+
+    ``name`` and ``size_bytes`` describe the file that was dropped, so dropping the
+    same file again reuses this copy instead of copying it twice.
+    """
+
+    id: EntityId
+    path: RelPath
+    name: str = Field(min_length=1)
+    size_bytes: int = Field(ge=0)
+    duration_ms: PositiveMs
+    sample_rate: int = Field(gt=0)
+    channels: int = Field(gt=0)
+
+
+class AudioLane(_Model):
+    id: EntityId
+    name: str = Field(default="Audio 1", min_length=1)
+    gain_db: AudioGain = 0.0
+    mute: bool = False
+    solo: bool = False
+
+
+class AudioClip(_Model):
+    """A stretch of an audio file on an audio lane (v5).
+
+    Not anchored to footage (decision 2, 2026-11-20, the exception to rule 4): it
+    starts at ``timeline_ms`` and no video edit moves or cuts it. ``in_ms`` and
+    ``out_ms`` are times in the file.
+    """
+
+    id: EntityId
+    lane_id: EntityId
+    file_id: EntityId
+    timeline_ms: Ms
+    in_ms: Ms = 0
+    out_ms: PositiveMs
+    gain_db: AudioGain = 0.0
+    fade_in_ms: Ms = 0
+    fade_out_ms: Ms = 0
+
+    @model_validator(mode="after")
+    def _check_times(self) -> "AudioClip":
+        if self.out_ms <= self.in_ms:
+            raise ValueError("out_ms must be greater than in_ms")
+        if self.fade_in_ms + self.fade_out_ms > self.out_ms - self.in_ms:
+            raise ValueError("the fades must fit inside the clip")
+        return self
+
+    @property
+    def length_ms(self) -> int:
+        return self.out_ms - self.in_ms
+
+    @property
+    def end_ms(self) -> int:
+        """Timeline time where the clip stops (exclusive)."""
+        return self.timeline_ms + self.length_ms
+
+
+def _default_audio_lanes() -> list[AudioLane]:
+    return [AudioLane(id=new_id(), name="Audio 1")]
+
+
 class VoiceProfile(_Model):
     id: EntityId
     name: str
@@ -331,6 +402,10 @@ class Project(_Model):
     keyframes: list[Keyframe] = Field(default_factory=list)
     reactions: list[Reaction] = Field(default_factory=list)
     voice_profiles: list[VoiceProfile] = Field(default_factory=list)
+    # Schema v5 (M8-1): music and sound effects on audio lanes.
+    audio_files: list[AudioFile] = Field(default_factory=list)
+    audio_lanes: list[AudioLane] = Field(default_factory=_default_audio_lanes)
+    audio_clips: list[AudioClip] = Field(default_factory=list)
 
     fx_chain: FxChain = Field(default_factory=FxChain)
     game_audio_db: float = 0.0
@@ -348,6 +423,9 @@ class Project(_Model):
             "keyframes": self.keyframes,
             "reactions": self.reactions,
             "voice_profiles": self.voice_profiles,
+            "audio_files": self.audio_files,
+            "audio_lanes": self.audio_lanes,
+            "audio_clips": self.audio_clips,
         }
         for name, items in collections.items():
             ids = [item.id for item in items]
