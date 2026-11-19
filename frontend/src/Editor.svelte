@@ -15,6 +15,7 @@
     getStorage,
     getTakePeaks,
     getTimeline,
+    importAudio,
     movePlacement,
     placeLine,
     redoEdit,
@@ -115,6 +116,7 @@
   /** Bumped after an undo or redo so the line bank reloads. */
   let lineReload = $state(0);
   let lineBank = $state<ReturnType<typeof LineBank> | null>(null);
+  let timelineView = $state<ReturnType<typeof Timeline> | null>(null);
   /** The voice job list; refreshed every 500 ms while a job is queued or running. */
   let jobs = $state<JobStatus | null>(null);
   let pollTimer: number | undefined;
@@ -176,6 +178,59 @@
       busy = false;
     }
   }
+
+  /**
+   * Audio files dropped from Explorer (M8-1). The app shell sends their full paths and
+   * the drop point; a drop that is not on the timeline is ignored (the page refused it).
+   */
+  async function importDropped(info: { x: number; y: number; paths: string[] }): Promise<void> {
+    const target = timelineView?.dropTarget(info.x, info.y) ?? null;
+    if (target === null || busy) {
+      return;
+    }
+    busy = true;
+    error = null;
+    notice = null;
+    try {
+      const result = await importAudio(info.paths, target.laneId, target.timelineMs);
+      timeline = result.timeline;
+      const placed = result.imported.map(
+        (item) => `${item.name} on ${item.lane_name} at ${clock(item.timeline_ms)}${item.reused ? " (already in the project)" : ""}`,
+      );
+      if (placed.length > 0) {
+        notice = `Placed ${placed.join("; ")}`;
+      }
+      if (result.errors.length > 0) {
+        error = result.errors.join(" ");
+      }
+    } catch (err) {
+      error = message(err);
+    } finally {
+      busy = false;
+    }
+  }
+
+  // Files dragged from Explorer: only the timeline accepts them (it cancels its own
+  // dragover); everywhere else the drop is refused, so WebView2 never opens the file.
+  $effect(() => {
+    const hook = window as unknown as Record<string, unknown>;
+    hook.__pngtuberFilesDropped = (info: { x: number; y: number; paths: string[] }) => {
+      void importDropped(info);
+    };
+    function refuse(e: DragEvent): void {
+      if (e.dataTransfer !== null && e.dataTransfer.types.includes("Files") && !e.defaultPrevented) {
+        e.preventDefault();
+        e.dataTransfer.dropEffect = "none";
+      }
+    }
+    window.addEventListener("dragover", refuse);
+    window.addEventListener("drop", refuse);
+    return () => {
+      delete hook.__pngtuberFilesDropped;
+      window.removeEventListener("dragover", refuse);
+      window.removeEventListener("drop", refuse);
+    };
+  });
 
   async function history(
     action: () => Promise<EditResult>,
@@ -954,6 +1009,7 @@
       <div class="bottom">
         {#if timeline.clips.length > 0}
           <Timeline
+            bind:this={timelineView}
             clips={timeline.clips}
             durationMs={timeline.duration_ms}
             bind:playheadMs

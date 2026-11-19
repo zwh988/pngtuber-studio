@@ -8,6 +8,7 @@ from fastapi.responses import FileResponse, HTMLResponse, Response
 from fastapi.staticfiles import StaticFiles
 from pydantic import BaseModel
 
+from backend.audio.clipimport import AudioImportRequest, AudioImportResult
 from backend.audio.fxstate import FxState
 from backend.avatar.envelope import EnvelopeReport
 from backend.avatar.scan import AvatarState
@@ -712,6 +713,36 @@ def create_app(
     @app.post("/api/timeline/batch")
     def edit_batch(batch: EditBatch) -> TimelineState:
         return run_edit(batch.ops, batch.label)
+
+    # ---- audio lanes (M8-1) ----------------------------------------------------
+
+    @app.post("/api/audio/import")
+    def import_audio(request: AudioImportRequest) -> AudioImportResult:
+        try:
+            return active.import_audio(request.paths, request.lane_id, request.timeline_ms)
+        except _API_ERRORS as exc:
+            raise HTTPException(status_code=400, detail=str(exc)) from exc
+
+    def decoded_audio(file_id: str) -> Path:
+        try:
+            path = active.audio_decoded_path(file_id)
+        except _API_ERRORS as exc:
+            raise HTTPException(status_code=400, detail=str(exc)) from exc
+        if path is None or not path.is_file():
+            raise HTTPException(status_code=404, detail="audio file not found")
+        return path
+
+    @app.get("/media/audio/{file_id}")
+    def get_audio_media(file_id: str, request: Request) -> Response:
+        # The decoded WAV of an imported file: what preview and export both play.
+        return range_response(decoded_audio(file_id), request.headers.get("range"))
+
+    @app.get("/api/audio/{file_id}/peaks")
+    def get_audio_peaks(file_id: str, buckets: int = 400) -> PeaksReport:
+        try:
+            return read_take_peaks(decoded_audio(file_id), file_id, buckets)
+        except PeaksError as exc:
+            raise HTTPException(status_code=400, detail=str(exc)) from exc
 
     @app.get("/app/logo.png")
     def get_logo() -> FileResponse:

@@ -13,8 +13,10 @@ from typing import Any
 
 import uvicorn
 import webview
+from webview.dom import DOMEventHandler
 
 from backend.app import APP_NAME, create_app
+from backend.dropfiles import dropped_files, page_call
 from backend.project.recent import default_recent_path
 from backend.project.session import Session
 from backend.settings import default_user_templates_dir
@@ -67,6 +69,21 @@ class Api:
         return str(result[0]) if result else None
 
 
+def _watch_file_drops(window: webview.Window) -> None:
+    """Hand files dropped from Explorer to the page with their full paths (M8-1).
+
+    Registered on every page load. ``prevent_default`` keeps WebView2 from opening
+    a dropped file; propagation goes on, so the page's own drop listeners run too.
+    """
+
+    def on_drop(event: dict[str, Any]) -> None:
+        message = dropped_files(event)
+        if message is not None:
+            window.evaluate_js(page_call(message))
+
+    window.dom.document.events.drop += DOMEventHandler(on_drop, True, False)
+
+
 def _free_port() -> int:
     with socket.socket(socket.AF_INET, socket.SOCK_STREAM) as sock:
         sock.bind(("127.0.0.1", 0))
@@ -114,13 +131,15 @@ def main() -> None:
             raise RuntimeError("backend server failed to start")
         time.sleep(0.05)
 
-    webview.create_window(
+    window = webview.create_window(
         APP_NAME,
         f"http://127.0.0.1:{port}/",
         width=1280,
         height=800,
         js_api=Api(),
     )
+    if window is not None:
+        window.events.loaded += lambda: _watch_file_drops(window)
     # pywebview's docs say "GTK/QT only", but its WinForms backend uses this icon
     # for the window (and so the taskbar); without it, python.exe's icon shows.
     webview.start(icon=str(APP_ICON) if APP_ICON.is_file() else None)

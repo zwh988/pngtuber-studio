@@ -155,6 +155,25 @@
   const viewMs = $derived(viewWidth / pxPerMs);
   const maxScrollMs = $derived(Math.max(0, durationMs - (viewWidth - GUTTER) / pxPerMs));
 
+  /**
+   * Where a drop at a window point (CSS px) lands: the TIMELINE time under it and the
+   * audio lane (null: the first one; audio lanes are drawn from M8-1 step 4).
+   * Null when the point is not over the timeline canvas.
+   */
+  export function dropTarget(
+    clientX: number,
+    clientY: number,
+  ): { timelineMs: number; laneId: string | null } | null {
+    if (canvasEl === null) {
+      return null;
+    }
+    const box = canvasEl.getBoundingClientRect();
+    if (clientX < box.left || clientX > box.right || clientY < box.top || clientY > box.bottom) {
+      return null;
+    }
+    return { timelineMs: Math.max(0, Math.round(scrollMs + (clientX - box.left) / pxPerMs)), laneId: null };
+  }
+
   function xPos(ms: number): number {
     return (ms - scrollMs) * pxPerMs;
   }
@@ -884,6 +903,17 @@
       return e.clientX - (canvas?.getBoundingClientRect().left ?? 0);
     }
     function dragover(e: DragEvent): void {
+      if (e.dataTransfer !== null && e.dataTransfer.types.includes("Files")) {
+        // Audio files from Explorer (M8-1): the app shell sends their paths to the
+        // editor after the drop, which asks `dropTarget` where they landed.
+        if (locked) {
+          return;
+        }
+        e.preventDefault();
+        e.dataTransfer.dropEffect = "copy";
+        dragUi = { kind: "drop", x: dropX(e) };
+        return;
+      }
       if (locked || e.dataTransfer === null || !e.dataTransfer.types.includes(LINE_DRAG_TYPE)) {
         return;
       }
@@ -897,6 +927,11 @@
       }
     }
     function drop(e: DragEvent): void {
+      if (e.dataTransfer !== null && e.dataTransfer.types.includes("Files")) {
+        e.preventDefault();
+        dragUi = null;
+        return;
+      }
       const lineId = e.dataTransfer?.getData(LINE_DRAG_TYPE) ?? "";
       if (locked || lineId === "") {
         dragUi = null;

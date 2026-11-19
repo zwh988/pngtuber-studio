@@ -14,7 +14,7 @@ from backend.audio.chainspec import FxChainError, processing_spec
 from backend.audio.trim import TrimBounds, processed_duration_ms, trimmed_duration_ms
 from backend.edl.anchoring import check_references, find_orphans
 from backend.edl.timemap import ClipSpan, clip_spans, timeline_duration, to_timeline
-from backend.project.schema import AvatarSettings, Project, Take
+from backend.project.schema import AudioLane, AvatarSettings, Project, Take
 from backend.voice.keys import fx_version as chain_version
 from backend.voice.overflow import PlacedLine, available_slack_ms, find_overflows
 from backend.voice.stretch import fit_stretch, stretched_duration_ms
@@ -123,6 +123,50 @@ class TimelineReaction(BaseModel):
     orphaned: bool
 
 
+class TimelineAudioClip(BaseModel):
+    """An audio clip as the editor draws it (M8-1). Times are TIMELINE ms, except
+    ``in_ms``/``out_ms``/``file_duration_ms``, which are times in the file."""
+
+    id: str
+    lane_id: str
+    file_id: str
+    name: str
+    timeline_ms: int
+    end_ms: int
+    in_ms: int
+    out_ms: int
+    file_duration_ms: int
+    gain_db: float
+    fade_in_ms: int
+    fade_out_ms: int
+
+
+def _build_audio_clips(project: Project) -> list[TimelineAudioClip]:
+    files = {audio_file.id: audio_file for audio_file in project.audio_files}
+    lane_order = {lane.id: index for index, lane in enumerate(project.audio_lanes)}
+    result = []
+    for clip in project.audio_clips:
+        audio_file = files.get(clip.file_id)
+        result.append(
+            TimelineAudioClip(
+                id=clip.id,
+                lane_id=clip.lane_id,
+                file_id=clip.file_id,
+                name=audio_file.name if audio_file is not None else "(missing file)",
+                timeline_ms=clip.timeline_ms,
+                end_ms=clip.end_ms,
+                in_ms=clip.in_ms,
+                out_ms=clip.out_ms,
+                file_duration_ms=audio_file.duration_ms if audio_file is not None else 0,
+                gain_db=clip.gain_db,
+                fade_in_ms=clip.fade_in_ms,
+                fade_out_ms=clip.fade_out_ms,
+            )
+        )
+    result.sort(key=lambda c: (lane_order.get(c.lane_id, len(lane_order)), c.timeline_ms))
+    return result
+
+
 class TimelineState(BaseModel):
     clips: list[TimelineClip] = Field(default_factory=list)
     # Placed lines, ordered by start time (unmappable ones last).
@@ -148,6 +192,9 @@ class TimelineState(BaseModel):
     keyframes: list[TimelineKeyframe] = Field(default_factory=list)
     reactions: list[TimelineReaction] = Field(default_factory=list)
     avatar: AvatarSettings = Field(default_factory=AvatarSettings)
+    # Audio lanes (M8-1): lanes top to bottom, clips by lane then start time.
+    audio_lanes: list[AudioLane] = Field(default_factory=list)
+    audio_clips: list[TimelineAudioClip] = Field(default_factory=list)
 
 
 class EditResult(BaseModel):
@@ -231,6 +278,8 @@ def build_timeline(
         keyframes=_build_keyframes(project, spans),
         reactions=_build_reactions(project, spans),
         avatar=project.avatar.model_copy(deep=True),
+        audio_lanes=[lane.model_copy() for lane in project.audio_lanes],
+        audio_clips=_build_audio_clips(project),
     )
 
 

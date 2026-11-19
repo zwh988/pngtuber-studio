@@ -25,6 +25,15 @@ from backend.audio.cleanup import (
     run_cache_cleanup,
     run_cleanup,
 )
+from backend.audio.clipimport import (
+    AudioImportError,
+    AudioImportResult,
+    Decode,
+    ImportedAudio,
+    ensure_decoded,
+    import_audio_file,
+    make_ffmpeg_decoder,
+)
 from backend.audio.fxpresets import load_fx_presets_file
 from backend.audio.fxstate import FxProcessing, FxState, build_fx_state
 from backend.audio.prefetch import Prefetcher, plan_jobs
@@ -76,7 +85,15 @@ from backend.edl.anchoring import check_references, check_voice_references
 from backend.export.job import EXPORTS_DIR, ExportDefaults
 from backend.export.pipeline import ExportInputs
 from backend.export.preflight import PreflightReport, preflight
+from backend.export.tools import default_ffmpeg_path
 from backend.oserrors import describe_error
+from backend.project.audio_commands import (
+    AddAudioClip,
+    AddAudioFile,
+    AddAudioLane,
+    find_lane,
+    free_lane_from,
+)
 from backend.project.avatar_commands import SetAvatarArtFolder
 from backend.project.clip_commands import AddClip
 from backend.project.commands import (
@@ -105,6 +122,7 @@ from backend.project.recent import (
 )
 from backend.project.relink import relink_mismatches, to_footage_relpath
 from backend.project.schema import (
+    AudioFile,
     ExportSettings,
     FxChain,
     Line,
@@ -266,6 +284,7 @@ class Session:
         fx_presets: dict[str, FxChain] | None = None,
         user_presets_path: Path | None = None,
         user_templates_dir: Path | None = None,
+        decode: Decode | None = None,
     ) -> None:
         # Re-entrant: the stack's on_change callback runs while a command
         # method already holds the lock.
@@ -277,6 +296,10 @@ class Session:
             audio_info if audio_info is not None else read_audio_info
         )
         self._hashes = FileHashCache()
+        # M8-1: decodes imported music and sound effects to WAV (ffmpeg by default).
+        self._decode: Decode = (
+            decode if decode is not None else make_ffmpeg_decoder(default_ffmpeg_path())
+        )
         self._trims = TrimCache()
         self._avatar_track: FrameTrack | None = None  # last frame track built (M5-6)
         # Loaded from templates/emotion_presets.json on first use when not given.
@@ -1131,6 +1154,103 @@ class Session:
             except (CommandError, ValueError) as exc:
                 raise SessionError(str(exc)) from exc
             return self._timeline_state()
+
+    # ---- audio lanes (M8-1) ---------------------------------------------------
+
+    def import_audio(
+        self, paths: Sequence[str], lane_id: str | None, timeline_ms: int
+    ) -> AudioImportResult:
+        """Copy dropped files into ``audio/`` and put them on the timeline.
+
+        The files go one after another from ``timeline_ms``, each on the first
+        lane from ``lane_id`` down with room for it (a new lane below the last when
+        none has). All placed files are one undo step. A file that cannot be used
+        is reported in ``errors``; the others are still placed.
+        """
+        if timeline_ms < 0:
+            raise SessionError("timeline time must not be negative")
+        with self._lock:
+            folder, stack = self._require_open()
+            known = [f.model_copy() for f in stack.project.audio_files]
+        # Copying, probing and decoding happen outside the lock.
+        prepared: list[tuple[AudioFile, bool]] = []
+        errors: list[str] = []
+        for raw in paths:
+            source = Path(raw.strip())
+            if not raw.strip() or not source.is_file():
+                errors.append(f"{source.name or raw}: file not found")
+                continue
+            try:
+                audio_file, reused = import_audio_file(
+                    folder, source, known, probe=self._probe, decode=self._decode
+                )
+            except AudioImportError as exc:
+                errors.append(str(exc))
+                continue
+            except OSError as exc:
+                errors.append(f"{source.name}: {describe_error(exc)}")
+                continue
+            if not reused:
+                known.append(audio_file)
+            prepared.append((audio_file, reused))
+        with self._lock:
+            now_folder, stack = self._require_open()
+            if now_folder != folder:
+                raise SessionError("the project changed while the files were imported")
+            project = stack.project
+            imported: list[ImportedAudio] = []
+            if prepared:
+                registered = {f.id for f in project.audio_files}
+                try:
+                    target = lane_id if lane_id is not None else project.audio_lanes[0].id
+                    find_lane(project, target)
+                    label = (
+                        f"Import {prepared[0][0].name}"
+                        if len(prepared) == 1
+                        else f"Import {len(prepared)} audio files"
+                    )
+                    start = timeline_ms
+                    with stack.group(label):
+                        for audio_file, reused in prepared:
+                            if audio_file.id not in registered:
+                                stack.execute(AddAudioFile(audio_file))
+                                registered.add(audio_file.id)
+                            lane = free_lane_from(project, target, start, audio_file.duration_ms)
+                            if lane is None:
+                                adding = AddAudioLane()
+                                stack.execute(adding)
+                                lane = adding.lane_id
+                            adding_clip = AddAudioClip(audio_file.id, lane, start)
+                            stack.execute(adding_clip)
+                            imported.append(
+                                ImportedAudio(
+                                    name=audio_file.name,
+                                    clip_id=adding_clip.clip_id,
+                                    lane_id=lane,
+                                    lane_name=find_lane(project, lane)[1].name,
+                                    timeline_ms=start,
+                                    reused=reused,
+                                )
+                            )
+                            start += audio_file.duration_ms
+                except (CommandError, IndexError) as exc:
+                    raise SessionError(f"could not place the audio: {exc}") from exc
+            return AudioImportResult(
+                imported=imported, errors=errors, timeline=self._timeline_state()
+            )
+
+    def audio_decoded_path(self, file_id: str) -> Path | None:
+        """The decoded WAV of an imported file (made again when missing); None for
+        an unknown id. The path comes from the project, never from the request."""
+        with self._lock:
+            folder, stack = self._require_open()
+            audio_file = next((f for f in stack.project.audio_files if f.id == file_id), None)
+        if audio_file is None:
+            return None
+        try:
+            return ensure_decoded(folder, audio_file, self._decode)
+        except AudioImportError as exc:
+            raise SessionError(str(exc)) from exc
 
     # ---- recent projects ---------------------------------------------------
 

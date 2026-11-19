@@ -193,6 +193,49 @@ export type TimelineState = {
   keyframes: TimelineKeyframe[];
   reactions: TimelineReaction[];
   avatar: AvatarSettings;
+  /** Audio lanes top to bottom (M8-1). */
+  audio_lanes: AudioLane[];
+  /** Music and sound-effect clips, by lane then start time. Not anchored to footage. */
+  audio_clips: TimelineAudioClip[];
+};
+
+export type AudioLane = {
+  id: string;
+  name: string;
+  gain_db: number;
+  mute: boolean;
+  solo: boolean;
+};
+
+/** TIMELINE ms, except in_ms / out_ms / file_duration_ms, which are times in the file. */
+export type TimelineAudioClip = {
+  id: string;
+  lane_id: string;
+  file_id: string;
+  name: string;
+  timeline_ms: number;
+  end_ms: number;
+  in_ms: number;
+  out_ms: number;
+  file_duration_ms: number;
+  gain_db: number;
+  fade_in_ms: number;
+  fade_out_ms: number;
+};
+
+export type ImportedAudio = {
+  name: string;
+  clip_id: string;
+  lane_id: string;
+  lane_name: string;
+  timeline_ms: number;
+  reused: boolean;
+};
+
+export type AudioImportResult = {
+  imported: ImportedAudio[];
+  errors: string[];
+  timeline: TimelineState;
 };
 
 export type TimelineKeyframe = {
@@ -439,6 +482,24 @@ export function avatarSpriteUrl(key: string): string {
 /** Several edits as ONE undo step; all apply or none do. */
 export function editBatch(label: string, ops: EditOp[]): Promise<TimelineState> {
   return post<TimelineState>("/api/timeline/batch", { label, ops });
+}
+
+/** Copy dropped audio files into the project and place them from `timelineMs` (M8-1). */
+export function importAudio(
+  paths: string[],
+  laneId: string | null,
+  timelineMs: number,
+): Promise<AudioImportResult> {
+  return post<AudioImportResult>("/api/audio/import", {
+    paths,
+    lane_id: laneId,
+    timeline_ms: Math.max(0, Math.round(timelineMs)),
+  });
+}
+
+/** The decoded WAV of an imported audio file (what preview and export play). */
+export function audioMediaUrl(fileId: string): string {
+  return `/media/audio/${encodeURIComponent(fileId)}`;
 }
 
 /** URL a <video> tag can play for a source of the open project (Range supported). */
