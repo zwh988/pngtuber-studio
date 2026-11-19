@@ -26,6 +26,7 @@
   import Editor from "./Editor.svelte";
   import ExportScreen from "./ExportScreen.svelte";
   import ModelSetup from "./ModelSetup.svelte";
+  import SettingsPage from "./SettingsPage.svelte";
   import { cleanPathInput, formatBytes, voiceStatusText } from "./voice";
   import {
     ArrowRight,
@@ -39,6 +40,7 @@
     Plus,
     AudioLines,
     RefreshCw,
+    Settings,
     UserRound,
     X,
   } from "@lucide/svelte";
@@ -59,7 +61,7 @@
   let busy = $state(false);
   let view = $state<"project" | "editor" | "export">("project");
   /** Which page the project screen shows (UI-2 S4; "model" is the voice model page, M7 S3). */
-  type Page = "home" | "project" | "new" | "open" | "model";
+  type Page = "home" | "project" | "new" | "open" | "model" | "settings";
   let page = $state<Page>("home");
   /** The voice model's files (M7 S3); polled while a download runs. */
   let model = $state<ModelStatus | null>(null);
@@ -322,6 +324,10 @@
           {#if model.state !== "ready"}<span class="nav-tag">{modelTag(model)}</span>{/if}
         </button>
       {/if}
+      <button type="button" class="nav-item" class:on={page === "settings"} onclick={() => show("settings")}>
+        <Settings size={16} strokeWidth={1.75} aria-hidden="true" />
+        Settings
+      </button>
       {#if current !== null}
         <button
           type="button"
@@ -379,7 +385,9 @@
         <Banner kind="error" onclose={() => (error = null)}>{error}</Banner>
       {/if}
 
-      {#if page === "model" && model !== null}
+      {#if page === "settings"}
+        <SettingsPage projectName={current?.name ?? null} onopenproject={() => show("project")} />
+      {:else if page === "model" && model !== null}
         <ModelSetup
           status={model}
           ondownload={() => void downloadModel()}

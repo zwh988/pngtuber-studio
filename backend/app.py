@@ -25,6 +25,7 @@ from backend.export.pipeline import run_export
 from backend.export.preflight import PreflightReport
 from backend.export.tools import default_ffmpeg_path, encoder_problem
 from backend.media.serve import range_response
+from backend.oserrors import describe_error
 from backend.project.edit_ops import (
     AddPlacementOp,
     EditBatch,
@@ -39,26 +40,38 @@ from backend.project.edit_ops import (
     SplitClipOp,
     TrimClipOp,
 )
-from backend.project.footage import FootageError
+from backend.project.footage import FootageError, default_ffprobe_path
 from backend.project.fx_ops import FxEditBatch
 from backend.project.line_ops import LineEditBatch
-from backend.project.recent import RecentItem
+from backend.project.recent import RecentItem, default_recent_path
 from backend.project.schema import SCHEMA_VERSION
 from backend.project.session import Session, SessionError
 from backend.project.store import ProjectError
 from backend.project.summary import FootageReport, ProjectSummary
 from backend.project.template import TemplateError
 from backend.project.timeline import EditResult, TimelineState
+from backend.settings import (
+    AppSettings,
+    PathItem,
+    app_data_dir,
+    folder_to_open,
+    path_items,
+)
 from backend.voice.engine import chatterbox_model_version
 from backend.voice.jobqueue import JobError, JobQueue
 from backend.voice.jobs import JobItem, JobStatus
 from backend.voice.linebank import LineBankState
-from backend.voice.model import ModelManager, ModelStatus
+from backend.voice.model import ModelManager, ModelStatus, hf_cache_dir
 from backend.voice.peaks import PeaksError, PeaksReport, read_take_peaks
 from backend.voice.profile import VoiceState
 from backend.voice.stretchrender import StretchError, ensure_stretched
 from backend.voice.subprocess_worker import SubprocessWorker, default_worker_log_path
 from backend.voice.takes import StorageReport, TakeDeleteReport, TakeItem, TakeTrimInfo
+from backend.voice.userpresets import (
+    PresetEdit,
+    PresetsState,
+    default_user_presets_path,
+)
 
 APP_NAME = "PNGtuber Studio"
 
@@ -116,6 +129,19 @@ class JobIdRequest(BaseModel):
     job_id: str
 
 
+class PresetsRequest(BaseModel):
+    presets: list[PresetEdit]
+
+
+class OpenPathRequest(BaseModel):
+    key: str
+
+
+def default_templates_dir() -> Path:
+    """``<repo>/templates``."""
+    return Path(__file__).resolve().parents[1] / "templates"
+
+
 def default_static_dir() -> Path:
     """``<repo>/frontend/dist``."""
     return Path(__file__).resolve().parents[1] / "frontend" / "dist"
@@ -128,13 +154,15 @@ def create_app(
     export_tools: Callable[[], str | None] | None = None,
     export_run: RunFn | None = None,
     model: ModelManager | None = None,
+    open_path: Callable[[Path], None] | None = None,
 ) -> FastAPI:
     """``jobs`` is the voice generation queue. By default one is built around the
     real GPU worker; nothing starts until the first job is submitted. The caller
     that owns the app (``main.py``) closes it. ``export_tools`` and ``export_run``
     replace the NVENC probe and the export steps in tests. ``model`` is the voice
     model's files and first-run download (M7 S3); built by default only with the
-    real queue, so tests that pass their own queue need no model on disk."""
+    real queue, so tests that pass their own queue need no model on disk.
+    ``open_path`` shows a folder in Explorer (Settings, M7 S5); tests replace it."""
     app = FastAPI(title=APP_NAME)
     active = session if session is not None else Session()
     queue = (
@@ -388,6 +416,67 @@ def create_app(
                 status_code=400,
                 detail="the voice model is not downloaded yet: download it from the start page",
             )
+
+    show_folder = open_path if open_path is not None else open_folder
+
+    def settings_paths(presets_file: Path | None = None) -> list[PathItem]:
+        presets_path = presets_file if presets_file is not None else default_user_presets_path()
+        return path_items(
+            [
+                ("app_data", "App data (recent list, logs, edited presets)", app_data_dir(), True),
+                ("recent", "Recent projects list", default_recent_path(), False),
+                ("worker_log", "Voice worker log", default_worker_log_path(), False),
+                ("presets", "Edited emotion presets", presets_path, False),
+                ("ffmpeg", "ffmpeg (video export)", default_ffmpeg_path(), False),
+                ("ffprobe", "ffprobe (reads footage)", default_ffprobe_path(), False),
+                ("model", "Voice model (Hugging Face cache)", hf_cache_dir(), True),
+                ("templates", "Built-in templates and presets", default_templates_dir(), True),
+            ]
+        )
+
+    @app.get("/api/settings")
+    def get_settings() -> AppSettings:
+        presets: PresetsState | None = None
+        presets_error: str | None = None
+        try:
+            presets = active.presets_state()
+        except _API_ERRORS as exc:
+            presets_error = str(exc)
+        return AppSettings(
+            presets=presets,
+            presets_error=presets_error,
+            tools_problem=check_tools(),
+            export=active.export_settings(),
+            paths=settings_paths(Path(presets.path) if presets is not None else None),
+        )
+
+    @app.post("/api/settings/presets")
+    def save_presets(request: PresetsRequest) -> PresetsState:
+        try:
+            return active.save_presets(request.presets)
+        except _API_ERRORS as exc:
+            raise HTTPException(status_code=400, detail=str(exc)) from exc
+
+    @app.post("/api/settings/presets/reset")
+    def reset_presets() -> PresetsState:
+        try:
+            return active.reset_presets()
+        except _API_ERRORS as exc:
+            raise HTTPException(status_code=400, detail=str(exc)) from exc
+
+    @app.post("/api/settings/open")
+    def open_settings_path(request: OpenPathRequest) -> dict[str, str]:
+        item = next((p for p in settings_paths() if p.key == request.key), None)
+        if item is None:
+            raise HTTPException(status_code=400, detail=f"unknown path {request.key!r}")
+        folder = folder_to_open(item)
+        if not folder.is_dir():
+            raise HTTPException(status_code=400, detail=f"{folder} does not exist yet")
+        try:
+            show_folder(folder)
+        except OSError as exc:
+            raise HTTPException(status_code=400, detail=describe_error(exc)) from exc
+        return {"folder": str(folder)}
 
     @app.get("/api/voice/model")
     def get_model() -> ModelStatus:

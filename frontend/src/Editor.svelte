@@ -44,6 +44,7 @@
   import VoiceFx from "./VoiceFx.svelte";
   import { AudioGraph } from "./audioGraph";
   import Player from "./Player.svelte";
+  import ShortcutsDialog from "./ShortcutsDialog.svelte";
   import Timeline from "./Timeline.svelte";
   import { STRETCH_MAX, STRETCH_MIN, STRETCH_WARN, stretchText, tightenTarget } from "./stretch";
   import { clipIndexAt, stepFrame } from "./timeline";
@@ -54,6 +55,7 @@
     Cpu,
     Gauge,
     HardDrive,
+    Keyboard,
     Mic,
     Plus,
     Redo2,
@@ -545,6 +547,9 @@
     });
   }
 
+  /** The keyboard shortcuts dialog ("?" or the header button, M7 S5). */
+  let showShortcuts = $state(false);
+
   function isTyping(target: EventTarget | null): boolean {
     return (
       target instanceof Element &&
@@ -576,6 +581,10 @@
     }
     const canEdit = !busy && !e.repeat;
     switch (e.key) {
+      case "?":
+        e.preventDefault();
+        showShortcuts = !showShortcuts;
+        break;
       case " ":
         e.preventDefault();
         if (!e.repeat) {
@@ -751,6 +760,7 @@
       onclick={redo}
     />
     <div class="spacer"></div>
+    <IconButton icon={Keyboard} label="Keyboard shortcuts (?)" onclick={() => (showShortcuts = true)} />
     <Button variant="primary" icon={Upload} disabled={busy || timeline === null} onclick={onexport}>
       Export
     </Button>
@@ -1159,6 +1169,8 @@
     </footer>
   {/if}
 </div>
+
+<ShortcutsDialog bind:open={showShortcuts} />
 
 <style>
   .editor {

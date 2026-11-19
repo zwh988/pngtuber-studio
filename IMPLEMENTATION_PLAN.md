@@ -132,7 +132,7 @@ Done when: a fresh install works from `install.bat` to a finished export.
 - A/B compare takes and loop-selected-line playback
 - Vertical 9:16 and 4K export
 - Zoom, freeze frame, and text overlay effects (via the effects registry)
-- Additional video tracks and music
+- Additional video tracks and music: drafted as M8 (`docs/tasks/M8-tracks-and-media.md`: audio files dragged onto the timeline, then optional extra video tracks and PNG sequences), to start after M7
 - Global favorites library across projects
 - Rhubarb as an alternate mouth provider
 - Per-emotion reference clips in voice profiles

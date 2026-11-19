@@ -21,6 +21,7 @@ from backend.voice.engine import chatterbox_model_version
 from backend.voice.jobqueue import JobQueue
 from backend.voice.model import ModelManager
 from backend.voice.subprocess_worker import SubprocessWorker, default_worker_log_path
+from backend.voice.userpresets import default_user_presets_path
 
 APP_ICON = Path(__file__).resolve().parents[1] / "assets" / "app.ico"
 # Windows taskbar identity: without it the window groups under python.exe and
@@ -84,7 +85,10 @@ def _set_app_user_model_id() -> None:
 def main() -> None:
     _set_app_user_model_id()
     port = _free_port()
-    session = Session(recent_path=default_recent_path())
+    session = Session(
+        recent_path=default_recent_path(),
+        user_presets_path=default_user_presets_path(),  # M7 S5: presets edited in Settings
+    )
     # Renders the processed takes in the background (CPU only) after every change.
     session.enable_prefetch()
     jobs = JobQueue(

@@ -103,7 +103,15 @@ from backend.project.recent import (
     save_recent,
 )
 from backend.project.relink import relink_mismatches, to_footage_relpath
-from backend.project.schema import FxChain, Line, Project, Source, Take, new_id
+from backend.project.schema import (
+    ExportSettings,
+    FxChain,
+    Line,
+    Project,
+    Source,
+    Take,
+    new_id,
+)
 from backend.project.store import (
     ProjectError,
     create_project,
@@ -157,6 +165,16 @@ from backend.voice.takes import (
     remove_takes,
 )
 from backend.voice.takestore import TakeStore
+from backend.voice.userpresets import (
+    PresetEdit,
+    PresetsState,
+    build_presets_state,
+    check_edit,
+    default_user_presets_path,
+    delete_user_presets,
+    load_effective,
+    save_user_presets,
+)
 
 Probe = Callable[[Path], dict[str, Any]]
 
@@ -219,6 +237,7 @@ class Session:
         audio_info: AudioInfoFn | None = None,
         presets: dict[str, EmotionPreset] | None = None,
         fx_presets: dict[str, FxChain] | None = None,
+        user_presets_path: Path | None = None,
     ) -> None:
         # Re-entrant: the stack's on_change callback runs while a command
         # method already holds the lock.
@@ -236,6 +255,9 @@ class Session:
         self._presets: dict[str, EmotionPreset] | None = presets
         # Loaded from templates/fx_presets.json on first use when not given.
         self._fx_presets: dict[str, FxChain] | None = fx_presets
+        # M7 S5: emotion presets edited in Settings (app-wide). None: built-in only,
+        # and Settings cannot save (tests and the default app).
+        self._user_presets_path = user_presets_path
         self._folder: Path | None = None
         self._stack: CommandStack | None = None
         self._save_error: str | None = None
@@ -1174,10 +1196,68 @@ class Session:
     def _presets_or_raise(self) -> dict[str, EmotionPreset]:
         if self._presets is None:
             try:
-                self._presets = load_presets_file()
+                _, self._presets, _, _ = load_effective(self._user_presets_path)
             except PresetError as exc:
                 raise SessionError(str(exc)) from exc
         return self._presets
+
+    # ---- settings (M7 S5) --------------------------------------------------
+
+    def presets_state(self) -> PresetsState:
+        """The emotion presets as Settings shows them; also reloads them."""
+        with self._lock:
+            try:
+                builtin, effective, customized, problem = load_effective(
+                    self._user_presets_path
+                )
+            except PresetError as exc:
+                raise SessionError(str(exc)) from exc
+            self._presets = effective
+            self._avatar_track = None  # preset expressions feed the auto-keys
+            path = self._user_presets_path or default_user_presets_path()
+            return build_presets_state(
+                builtin, effective, customized=customized, path=path, problem=problem
+            )
+
+    def save_presets(self, edits: list[PresetEdit]) -> PresetsState:
+        """Save edited preset values app-wide. Values equal to the built-ins
+        remove the file (nothing customized)."""
+        with self._lock:
+            path = self._require_user_presets_path()
+            try:
+                builtin = load_presets_file()
+                edited = check_edit(builtin, edits)
+            except PresetError as exc:
+                raise SessionError(str(exc)) from exc
+            try:
+                if edited == builtin:
+                    delete_user_presets(path)
+                else:
+                    save_user_presets(path, edited)
+            except OSError as exc:
+                raise SessionError(f"cannot save the presets: {describe_error(exc)}") from exc
+            return self.presets_state()
+
+    def reset_presets(self) -> PresetsState:
+        with self._lock:
+            path = self._require_user_presets_path()
+            try:
+                delete_user_presets(path)
+            except OSError as exc:
+                raise SessionError(f"cannot reset the presets: {describe_error(exc)}") from exc
+            return self.presets_state()
+
+    def _require_user_presets_path(self) -> Path:
+        if self._user_presets_path is None:
+            raise SessionError("editing presets is not available in this app instance")
+        return self._user_presets_path
+
+    def export_settings(self) -> ExportSettings | None:
+        """The open project's export defaults (None without a project)."""
+        with self._lock:
+            if self._stack is None:
+                return None
+            return self._stack.project.export.model_copy(deep=True)
 
     def _fx_presets_or_raise(self) -> dict[str, FxChain]:
         if self._fx_presets is None:

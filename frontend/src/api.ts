@@ -306,6 +306,15 @@ export type EditOp =
       float_angle_deg?: number;
       blink_rate?: number;
       mouth_sensitivity?: number;
+    }
+  // M7 S5: export defaults saved back to the project (one undo step).
+  | {
+      op: "set_export_settings";
+      height?: number;
+      fps?: "match" | number;
+      include_avatar_overlay?: boolean;
+      include_raw_video_link?: boolean;
+      unload_tts_before_export?: boolean;
     };
 
 export function splitClip(timelineMs: number): Promise<TimelineState> {
@@ -872,4 +881,65 @@ export function getModelStatus(): Promise<ModelStatus> {
 /** Starts (or retries) the download; does nothing when ready or already running. */
 export function startModelDownload(): Promise<ModelStatus> {
   return post<ModelStatus>("/api/voice/model/download");
+}
+
+// ---- settings (M7 S5) -------------------------------------------------------------
+
+export type PresetItem = {
+  name: string;
+  exaggeration: number;
+  cfg_weight: number;
+  expression: string;
+  builtin_exaggeration: number;
+  builtin_cfg_weight: number;
+  builtin_expression: string;
+};
+
+export type PresetsState = {
+  presets: PresetItem[];
+  customized: boolean;
+  path: string;
+  problem: string | null;
+  exaggeration_min: number;
+  exaggeration_max: number;
+  cfg_weight_min: number;
+  cfg_weight_max: number;
+};
+
+export type PresetEdit = { name: string; exaggeration: number; cfg_weight: number; expression: string };
+
+export type ExportSettings = {
+  height: number;
+  fps: "match" | number;
+  include_avatar_overlay: boolean;
+  include_raw_video_link: boolean;
+  unload_tts_before_export: boolean;
+};
+
+export type PathItem = { key: string; label: string; path: string; exists: boolean; folder: boolean };
+
+/** `GET /api/settings`. */
+export type AppSettings = {
+  presets: PresetsState | null;
+  presets_error: string | null;
+  tools_problem: string | null;
+  export: ExportSettings | null;
+  paths: PathItem[];
+};
+
+export function getSettings(): Promise<AppSettings> {
+  return request<AppSettings>("/api/settings");
+}
+
+export function savePresets(presets: PresetEdit[]): Promise<PresetsState> {
+  return post<PresetsState>("/api/settings/presets", { presets });
+}
+
+export function resetPresets(): Promise<PresetsState> {
+  return post<PresetsState>("/api/settings/presets/reset");
+}
+
+/** Shows the folder of a Settings path in Explorer. */
+export function openSettingsPath(key: string): Promise<{ folder: string }> {
+  return post<{ folder: string }>("/api/settings/open", { key });
 }
