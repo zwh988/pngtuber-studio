@@ -20,6 +20,16 @@
 
 Settled by the user on 2026-11-19: several audio lanes, not one; extra video lanes are part of M8 (decision 4 is now only about what they do).
 
+**Answers (user, 2026-11-20; also in the `PROJECT_STATE.md` decisions log):**
+
+1. Copy dropped audio files into the project's `audio/` folder.
+2. Audio clips are independent of the footage: anchored to a timeline time, never moved or cut by a video edit (the user moves and trims them). A video's own sound always follows its video. Rule 4 in `CLAUDE.md` names the exception.
+3. No ducking in M8.
+4. Upper video lanes do picture-in-picture in M8-2 (position, scale, opacity per clip, full frame by default). The upper clip's sound plays at a per-clip level (on by default); the main footage's sound continues. Upper-lane clips are independent of footage edits too (timeline time).
+5. M8-3 is (b), seen as a video source: the user picks a folder of PNGs and a frame rate, and it goes on a video lane like a video clip.
+
+The original options and recommendations follow for the record.
+
 1. **Where dropped audio files go.** (a) copied into the project's `audio/` folder (the project stays self-contained; the copy is what the project uses), or (b) referenced where they are, by path, relinked like footage when moved. **Recommendation:** (a): music and sound effects are small next to footage, and a project that still plays after the original file is moved or deleted is worth the copy.
 2. **What audio clips follow when you cut.** Rule 4 anchors timed items to the footage, so a cut moves them with the picture. (a) anchor like voice lines (a sound effect stays on its moment in the footage; music jumps at a cut), (b) anchor to the timeline (music keeps playing across cuts; an exception to rule 4, written into `CLAUDE.md`), or (c) per clip: a "Stay with footage" switch, on by default for short clips and off for long ones. **Recommendation:** (c), with (a) for anything under 30 s.
 3. **Ducking.** Lower audio clips under the voice lines automatically (a fixed level curve computed from the placements, the same in preview and export), per clip on or off? **Recommendation:** yes, off by default, one "duck under voice" switch per clip with a single depth setting in Settings.
@@ -31,12 +41,12 @@ Settled by the user on 2026-11-19: several audio lanes, not one; extra video lan
 ### M8-1 Audio lanes by drag and drop (decisions 1 to 3)
 
 1. **Spike (half a step):** drop a file from Explorer onto the pywebview window and get its full path in Python; if that fails, upload the bytes. Decide the import path from the result.
-2. **Schema v5:** `audio_lanes: list[AudioLane{id, name, gain_db, mute, solo}]` (one "Audio 1" lane in a new or migrated project) and `audio_clips: list[AudioClip{id, lane_id, file (project-relative), anchor (clip_id, source_time) or timeline_ms per decision 2, in_ms, out_ms, gain_db, fade_in_ms, fade_out_ms, duck}]`, migration from v4. Lane commands add, rename, reorder, remove (only when empty), level, mute, solo. Commands add, move, trim, set level and fades, set duck, remove (undoable). Orphan handling as for placements when anchored to footage (rule 4).
+2. **Schema v5:** `audio_lanes: list[AudioLane{id, name, gain_db, mute, solo}]` (one "Audio 1" lane in a new or migrated project) and `audio_clips: list[AudioClip{id, lane_id, file (project-relative), timeline_ms, in_ms, out_ms, gain_db, fade_in_ms, fade_out_ms}]` (decision 2: timeline time, no anchor, so no orphans; decision 3: no duck), migration from v4. Lane commands add, rename, reorder, remove (only when empty), level, mute, solo. Commands add, move, trim, set level and fades, remove (undoable).
 3. **Import:** dropping one or more audio files (WAV, MP3, FLAC, OGG, M4A) on the timeline imports each (decision 1), probes it with ffprobe, decodes it once to a cached WAV for preview and peaks, and places it at the drop point. A file whose name and size match an earlier import is reused, not copied again.
-4. **Timeline:** audio lanes under the voice lane, each with a name, level, mute and solo in the lane-name column, and "+ Audio lane". Blocks with a waveform (the existing peaks code), drag to move (also up and down between lanes), edge-drag to trim; a drop on empty space below the last lane adds a lane. Clips on one lane do not overlap (a drop that would overlap goes to the next free lane). An inspector (Line bank style) for level, fades, duck and "Stay with footage".
-5. **Preview:** an audio-clip bus in Web Audio, scheduled like the voice lines, with the fades and the duck curve applied as gain automation.
+4. **Timeline:** audio lanes under the voice lane, each with a name, level, mute and solo in the lane-name column, and "+ Audio lane". Blocks with a waveform (the existing peaks code), drag to move (also up and down between lanes), edge-drag to trim; a drop on empty space below the last lane adds a lane. Clips on one lane do not overlap (a drop that would overlap goes to the next free lane). An inspector (Line bank style) for level and fades.
+5. **Preview:** an audio-clip bus in Web Audio, scheduled like the voice lines, with the fades applied as gain automation.
 6. **Export:** the clips are mixed into the voice/music track before the final mix and limiter, using the same pure level curve as the preview; each imported file is also listed in `export.json`.
-7. **Tests:** migration, commands, the anchoring per decision 2 (cut, ripple-delete, undo), the fade and duck curve (pure), the export mix, import reuse.
+7. **Tests:** migration, commands, audio clips unmoved by cut, ripple-delete and undo (decision 2), the fade curve (pure), the export mix, import reuse.
 
 ### M8-2 Video lanes (required; decision 4)
 
@@ -53,7 +63,7 @@ Settled by the user on 2026-11-19: several audio lanes, not one; extra video lan
 
 ## Acceptance checks
 
-- M8-1: dragging a music file and two sound effects onto two audio lanes places them at the drop points; they play in the preview and the export at the same times and levels, with fades, ducking, lane mute and solo; cutting the footage behaves as decision 2 says; undo removes each step; old projects open unchanged (migration).
+- M8-1: dragging a music file and two sound effects onto two audio lanes places them at the drop points; they play in the preview and the export at the same times and levels, with fades, lane mute and solo; cutting the footage never moves them (decision 2); undo removes each step; old projects open unchanged (migration).
 - M8-2: a cutaway clip on video lane 2 and a still image on video lane 3 show over the main picture in the preview and the export at the same times, with the avatar on top; a cut on the main lane moves or parks them as rule 4 says.
 - `uv run pytest`, `uv run ruff check .`, `npm run check`, `npm test` pass; `PROJECT_STATE.md` and the spec sections updated.
 
