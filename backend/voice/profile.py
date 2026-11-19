@@ -100,7 +100,11 @@ def reference_filename(original_name: str, digest: str) -> str:
         raise ValueError(
             f"unsupported audio type {extension or '(none)'}; use one of {allowed}"
         )
-    return f"{clean_stem(path.stem)}-{digest[:8]}{extension}"
+    stem = clean_stem(path.stem)
+    tag = f"-{digest[:8]}"
+    if stem.endswith(tag) and len(stem) > len(tag):
+        stem = stem[: -len(tag)]  # already a project or template copy (M7 S6): keep one tag
+    return f"{stem}{tag}{extension}"
 
 
 def reference_relpath(filename: str) -> str:

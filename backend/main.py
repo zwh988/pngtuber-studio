@@ -17,6 +17,7 @@ import webview
 from backend.app import APP_NAME, create_app
 from backend.project.recent import default_recent_path
 from backend.project.session import Session
+from backend.settings import default_user_templates_dir
 from backend.voice.engine import chatterbox_model_version
 from backend.voice.jobqueue import JobQueue
 from backend.voice.model import ModelManager
@@ -88,6 +89,7 @@ def main() -> None:
     session = Session(
         recent_path=default_recent_path(),
         user_presets_path=default_user_presets_path(),  # M7 S5: presets edited in Settings
+        user_templates_dir=default_user_templates_dir(),  # M7 S6: saved channel templates
     )
     # Renders the processed takes in the background (CPU only) after every change.
     session.enable_prefetch()

@@ -4,6 +4,7 @@
     getFootage,
     getModelStatus,
     getProject,
+    getTemplates,
     getRecent,
     getVoice,
     newProject,
@@ -21,15 +22,18 @@
     type ModelStatus,
     type ProjectSummary,
     type RecentItem,
+    type TemplateList,
     type VoiceState,
   } from "./api";
   import Editor from "./Editor.svelte";
   import ExportScreen from "./ExportScreen.svelte";
   import ModelSetup from "./ModelSetup.svelte";
   import SettingsPage from "./SettingsPage.svelte";
+  import SaveTemplate from "./SaveTemplate.svelte";
   import { cleanPathInput, formatBytes, voiceStatusText } from "./voice";
   import {
     ArrowRight,
+    BookmarkPlus,
     Clapperboard,
     Film,
     Folder,
@@ -69,6 +73,12 @@
 
   let newName = $state("");
   let newParent = $state("");
+  /** Channel templates for "New project" (M7 S6); loaded when the page opens. */
+  let templates = $state<TemplateList | null>(null);
+  let newTemplate = $state("default");
+  /** The "Save as template" panel on the project page (M7 S6). */
+  let savingTemplate = $state(false);
+  const pickedTemplate = $derived(templates?.templates.find((t) => t.id === newTemplate) ?? null);
   let openPath = $state("");
 
   const missingFootage = $derived(
@@ -88,6 +98,20 @@
   function show(next: Page): void {
     error = null;
     page = next;
+    if (next === "new") {
+      void loadTemplates();
+    }
+  }
+
+  async function loadTemplates(): Promise<void> {
+    try {
+      templates = await getTemplates();
+      if (!templates.templates.some((t) => t.id === newTemplate)) {
+        newTemplate = "default";
+      }
+    } catch (err) {
+      error = message(err);
+    }
   }
 
   async function refreshProject(): Promise<void> {
@@ -309,7 +333,7 @@
   <div class="screen">
     <nav class="sidebar" aria-label="Projects">
       <div class="brand">
-        <img src="/logo.png" alt="" width="28" height="28" />
+        <img src="/app/logo.png" alt="" width="28" height="28" />
         <span>PNGtuber Studio</span>
       </div>
 
@@ -403,11 +427,17 @@
             <h1>{current.name}</h1>
             <div class="path" title="Project folder">{current.folder}</div>
           </div>
-          <Button variant="primary" onclick={() => (view = "editor")} disabled={busy}>
-            Open editor
-            <ArrowRight size={16} strokeWidth={1.75} aria-hidden="true" />
-          </Button>
+          <div class="head-actions">
+            <Button icon={BookmarkPlus} onclick={() => (savingTemplate = true)} disabled={busy || savingTemplate}>
+              Save as template
+            </Button>
+            <Button variant="primary" onclick={() => (view = "editor")} disabled={busy}>
+              Open editor
+              <ArrowRight size={16} strokeWidth={1.75} aria-hidden="true" />
+            </Button>
+          </div>
         </div>
+        <SaveTemplate suggestedName={current.name} bind:open={savingTemplate} />
 
         <div class="stats">
           <div class="stat">
@@ -694,9 +724,28 @@
         <section class="card form-card">
           <div class="card-body">
             <p class="muted">
-              The project starts from the default channel template. Its folder is the parent folder
-              plus the name.
+              The project starts from a channel template. Its folder is the parent folder plus the
+              name.
             </p>
+            <div class="field">
+              <label for="new-template">Channel template</label>
+              <select id="new-template" bind:value={newTemplate} disabled={busy || templates === null}>
+                {#each templates?.templates ?? [] as t (t.id)}
+                  <option value={t.id}>{t.builtin ? `${t.name} (built in)` : t.name}</option>
+                {/each}
+              </select>
+              {#if pickedTemplate !== null}
+                <span class="muted small field-note">
+                  {#if pickedTemplate.builtin}No intro or outro, no voice reference, no avatar art.
+                  {:else}Intro: {pickedTemplate.intro ?? "none"} · Outro: {pickedTemplate.outro ?? "none"} ·
+                    Voice: {pickedTemplate.voice_reference ?? "no reference clip"} · Avatar art:
+                    {pickedTemplate.art_folder ?? "none"}{/if}
+                </span>
+              {/if}
+              {#each templates?.problems ?? [] as problem}
+                <span class="bad small field-note">A saved template could not be read: {problem}</span>
+              {/each}
+            </div>
             <div class="field">
               <label for="new-name">Name</label>
               <input id="new-name" bind:value={newName} placeholder="My Rack" disabled={busy} />
@@ -719,7 +768,7 @@
               <Button
                 variant="primary"
                 icon={Plus}
-                onclick={() => run(() => newProject(newName, newParent))}
+                onclick={() => run(() => newProject(newName, newParent, newTemplate))}
                 disabled={busy}
               >
                 Create project
@@ -957,6 +1006,11 @@
     align-items: center;
     gap: 12px;
   }
+  .head-actions {
+    display: flex;
+    align-items: center;
+    gap: 8px;
+  }
   .title {
     flex: 1;
     min-width: 0;
@@ -1131,9 +1185,14 @@
     color: var(--text-2);
     font-size: var(--fs-sm);
   }
-  .field > input {
+  .field > input,
+  .field > select {
     width: 100%;
     box-sizing: border-box;
+  }
+  .field-note {
+    display: block;
+    margin-top: 4px;
   }
   .input-row {
     display: flex;

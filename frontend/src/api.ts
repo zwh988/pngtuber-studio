@@ -76,8 +76,12 @@ export function getProject(): Promise<ProjectSummary | null> {
   return request<ProjectSummary | null>("/api/project");
 }
 
-export function newProject(name: string, parent: string): Promise<ProjectSummary> {
-  return post<ProjectSummary>("/api/project/new", { name, parent });
+export function newProject(
+  name: string,
+  parent: string,
+  templateId: string | null = null,
+): Promise<ProjectSummary> {
+  return post<ProjectSummary>("/api/project/new", { name, parent, template_id: templateId });
 }
 
 export function openProject(folder: string): Promise<ProjectSummary> {
@@ -942,4 +946,29 @@ export function resetPresets(): Promise<PresetsState> {
 /** Shows the folder of a Settings path in Explorer. */
 export function openSettingsPath(key: string): Promise<{ folder: string }> {
   return post<{ folder: string }>("/api/settings/open", { key });
+}
+
+// ---- channel templates (M7 S6) ------------------------------------------------------
+
+export type TemplateInfo = {
+  id: string;
+  name: string;
+  builtin: boolean;
+  intro: string | null;
+  outro: string | null;
+  voice_reference: string | null;
+  art_folder: string | null;
+  folder: string | null;
+};
+
+/** `GET /api/templates`: the built-in default first, then saved templates by name. */
+export type TemplateList = { templates: TemplateInfo[]; problems: string[]; folder: string | null };
+
+export function getTemplates(): Promise<TemplateList> {
+  return request<TemplateList>("/api/templates");
+}
+
+/** Saves the open project's channel settings; `replace` overwrites a template of that name. */
+export function saveTemplate(name: string, replace = false): Promise<TemplateInfo> {
+  return post<TemplateInfo>("/api/templates/save", { name, replace });
 }

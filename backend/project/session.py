@@ -126,11 +126,21 @@ from backend.project.summary import (
     summarize,
 )
 from backend.project.template import (
+    TemplateError,
     apply_template,
     external_source,
-    load_template_file,
 )
 from backend.project.timeline import EditResult, TimelineState, build_timeline
+from backend.project.usertemplates import (
+    TemplateInfo,
+    TemplateList,
+    list_templates,
+    resolve_template,
+    save_template,
+    template_folder_name,
+    template_from_project,
+    template_reference,
+)
 from backend.project.voice_commands import AddVoiceProfile, SetReferenceClip
 from backend.voice.generation import GenerationError, GenerationPlan
 from backend.voice.generation import plan_generation as build_generation_plan
@@ -238,6 +248,7 @@ class Session:
         presets: dict[str, EmotionPreset] | None = None,
         fx_presets: dict[str, FxChain] | None = None,
         user_presets_path: Path | None = None,
+        user_templates_dir: Path | None = None,
     ) -> None:
         # Re-entrant: the stack's on_change callback runs while a command
         # method already holds the lock.
@@ -258,6 +269,8 @@ class Session:
         # M7 S5: emotion presets edited in Settings (app-wide). None: built-in only,
         # and Settings cannot save (tests and the default app).
         self._user_presets_path = user_presets_path
+        # M7 S6: where "Save as template" writes; None: only the built-in template.
+        self._user_templates_dir = user_templates_dir
         self._folder: Path | None = None
         self._stack: CommandStack | None = None
         self._save_error: str | None = None
@@ -274,7 +287,9 @@ class Session:
                 return None
             return self._summary()
 
-    def new_project(self, parent: str, name: str) -> ProjectSummary:
+    def new_project(
+        self, parent: str, name: str, template_id: str | None = None
+    ) -> ProjectSummary:
         try:
             clean = clean_folder_name(name)
         except ValueError as exc:
@@ -286,7 +301,10 @@ class Session:
         if project_file(folder).exists():
             raise SessionError(f"a project already exists in {folder}")
 
-        template = load_template_file(self._template_path)
+        template, template_folder = resolve_template(
+            self._user_templates_dir, template_id, self._template_path
+        )
+        reference = template_reference(template, template_folder)
         intro = self._probe_bookend(template.intro.path) if template.intro else None
         outro = self._probe_bookend(template.outro.path) if template.outro else None
         project = apply_template(
@@ -295,8 +313,48 @@ class Session:
 
         with self._lock:
             folder.mkdir(exist_ok=True)
+            if template_folder is not None and project.voice_profiles:
+                # A saved template's clip path is relative to the template: copy the
+                # clip into media/voice/ (M7 S6). A clip that fails its check leaves
+                # the profile without one; the Voice section then says so.
+                profile = project.voice_profiles[0]
+                profile.reference_clips = []
+                if reference is not None:
+                    try:
+                        imported = import_reference(
+                            folder, reference, audio_info=self._audio_info, hashes=self._hashes
+                        )
+                    except VoiceProfileError:
+                        pass
+                    else:
+                        profile.reference_clips = [imported.rel_path]
             create_project(folder, project)
             return self._set_open(folder, project)
+
+    # ---- channel templates (M7 S6) -------------------------------------------
+
+    def templates(self) -> TemplateList:
+        try:
+            return list_templates(self._user_templates_dir, self._template_path)
+        except TemplateError as exc:
+            raise SessionError(str(exc)) from exc
+
+    def save_as_template(self, name: str, *, replace: bool = False) -> TemplateInfo:
+        """Save the open project's channel settings as a template (decision 5)."""
+        if self._user_templates_dir is None:
+            raise SessionError("saving templates is not available in this app instance")
+        with self._lock:
+            folder, stack = self._require_open()
+            try:
+                template_folder_name(name)
+                template, reference = template_from_project(stack.project, folder, name)
+                return save_template(
+                    self._user_templates_dir, template, reference, replace=replace
+                )
+            except TemplateError as exc:
+                raise SessionError(str(exc)) from exc
+            except OSError as exc:
+                raise SessionError(f"cannot save the template: {describe_error(exc)}") from exc
 
     def open_project(self, folder: str) -> ProjectSummary:
         folder_path = Path(folder.strip())

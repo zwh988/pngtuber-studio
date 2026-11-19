@@ -4,7 +4,7 @@ from collections.abc import Callable, Sequence
 from pathlib import Path
 
 from fastapi import FastAPI, HTTPException, Request
-from fastapi.responses import HTMLResponse, Response
+from fastapi.responses import FileResponse, HTMLResponse, Response
 from fastapi.staticfiles import StaticFiles
 from pydantic import BaseModel
 
@@ -50,10 +50,12 @@ from backend.project.store import ProjectError
 from backend.project.summary import FootageReport, ProjectSummary
 from backend.project.template import TemplateError
 from backend.project.timeline import EditResult, TimelineState
+from backend.project.usertemplates import TemplateInfo, TemplateList
 from backend.settings import (
     AppSettings,
     PathItem,
     app_data_dir,
+    default_user_templates_dir,
     folder_to_open,
     path_items,
 )
@@ -93,6 +95,12 @@ class AvatarFolderRequest(BaseModel):
 class NewProjectRequest(BaseModel):
     name: str
     parent: str
+    template_id: str | None = None  # M7 S6: None or "default" = the built-in template
+
+
+class SaveTemplateRequest(BaseModel):
+    name: str
+    replace: bool = False
 
 
 class OpenProjectRequest(BaseModel):
@@ -140,6 +148,12 @@ class OpenPathRequest(BaseModel):
 def default_templates_dir() -> Path:
     """``<repo>/templates``."""
     return Path(__file__).resolve().parents[1] / "templates"
+
+
+def default_logo_path() -> Path:
+    """``<repo>/assets/logo-512.png``: the one logo file the page shows (sidebar,
+    favicon). The window and shortcut use ``assets/app.ico`` (``main.py``)."""
+    return Path(__file__).resolve().parents[1] / "assets" / "logo-512.png"
 
 
 def default_static_dir() -> Path:
@@ -192,7 +206,7 @@ def create_app(
     @app.post("/api/project/new")
     def new_project(request: NewProjectRequest) -> ProjectSummary:
         try:
-            return active.new_project(request.parent, request.name)
+            return active.new_project(request.parent, request.name, request.template_id)
         except _API_ERRORS as exc:
             raise HTTPException(status_code=400, detail=str(exc)) from exc
 
@@ -431,6 +445,7 @@ def create_app(
                 ("ffprobe", "ffprobe (reads footage)", default_ffprobe_path(), False),
                 ("model", "Voice model (Hugging Face cache)", hf_cache_dir(), True),
                 ("templates", "Built-in templates and presets", default_templates_dir(), True),
+                ("user_templates", "Saved channel templates", default_user_templates_dir(), True),
             ]
         )
 
@@ -449,6 +464,20 @@ def create_app(
             export=active.export_settings(),
             paths=settings_paths(Path(presets.path) if presets is not None else None),
         )
+
+    @app.get("/api/templates")
+    def get_templates() -> TemplateList:
+        try:
+            return active.templates()
+        except _API_ERRORS as exc:
+            raise HTTPException(status_code=400, detail=str(exc)) from exc
+
+    @app.post("/api/templates/save")
+    def save_template(request: SaveTemplateRequest) -> TemplateInfo:
+        try:
+            return active.save_as_template(request.name, replace=request.replace)
+        except _API_ERRORS as exc:
+            raise HTTPException(status_code=400, detail=str(exc)) from exc
 
     @app.post("/api/settings/presets")
     def save_presets(request: PresetsRequest) -> PresetsState:
@@ -683,6 +712,15 @@ def create_app(
     @app.post("/api/timeline/batch")
     def edit_batch(batch: EditBatch) -> TimelineState:
         return run_edit(batch.ops, batch.label)
+
+    @app.get("/app/logo.png")
+    def get_logo() -> FileResponse:
+        # Read from assets/ on every request (no-cache), so a changed logo shows
+        # after a restart without rebuilding the frontend.
+        logo = default_logo_path()
+        if not logo.is_file():
+            raise HTTPException(status_code=404, detail="logo not found")
+        return FileResponse(logo, media_type="image/png", headers={"Cache-Control": "no-cache"})
 
     folder = static_dir if static_dir is not None else default_static_dir()
     if (folder / "index.html").is_file():

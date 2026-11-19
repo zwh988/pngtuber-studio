@@ -25,6 +25,11 @@ def app_data_dir() -> Path:
     return root / APP_DATA_NAME
 
 
+def default_user_templates_dir() -> Path:
+    """Where "Save as template" writes (M7 S6)."""
+    return app_data_dir() / "templates"
+
+
 class PathItem(BaseModel):
     key: str
     label: str
