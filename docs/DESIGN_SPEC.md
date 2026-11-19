@@ -51,13 +51,14 @@ A one-stop local desktop app that turns a recorded pool rack into a finished PNG
 ## 4. Screens
 
 ### 4.1 Project screen
-- New project from the channel template (name plus parent folder; the project folder is `<parent>\<name>`), open recent, open folder (native folder picker).
+- New project from a channel template (name, parent folder and template; the project folder is `<parent>\<name>`), open recent, open folder (native folder picker). The template picker lists the built-in Default and the user's saved templates, each with a one-line summary. "Save as template" on the project page saves the project's intro and outro, voice profile with a copy of its reference clip, voice FX, game audio level, avatar settings and export defaults to `%APPDATA%\PNGtuberStudio\templates\<name>\`; an existing name is replaced only on request. Templates are not applied to an open project.
 - Recent projects: up to 10, newest first, stored per user outside any project. Entries whose folder no longer exists are marked missing; the user can remove an entry from the list (the project folder is never touched).
 - Shows footage files found in `footage/` (resolution, frame rate, length, audio tracks, status) with a Rescan button. New files are detected on open and on Rescan; missing files are flagged, never removed automatically.
 - Voice profile and avatar art show as "not configured" or "path set" until real validation arrives (voice profile with M3, avatar art with M5).
 - Relink: a missing footage file is relinked by picking the moved file. It must be inside the project's `footage/` folder and is re-probed; it is refused unless resolution, frame rate and audio track count match and length is within 100 ms.
 - A failed save is shown as a banner; edits are never lost silently.
-- Layout (UI-2): a sidebar (logo, Home, the open project, Recent, New project, Open folder) and pages. Home lists the recent projects; the Project page has a header with the name and "Open editor", four summary cards (footage, timeline, voice, avatar) with status badges, the footage table, and Voice and Avatar cards with their path fields; long help texts are folded away.
+- First run (M7): with no voice model on disk and no project open, the Voice model page opens first: download size and folder, Download with progress, Retry after a failure, Later. Home shows a banner while the model is missing.
+- Layout (UI-2): a sidebar (logo, Home, Voice model, Settings, the open project, Recent, New project, Open folder) and pages. Home lists the recent projects; the Project page has a header with the name and "Open editor", four summary cards (footage, timeline, voice, avatar) with status badges, the footage table, and Voice and Avatar cards with their path fields; long help texts are folded away.
 
 ### 4.2 Editor (95% of the user's time)
 
@@ -97,7 +98,12 @@ Opened with "Export..." in the editor.
 - Progress bar with the step, time so far and time left, and cancel; then the files written and "Open folder".
 
 ### 4.4 Settings
-Voice profiles (reference clips), emotion presets, FX chain presets, avatar art mapping, channel template, hotkeys, take storage manager.
+A sidebar page on the project screen (M7). It adds what has no other home and points to the rest:
+- **Emotion presets:** exaggeration, pacing (cfg_weight) and avatar expression for each built-in emotion, app-wide (`%APPDATA%\PNGtuberStudio\emotion_presets.json`; the built-in file stays the default). Values only: presets are not added or removed. Reset per row or all. Lines that use a changed preset get a new take on their next Generate; old takes stay.
+- **Export defaults** of the open project: resolution (1080p or 720p), frame rate (match, 30, 60) and the bundle switches; one undo step; the export screen starts from them.
+- **Keyboard shortcuts:** the read-only map (also `?` or the keyboard icon in the editor).
+- **Tools and folders:** whether video export works (ffmpeg and NVENC), and each path the app uses with Open folder.
+- **Elsewhere:** voice reference and avatar art folder on the project page; FX presets and game level in the Voice FX tab; takes, disk space and deletes in the Line bank; avatar motion in the Avatar tab; the model download on the Voice model page; channel templates on the project page and New project.
 
 ## 5. Data model
 
@@ -262,7 +268,11 @@ Progress is polled (`GET /api/export/status`: stage, fraction, elapsed time and 
 
 **Persistence:** `project.json` is the single source of truth with atomic writes (temp then replace), autosave on change, and a rotating backup. A `schema_version` field supports migrations. The per-user recent-projects list lives at `%APPDATA%\PNGtuberStudio\recent.json`, outside any project.
 
-**Packaging:** start with `install.bat` (uv creates the environment, installs CUDA torch, downloads model weights) and `run.bat`. A single exe is deferred because CUDA torch makes it a multi-gigabyte build.
+**Packaging (M7):** `install.bat` runs `scripts\install\install.ps1`: it checks for an NVIDIA GPU with driver 570 or newer (stops with a message otherwise), puts a pinned portable uv in `tools\uv\` and a pinned portable Node in `tools\node\` (SHA-256 checked, no admin rights, no PATH changes), runs `uv sync --frozen` (Python 3.11, CUDA torch from `uv.lock`), builds the frontend, downloads the pinned ffmpeg 8.1 build into `bin\`, checks CUDA and NVENC, and writes `run.bat` and a desktop shortcut. It skips finished steps and logs to `install.log`. The voice model is not downloaded by the installer: the app's first-run page downloads the pinned Chatterbox revision into the Hugging Face cache, and the GPU worker then always runs offline (`HF_HUB_OFFLINE=1`). The app is GPL-3.0-or-later (Pedalboard is GPL); third-party notices are in `THIRD_PARTY_NOTICES.md`. A single exe is deferred because CUDA torch makes it a multi-gigabyte build.
+
+**Per-user data** in `%APPDATA%\PNGtuberStudio\`: `recent.json`, `worker.log`, `emotion_presets.json` (edited presets), `templates\` (saved channel templates).
+
+**Errors:** file errors the user can fix (disk full, a file open in another program, access denied) are turned into plain sentences (`backend/oserrors.py`); every message says what to do next.
 
 ## 12. Open items
 

@@ -2,8 +2,8 @@
 
 Living document: how the project works right now and where everything lives. **Update it at the end of every task** (see the checklist in `CLAUDE.md`). Keep it factual and short; link to files instead of copying code.
 
-- **Last updated:** 2026-11-19 (M7: S6 committed (`9c84c6c`), the Line bank and Storage merge committed (`414d703`), the S4 leftovers done (media cache size in the Line bank). Agent session: `uv run pytest` 1537 passed, ruff clean, `npm run check` 0 errors and 0 warnings, `npm test` 38 passed, `npm run build` ok)
-- **Current milestone:** M7 (polish) on branch `m7-polish`: S1 to S6 done and committed; S7 (clean-install test on a fresh Windows user account, run by the user) is next, then S8 (wrap-up, merge, tag `m7-done`).
+- **Last updated:** 2026-11-19 (M7 S8 wrap-up: spec 4.1, 4.4 and 11 as built, M7-1 to M7-4 ticked, M7-5 (clean-install test) deferred by the user; `m7-polish` merged into `main` and tagged `m7-done` locally, not pushed)
+- **Current milestone:** M7 done (tag `m7-done`), except M7-5, the clean-install test, deferred by the user. Next: M8 tracks and media (`docs/tasks/M8-tracks-and-media.md`), in a new chat on a branch `m8-1-audio-lanes` from `main`.
 - **Overall status:** M0 verdict GO (see "M0 findings"). The app runs: a pywebview window shows a Svelte project screen (create from template, open, Recent, footage scan, rescan, relink) and, new in M2, a **video editor screen** reached from "Open editor": add footage to the timeline, a player that plays across the cuts (segment hopping, clip speed with pitch preserved), a custom canvas timeline (ruler, clips, cut markers, speed badges, playhead, zoom and scroll), clip selection, drag to trim and reorder, the hotkeys from spec 4.2, and unlimited undo/redo. The backend behind it (time mapping, clip commands, orphan logic, reference check, timeline API, media server) is pure and tested (490 tests passing). Voice generation now works end to end (M3): a voice profile section on the project screen, a Line bank tab (write lines, emotion and slider overrides, generate, reroll, cancel, take picker), a status bar with the GPU queue and takes on disk, and a Storage tab with confirmed deletes. Lines can be placed on the footage (voice lane with waveform blocks), play in sync with the video through Web Audio, warn when they run into the next line (red block edge), and be fixed by Nudge earlier, Tighten (pitch-preserving speed-up up to +25 percent) or Reroll. There is no avatar or export yet. The voice chain exists in the backend (M4 chat B: processed takes with trim, EQ, compressor, effects, loudness and limiter, served through `/media/take/{id}?processed=1`, edited through `/api/fx`, rendered ahead in the background) but has no UI yet and nothing plays it; placed lines still play the raw take until chats C and D. No `install.bat` / `run.bat` yet.
 
 ## How to run / test
@@ -808,6 +808,7 @@ MyRack/
 | 2026-11-19 | Logo: the page reads the logo from `assets/logo-512.png` through `GET /app/logo.png` (no-cache) instead of a copy in `frontend/public/` that only a rebuild picked up; the copy is removed. Changing the logo = replace `assets/logo-512.png` (512 px PNG) and `assets/app.ico` (16 to 256 px), then restart the app; run `install.bat` once to refresh the desktop shortcut if Windows keeps the old icon |
 | 2026-11-19 | M8 scope (user): recording audio in the app is out of scope; a video keeps its own sound; dropped audio files go on several audio lanes; extra video lanes are required. `docs/tasks/M8-tracks-and-media.md` revised |
 | 2026-11-19 | M7 (S4 leftovers): `StorageReport.cache_bytes` is the size of `media/takes_fx`, `media/envelopes` and `media/avatar_preview` (re-creatable, cleaned on idle, not part of the takes total); the Line bank toolbar shows it as "cache" with a tooltip. The Storage tab's own empty state went away with the merge |
+| 2026-11-19 | M7 (S8): the user deferred the clean-install test (M7-5) and closed M7: M7-1 to M7-4 ticked, M7-5 left open with a note. Spec 4.1 (first run, templates, sidebar), 4.4 (Settings as built) and 11 (packaging, per-user data, error messages) rewritten as built. `m7-polish` merged into `main` and tagged `m7-done` |
 
 ## Known issues / open questions
 
@@ -942,6 +943,7 @@ MyRack/
 
 ## Next up
 
-1. **M7 S7 clean-install test** (user): a new Windows user account, the repo as a GitHub "Download ZIP", `install.bat`, the first-run model download, then one short project from footage to export. Paste back `install.log` and anything that went wrong.
-2. **M7 S8** wrap-up: spec 4.4 and 11 as built, tick M7-1 to M7-5, merge `m7-polish`, tag `m7-done`.
-3. **After M7: M8 tracks and media** (`docs/tasks/M8-tracks-and-media.md`, drafted 2026-11-19, nothing built): audio lanes (music and sound effects dragged onto the timeline), extra video lanes (required), then optional PNG sequences. Recording audio in the app is out of scope. Decisions to settle at its start are listed in the file.
+1. **Push** `main` and the tags when ready: `git push`, `git push --tags` (not done by the agent).
+2. **M8 tracks and media** (`docs/tasks/M8-tracks-and-media.md`, nothing built): start in a new chat from `main` with `git switch -c m8-1-audio-lanes`; settle the decisions in the file first. Order: audio lanes (music and sound effects dragged onto the timeline), extra video lanes (required), then optional PNG sequences. Recording audio in the app is out of scope.
+3. **Deferred M7-5 clean-install test:** before giving the app to anyone, run it on a fresh Windows user account from a `git archive` zip of `main` (steps: `docs/tasks/M7-polish.md`, S7).
+4. **Tuning by eye:** the avatar constants (see Known issues) and, if exports are too big, the video quality (`VIDEO_ENCODE_ARGS` in `backend/export/editgraph.py`).

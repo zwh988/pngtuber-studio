@@ -3,6 +3,7 @@
 > Written 2026-11-17 after M6 from `IMPLEMENTATION_PLAN.md` (M7-1 to M7-5), `docs/DESIGN_SPEC.md` sections 4.4 and 11, `PROJECT_STATE.md` (known issues and "Next up") and the code as of `m6-done`. The plan wins where this file and it disagree. Nothing here has been built. The questions under "Decisions" are for the user at the start of M7; the answers go into the decisions log in `PROJECT_STATE.md`.
 
 - **Milestone items:** M7-1 to M7-5.
+- **Status (2026-11-19):** done and tagged `m7-done`; S7 (clean-install test, M7-5) deferred by the user.
 - **Branch:** `m7-polish` (from `main` at `m6-done`).
 - **Done when (plan):** a fresh install works from `install.bat` to a finished export.
 
