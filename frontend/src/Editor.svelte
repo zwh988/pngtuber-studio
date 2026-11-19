@@ -40,7 +40,6 @@
   import AvatarOverlay from "./AvatarOverlay.svelte";
   import AvatarPanel from "./AvatarPanel.svelte";
   import LineBank from "./LineBank.svelte";
-  import StorageList from "./StorageList.svelte";
   import VoiceFx from "./VoiceFx.svelte";
   import { AudioGraph } from "./audioGraph";
   import Player from "./Player.svelte";
@@ -108,7 +107,7 @@
   let voiceArmed = false;
   let voiceArmedMs = 0;
   /** Which tab of the footage / line bank panel is showing. */
-  let tab = $state<"footage" | "lines" | "storage" | "fx" | "avatar">("footage");
+  let tab = $state<"footage" | "lines" | "fx" | "avatar">("footage");
   /** Selected avatar key or reaction (click in the timeline's avatar rows). */
   let selectedKeyId = $state<string | null>(null);
   let selectedReactionId = $state<string | null>(null);
@@ -844,7 +843,10 @@
               role="tab"
               aria-selected={tab === "lines"}
               class:on={tab === "lines"}
-              onclick={() => (tab = "lines")}
+              onclick={() => {
+                tab = "lines";
+                void refreshStorage();
+              }}
             >
               Line bank
             </button>
@@ -865,18 +867,6 @@
               onclick={() => (tab = "avatar")}
             >
               Avatar
-            </button>
-            <button
-              type="button"
-              role="tab"
-              aria-selected={tab === "storage"}
-              class:on={tab === "storage"}
-              onclick={() => {
-                tab = "storage";
-                void refreshStorage();
-              }}
-            >
-              Storage
             </button>
           </div>
           <div class="pane">
@@ -911,10 +901,11 @@
                 {jobs}
                 onjobchange={() => void jobsChanged()}
                 fxVersion={timeline?.fx_version ?? ""}
+                {storage}
+                ondeleted={takesDeleted}
+                onplace={placeSelected}
+                placeDisabled={busy}
               />
-            </div>
-            <div hidden={tab !== "storage"}>
-              <StorageList report={storage} onchanged={takesDeleted} />
             </div>
             <div hidden={tab !== "avatar"}>
               {#if timeline !== null}

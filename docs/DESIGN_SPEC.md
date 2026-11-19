@@ -62,7 +62,7 @@ A one-stop local desktop app that turns a recorded pool rack into a finished PNG
 ### 4.2 Editor (95% of the user's time)
 
 - **Top left:** video player with the avatar drawn on a canvas over it (the preview frame is 16:9, fitted inside the player). While paused, drag the avatar to move it (keys x and y at the playhead) and drag its corner handle to resize it (keys scale); each gesture is one undo step.
-- **Top right:** tabs for **Footage** (add a recording to the timeline), **Line bank** (the line list, the selected line's settings and its takes), **Voice FX**, **Avatar**, and **Storage** (takes on disk, deletes) (the base motion and placement used wherever a lane has no keys, the expression and reaction tools behind `E` and `R`, and an inspector for the selected keyframe or reaction).
+- **Top right:** tabs for **Footage** (add a recording to the timeline), **Line bank** (the line list, the selected line's settings, Generate, Reroll and Place at playhead (`M`), and its takes with their size on disk; the disk total, the confirmed permanent Delete take and Delete line and takes, and the read-only list of unreferenced files also live here), **Voice FX**, and **Avatar** (the base motion and placement used wherever a lane has no keys, the expression and reaction tools behind `E` and `R`, and an inspector for the selected keyframe or reaction).
 - **Bottom:** timeline with a ruler and these lanes:
   - Video strip (clips, cut markers, speed badges)
   - Voice lane (placed lines as blocks with waveform; red edge on overflow)

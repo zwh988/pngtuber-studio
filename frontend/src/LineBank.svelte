@@ -6,6 +6,8 @@
     EXAGGERATION_MAX,
     EXAGGERATION_MIN,
     cancelJob,
+    deleteLine,
+    deleteTake,
     editLines,
     generateLine,
     getLines,
@@ -17,17 +19,23 @@
     type LineBankState,
     type LineEditOp,
     type LineItem,
+    type StorageReport,
+    type TakeDeleteReport,
     type TakeItem,
+    type TakeStorage,
   } from "./api";
   import ParamSlider from "./ParamSlider.svelte";
   import TakeTrimmer from "./TakeTrimmer.svelte";
-  import { Dices, Pause, Play, Plus, Scissors, Sparkles, Star, Trash2, X } from "@lucide/svelte";
+  import { Dices, MapPin, Pause, Play, Plus, Scissors, Sparkles, Star, Trash2, X } from "@lucide/svelte";
   import Badge from "./ui/Badge.svelte";
   import Banner from "./ui/Banner.svelte";
   import Button from "./ui/Button.svelte";
   import IconButton from "./ui/IconButton.svelte";
+  import Section from "./ui/Section.svelte";
   import { LINE_DRAG_TYPE } from "./timeline";
   import {
+    deleteReportText,
+    formatBytes,
     isBlank,
     jobText,
     latestJobFor,
@@ -44,6 +52,10 @@
     jobs,
     onjobchange,
     fxVersion = "",
+    storage = null,
+    ondeleted,
+    onplace,
+    placeDisabled = false,
   }: {
     /** Change this number to make the bank reload (after an undo or redo elsewhere). */
     reloadToken?: number;
@@ -55,6 +67,14 @@
     onjobchange: () => void;
     /** `TimelineState.fx_version`, so the trimmer can play the processed result. */
     fxVersion?: string;
+    /** The editor's storage report (take sizes, total, unreferenced files); null while it loads. */
+    storage?: StorageReport | null;
+    /** Called after a delete, so the editor reloads lines, takes and disk usage. */
+    ondeleted: () => void;
+    /** The "Place at playhead" button: the editor's hotkey M handler (one undoable edit). */
+    onplace: () => void;
+    /** True while the editor is busy with another edit. */
+    placeDisabled?: boolean;
   } = $props();
 
   let bank = $state<LineBankState | null>(null);
@@ -84,6 +104,36 @@
   let trimmingId = $state<string | null>(null);
   let playingId = $state<string | null>(null);
   let audio: HTMLAudioElement | null = null;
+
+  /** Take sizes and flags from the storage report, by take id. */
+  const takeStorage = $derived(
+    new Map<string, TakeStorage>(
+      (storage?.lines ?? []).flatMap((l) => l.takes.map((t) => [t.take_id, t] as const)),
+    ),
+  );
+  const selStorage = $derived(storage?.lines.find((l) => l.line_id === selLineId) ?? null);
+
+  /** Which permanent delete is waiting for confirmation: "take:<id>" or "line:<id>". */
+  let pendingKey = $state<string | null>(null);
+  let deleting = $state(false);
+  let notice = $state<string | null>(null);
+  let unreferencedOpen = $state(false);
+
+  /** Run a confirmed permanent delete (Rule 1: only after the inline confirm). */
+  async function remove(action: () => Promise<TakeDeleteReport>): Promise<void> {
+    deleting = true;
+    error = null;
+    notice = null;
+    try {
+      notice = deleteReportText(await action());
+    } catch (err) {
+      error = message(err);
+    } finally {
+      deleting = false;
+      pendingKey = null;
+    }
+    ondeleted();
+  }
 
   /** Newest first; the backend sends them oldest first. */
   const takesNewestFirst = $derived([...takes].reverse());
@@ -126,6 +176,7 @@
     void reloadToken;
     untrack(() => {
       stopAudio();
+      pendingKey = null;
       if (trimmingId !== null && !takes.some((t) => t.id === trimmingId && t.line_id === id)) {
         trimmingId = null;
       }
@@ -333,10 +384,21 @@
       {bank.lines.filter((l) => l.placement_count > 0).length} placed
     </span>
   {/if}
+  {#if storage !== null}
+    <span class="hint num" title="Takes on disk">
+      · {takeCountText(storage.take_count)}, {formatBytes(storage.total_bytes)}
+    </span>
+    {#if storage.missing_file_count > 0}
+      <Badge kind="error">{storage.missing_file_count} take file(s) missing</Badge>
+    {/if}
+  {/if}
 </div>
 
 {#if error !== null}
   <Banner kind="error">{error}</Banner>
+{/if}
+{#if notice !== null}
+  <Banner kind="success" onclose={() => (notice = null)}>{notice}</Banner>
 {/if}
 {#if bank !== null && bank.save_error !== null}
   <Banner kind="error">Could not save the project: {bank.save_error}</Banner>
@@ -373,6 +435,27 @@
             </li>
           {/each}
         </ul>
+      {/if}
+      {#if storage !== null && storage.unreferenced.length > 0}
+        <div class="unref">
+          <Section
+            title="Unreferenced files · {storage.unreferenced.length} · {formatBytes(storage.unreferenced_bytes)}"
+            bind:open={unreferencedOpen}
+          >
+            <p class="hint">
+              These files in media\takes_raw belong to no take, for example after a crash. The app
+              never deletes them. You can delete them yourself in File Explorer.
+            </p>
+            <ul class="plain">
+              {#each storage.unreferenced as file (file.path)}
+                <li>
+                  <span class="path">{file.path}</span>
+                  <span class="meta num">{formatBytes(file.size_bytes)}</span>
+                </li>
+              {/each}
+            </ul>
+          </Section>
+        </div>
       {/if}
     </div>
 
@@ -440,6 +523,16 @@
             >
               Reroll
             </Button>
+            <Button
+              icon={MapPin}
+              title={line.active_take_id === null
+                ? "Generate a take first, then place it at the playhead (M)"
+                : "Place the active take at the playhead (M). Undo removes it."}
+              disabled={line.active_take_id === null || placeDisabled}
+              onclick={onplace}
+            >
+              Place at playhead <span class="kbd">M</span>
+            </Button>
             {#if liveJob !== undefined}
               {@const job = liveJob}
               <Button variant="danger" icon={X} onclick={() => void cancel(job)}>Cancel</Button>
@@ -497,7 +590,12 @@
           Allow this line to overlap the next one (no overflow warning)
         </label>
 
-        <h4>Takes <Badge>{takes.length}</Badge></h4>
+        <h4>
+          Takes <Badge>{takes.length}</Badge>
+          {#if selStorage !== null && selStorage.take_count > 0}
+            <span class="h-meta num">{formatBytes(selStorage.size_bytes)} on disk</span>
+          {/if}
+        </h4>
         {#if takes.length === 0}
           <p class="hint">No takes yet. Generate this line to make one.</p>
         {:else}
@@ -512,7 +610,12 @@
                   onclick={() => togglePlay(take)}
                 />
                 <span class="take-info">
-                  <span class="take-len num">{(take.duration_ms / 1000).toFixed(1)} s</span>
+                  <span class="take-len num">
+                    {(take.duration_ms / 1000).toFixed(1)} s
+                    {#if takeStorage.get(take.id) !== undefined}
+                      <span class="take-size">· {formatBytes(takeStorage.get(take.id)?.size_bytes ?? 0)}</span>
+                    {/if}
+                  </span>
                   <span class="take-meta num">
                     seed {take.seed} · exag {show2(take.exaggeration)} · pacing {show2(take.cfg_weight)}
                   </span>
@@ -553,6 +656,34 @@
                   pressed={take.starred}
                   onclick={() => void toggleStar(take)}
                 />
+                <IconButton
+                  icon={Trash2}
+                  size="sm"
+                  variant="danger"
+                  label="Delete this take"
+                  pressed={pendingKey === `take:${take.id}`}
+                  disabled={deleting}
+                  onclick={() => (pendingKey = pendingKey === `take:${take.id}` ? null : `take:${take.id}`)}
+                />
+                {#if pendingKey === `take:${take.id}`}
+                  {@const size = takeStorage.get(take.id)?.size_bytes}
+                  <div class="confirm">
+                    <span>
+                      Delete this take for good{size === undefined ? "" : `, freeing ${formatBytes(size)}`}?
+                      {#if take.active}The line will have no active take.{/if}
+                      This cannot be undone.
+                    </span>
+                    <Button
+                      size="sm"
+                      variant="danger"
+                      disabled={deleting}
+                      onclick={() => void remove(() => deleteTake(take.id))}
+                    >
+                      Delete
+                    </Button>
+                    <Button size="sm" disabled={deleting} onclick={() => (pendingKey = null)}>Keep</Button>
+                  </div>
+                {/if}
                 {#if trimmingId === take.id}
                   <div class="trim-slot">
                     <TakeTrimmer
@@ -569,22 +700,52 @@
         {/if}
 
         <div class="actions">
-          <Button
-            size="sm"
-            variant="danger"
-            icon={Trash2}
-            disabled={line.take_count > 0 || line.placement_count > 0}
-            onclick={() => void removeSelected()}
-          >
-            Remove line
-          </Button>
-          {#if line.take_count > 0 || line.placement_count > 0}
-            <span class="hint">
-              A line with takes or placements cannot be removed here. Takes are deleted in the
-              Storage tab.
-            </span>
+          {#if line.take_count === 0}
+            <Button
+              size="sm"
+              variant="danger"
+              icon={Trash2}
+              disabled={line.placement_count > 0}
+              onclick={() => void removeSelected()}
+            >
+              Remove line
+            </Button>
+          {:else}
+            <Button
+              size="sm"
+              variant="danger"
+              icon={Trash2}
+              aria-expanded={pendingKey === `line:${line.id}`}
+              disabled={line.placement_count > 0 || deleting}
+              onclick={() => (pendingKey = pendingKey === `line:${line.id}` ? null : `line:${line.id}`)}
+            >
+              Delete line and takes
+            </Button>
+          {/if}
+          {#if line.placement_count > 0}
+            <span class="hint">This line is placed on the timeline. Remove its placements first.</span>
+          {:else if line.take_count > 0}
+            <span class="hint">Takes are never deleted automatically. Deleting is permanent.</span>
           {/if}
         </div>
+        {#if pendingKey === `line:${line.id}`}
+          <div class="confirm">
+            <span>
+              Delete this line and {takeCountText(line.take_count)} for good{selStorage === null
+                ? ""
+                : `, freeing ${formatBytes(selStorage.size_bytes)}`}? This cannot be undone.
+            </span>
+            <Button
+              size="sm"
+              variant="danger"
+              disabled={deleting}
+              onclick={() => void remove(() => deleteLine(line.id))}
+            >
+              Delete
+            </Button>
+            <Button size="sm" disabled={deleting} onclick={() => (pendingKey = null)}>Keep</Button>
+          </div>
+        {/if}
       {/if}
     </div>
   </div>
@@ -783,8 +944,51 @@
   }
   .actions {
     display: flex;
+    flex-wrap: wrap;
     align-items: center;
     gap: 10px;
+  }
+  .take-size {
+    color: var(--text-3);
+    font-weight: normal;
+  }
+  .h-meta {
+    margin-left: auto;
+    font-weight: normal;
+    letter-spacing: 0;
+    text-transform: none;
+  }
+  .confirm {
+    display: flex;
+    flex-basis: 100%;
+    flex-wrap: wrap;
+    align-items: center;
+    gap: 6px 8px;
+    padding: 6px 8px;
+    border-radius: var(--r-sm);
+    background: var(--danger-soft);
+    font-size: var(--fs-sm);
+  }
+  .confirm span {
+    flex: 1;
+    min-width: 10rem;
+  }
+  .unref {
+    margin-top: 12px;
+  }
+  .plain {
+    list-style: none;
+    padding: 0;
+    margin: 0;
+  }
+  .plain li {
+    padding: 4px 0;
+    border-bottom: 1px solid var(--border);
+    font-size: var(--fs-sm);
+  }
+  .path {
+    font-family: var(--font-mono);
+    overflow-wrap: anywhere;
   }
   .hint {
     color: var(--text-2);
