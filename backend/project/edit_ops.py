@@ -30,6 +30,7 @@ from backend.project.avatar_commands import (
 from backend.project.clip_commands import AddClip, RemoveClip, ReorderClip, SetSpeed
 from backend.project.commands import Command, CommandError
 from backend.project.cut_commands import RippleDelete, SplitClip, TrimClip
+from backend.project.export_commands import SetExportSettings
 from backend.project.placement_commands import (
     AddPlacement,
     MovePlacement,
@@ -212,6 +213,17 @@ class SetAvatarSettingsOp(_Op):
     mouth_sensitivity: float | None = None
 
 
+class SetExportSettingsOp(_Op):
+    """M7 S5: export defaults saved back to the project (one undo step)."""
+
+    op: Literal["set_export_settings"] = "set_export_settings"
+    height: int | None = None
+    fps: Literal["match"] | float | None = None
+    include_avatar_overlay: bool | None = None
+    include_raw_video_link: bool | None = None
+    unload_tts_before_export: bool | None = None
+
+
 EditOp = Annotated[
     AddClipOp
     | RemoveClipOp
@@ -235,7 +247,8 @@ EditOp = Annotated[
     | MoveReactionOp
     | SetReactionOp
     | RemoveReactionOp
-    | SetAvatarSettingsOp,
+    | SetAvatarSettingsOp
+    | SetExportSettingsOp,
     Field(discriminator="op"),
 ]
 
@@ -304,4 +317,6 @@ def _build_avatar_command(op: EditOp) -> Command:
         return RemoveReaction(op.reaction_id)
     if isinstance(op, SetAvatarSettingsOp):
         return SetAvatarSettings(**op.model_dump(exclude={"op"}))
+    if isinstance(op, SetExportSettingsOp):
+        return SetExportSettings(**op.model_dump(exclude={"op"}))
     raise CommandError(f"unsupported edit {op!r}")

@@ -32,6 +32,7 @@ from backend.voice.protocol import (
     ShutdownCommand,
     UnloadCommand,
     UnloadedEvent,
+    WarmingUpEvent,
     WorkerCommand,
     WorkerEvent,
 )
@@ -86,11 +87,15 @@ class WorkerLoop:
                 traceback.print_exc()
                 self._emit(
                     ErrorEvent(
-                        message=f"could not load the model: {describe_error(exc)}",
+                        message=(
+                            f"could not load the model: {describe_error(exc)}. If the "
+                            "GPU or driver changed, run install.bat again to check it."
+                        ),
                         fatal=True,
                     )
                 )
                 return False
+            self._emit(WarmingUpEvent())
             try:
                 self._engine.warm_up()
             except Exception:  # noqa: BLE001 - warm-up is optional

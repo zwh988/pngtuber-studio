@@ -2,7 +2,9 @@
   import {
     getAvatar,
     getFootage,
+    getModelStatus,
     getProject,
+    getTemplates,
     getRecent,
     getVoice,
     newProject,
@@ -14,17 +16,24 @@
     rescanFootage,
     setAvatarFolder,
     setVoiceReference,
+    startModelDownload,
     type AvatarState,
     type FootageReport,
+    type ModelStatus,
     type ProjectSummary,
     type RecentItem,
+    type TemplateList,
     type VoiceState,
   } from "./api";
   import Editor from "./Editor.svelte";
   import ExportScreen from "./ExportScreen.svelte";
-  import { cleanPathInput, voiceStatusText } from "./voice";
+  import ModelSetup from "./ModelSetup.svelte";
+  import SettingsPage from "./SettingsPage.svelte";
+  import SaveTemplate from "./SaveTemplate.svelte";
+  import { cleanPathInput, formatBytes, voiceStatusText } from "./voice";
   import {
     ArrowRight,
+    BookmarkPlus,
     Clapperboard,
     Film,
     Folder,
@@ -33,7 +42,9 @@
     Link,
     Mic,
     Plus,
+    AudioLines,
     RefreshCw,
+    Settings,
     UserRound,
     X,
   } from "@lucide/svelte";
@@ -53,11 +64,21 @@
   let error = $state<string | null>(null);
   let busy = $state(false);
   let view = $state<"project" | "editor" | "export">("project");
-  /** Which page the project screen shows (UI-2 S4). */
-  let page = $state<"home" | "project" | "new" | "open">("home");
+  /** Which page the project screen shows (UI-2 S4; "model" is the voice model page, M7 S3). */
+  type Page = "home" | "project" | "new" | "open" | "model" | "settings";
+  let page = $state<Page>("home");
+  /** The voice model's files (M7 S3); polled while a download runs. */
+  let model = $state<ModelStatus | null>(null);
+  let modelTimer: ReturnType<typeof setTimeout> | null = null;
 
   let newName = $state("");
   let newParent = $state("");
+  /** Channel templates for "New project" (M7 S6); loaded when the page opens. */
+  let templates = $state<TemplateList | null>(null);
+  let newTemplate = $state("default");
+  /** The "Save as template" panel on the project page (M7 S6). */
+  let savingTemplate = $state(false);
+  const pickedTemplate = $derived(templates?.templates.find((t) => t.id === newTemplate) ?? null);
   let openPath = $state("");
 
   const missingFootage = $derived(
@@ -74,9 +95,23 @@
     return err instanceof Error ? err.message : String(err);
   }
 
-  function show(next: "home" | "project" | "new" | "open"): void {
+  function show(next: Page): void {
     error = null;
     page = next;
+    if (next === "new") {
+      void loadTemplates();
+    }
+  }
+
+  async function loadTemplates(): Promise<void> {
+    try {
+      templates = await getTemplates();
+      if (!templates.templates.some((t) => t.id === newTemplate)) {
+        newTemplate = "default";
+      }
+    } catch (err) {
+      error = message(err);
+    }
   }
 
   async function refreshProject(): Promise<void> {
@@ -225,6 +260,47 @@
     } catch (err) {
       error = message(err);
     }
+    await refreshModel();
+    // First run (M7 S3): with no project open, a missing model gets its page first.
+    if (model !== null && model.state !== "ready" && current === null) {
+      page = "model";
+    }
+  }
+
+  function scheduleModelPoll(): void {
+    if (modelTimer !== null) {
+      clearTimeout(modelTimer);
+      modelTimer = null;
+    }
+    if (model?.state === "downloading") {
+      modelTimer = setTimeout(() => void refreshModel(), 500);
+    }
+  }
+
+  async function refreshModel(): Promise<void> {
+    try {
+      model = await getModelStatus();
+    } catch (err) {
+      error = message(err);
+    }
+    scheduleModelPoll();
+  }
+
+  async function downloadModel(): Promise<void> {
+    error = null;
+    try {
+      model = await startModelDownload();
+    } catch (err) {
+      error = message(err);
+    }
+    scheduleModelPoll();
+  }
+
+  function modelTag(status: ModelStatus): string {
+    if (status.state === "downloading") {
+      return `${Math.floor((100 * status.bytes_done) / Math.max(1, status.bytes_total))}%`;
+    }
+    return status.state === "failed" ? "stopped" : "not set up";
   }
 
   function when(iso: string): string {
@@ -257,13 +333,24 @@
   <div class="screen">
     <nav class="sidebar" aria-label="Projects">
       <div class="brand">
-        <img src="/logo.png" alt="" width="28" height="28" />
+        <img src="/app/logo.png" alt="" width="28" height="28" />
         <span>PNGtuber Studio</span>
       </div>
 
       <button type="button" class="nav-item" class:on={page === "home"} onclick={() => show("home")}>
         <House size={16} strokeWidth={1.75} aria-hidden="true" />
         Home
+      </button>
+      {#if model !== null}
+        <button type="button" class="nav-item" class:on={page === "model"} onclick={() => show("model")}>
+          <AudioLines size={16} strokeWidth={1.75} aria-hidden="true" />
+          <span class="nav-text">Voice model</span>
+          {#if model.state !== "ready"}<span class="nav-tag">{modelTag(model)}</span>{/if}
+        </button>
+      {/if}
+      <button type="button" class="nav-item" class:on={page === "settings"} onclick={() => show("settings")}>
+        <Settings size={16} strokeWidth={1.75} aria-hidden="true" />
+        Settings
       </button>
       {#if current !== null}
         <button
@@ -322,7 +409,15 @@
         <Banner kind="error" onclose={() => (error = null)}>{error}</Banner>
       {/if}
 
-      {#if page === "project" && current !== null}
+      {#if page === "settings"}
+        <SettingsPage projectName={current?.name ?? null} onopenproject={() => show("project")} />
+      {:else if page === "model" && model !== null}
+        <ModelSetup
+          status={model}
+          ondownload={() => void downloadModel()}
+          onleave={() => show(current === null ? "home" : "project")}
+        />
+      {:else if page === "project" && current !== null}
         {#if current.save_error !== null}
           <Banner kind="error">Could not save the project: {current.save_error}</Banner>
         {/if}
@@ -332,11 +427,17 @@
             <h1>{current.name}</h1>
             <div class="path" title="Project folder">{current.folder}</div>
           </div>
-          <Button variant="primary" onclick={() => (view = "editor")} disabled={busy}>
-            Open editor
-            <ArrowRight size={16} strokeWidth={1.75} aria-hidden="true" />
-          </Button>
+          <div class="head-actions">
+            <Button icon={BookmarkPlus} onclick={() => (savingTemplate = true)} disabled={busy || savingTemplate}>
+              Save as template
+            </Button>
+            <Button variant="primary" onclick={() => (view = "editor")} disabled={busy}>
+              Open editor
+              <ArrowRight size={16} strokeWidth={1.75} aria-hidden="true" />
+            </Button>
+          </div>
         </div>
+        <SaveTemplate suggestedName={current.name} bind:open={savingTemplate} />
 
         <div class="stats">
           <div class="stat">
@@ -623,9 +724,28 @@
         <section class="card form-card">
           <div class="card-body">
             <p class="muted">
-              The project starts from the default channel template. Its folder is the parent folder
-              plus the name.
+              The project starts from a channel template. Its folder is the parent folder plus the
+              name.
             </p>
+            <div class="field">
+              <label for="new-template">Channel template</label>
+              <select id="new-template" bind:value={newTemplate} disabled={busy || templates === null}>
+                {#each templates?.templates ?? [] as t (t.id)}
+                  <option value={t.id}>{t.builtin ? `${t.name} (built in)` : t.name}</option>
+                {/each}
+              </select>
+              {#if pickedTemplate !== null}
+                <span class="muted small field-note">
+                  {#if pickedTemplate.builtin}No intro or outro, no voice reference, no avatar art.
+                  {:else}Intro: {pickedTemplate.intro ?? "none"} · Outro: {pickedTemplate.outro ?? "none"} ·
+                    Voice: {pickedTemplate.voice_reference ?? "no reference clip"} · Avatar art:
+                    {pickedTemplate.art_folder ?? "none"}{/if}
+                </span>
+              {/if}
+              {#each templates?.problems ?? [] as problem}
+                <span class="bad small field-note">A saved template could not be read: {problem}</span>
+              {/each}
+            </div>
             <div class="field">
               <label for="new-name">Name</label>
               <input id="new-name" bind:value={newName} placeholder="My Rack" disabled={busy} />
@@ -648,7 +768,7 @@
               <Button
                 variant="primary"
                 icon={Plus}
-                onclick={() => run(() => newProject(newName, newParent))}
+                onclick={() => run(() => newProject(newName, newParent, newTemplate))}
                 disabled={busy}
               >
                 Create project
@@ -695,6 +815,23 @@
             <div class="muted">Open a recent project, or start a new one.</div>
           </div>
         </div>
+        {#if model !== null && model.state !== "ready"}
+          <Banner kind={model.state === "failed" ? "error" : "warning"}>
+            {#if model.state === "downloading"}
+              Downloading the voice model: {formatBytes(model.bytes_done)} of {formatBytes(model.bytes_total)}.
+            {:else if model.state === "failed"}
+              The voice model download stopped. Generating lines needs it.
+            {:else}
+              The voice model is not downloaded yet ({formatBytes(model.bytes_total)}). Generating lines
+              needs it.
+            {/if}
+            {#snippet action()}
+              <Button size="sm" onclick={() => show("model")}>
+                {model?.state === "missing" ? "Set up" : "Details"}
+              </Button>
+            {/snippet}
+          </Banner>
+        {/if}
         <section class="card">
           <div class="card-head"><h2>Recent projects</h2></div>
           {#if recent.length === 0}
@@ -868,6 +1005,11 @@
     display: flex;
     align-items: center;
     gap: 12px;
+  }
+  .head-actions {
+    display: flex;
+    align-items: center;
+    gap: 8px;
   }
   .title {
     flex: 1;
@@ -1043,9 +1185,14 @@
     color: var(--text-2);
     font-size: var(--fs-sm);
   }
-  .field > input {
+  .field > input,
+  .field > select {
     width: 100%;
     box-sizing: border-box;
+  }
+  .field-note {
+    display: block;
+    margin-top: 4px;
   }
   .input-row {
     display: flex;

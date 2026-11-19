@@ -19,6 +19,7 @@ from backend.voice.protocol import (
     ShutdownCommand,
     UnloadCommand,
     UnloadedEvent,
+    WarmingUpEvent,
     WorkerEvent,
 )
 from backend.voice.worker_client import WorkerClient, WorkerError
@@ -87,7 +88,8 @@ def test_load_reports_the_model_version() -> None:
     fake.start()
     fake.send(LoadCommand(device="cpu"))
     assert drain(fake) == [
-        ReadyEvent(model_version="chatterbox-test", sample_rate=22050, device="cpu")
+        WarmingUpEvent(),
+        ReadyEvent(model_version="chatterbox-test", sample_rate=22050, device="cpu"),
     ]
     assert fake.loaded
 
@@ -233,7 +235,7 @@ def test_unload_then_generate_fails_until_loaded_again(
     generate(loaded, tmp_path)
     assert isinstance(drain(loaded)[0], ErrorEvent)
     loaded.send(LoadCommand())
-    assert isinstance(drain(loaded)[0], ReadyEvent)
+    assert isinstance(drain(loaded)[-1], ReadyEvent)
     generate(loaded, tmp_path, job_id="j2")
     assert isinstance(drain(loaded)[-1], DoneEvent)
 

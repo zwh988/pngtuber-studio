@@ -3,6 +3,7 @@
 > Written 2026-11-17 after M6 from `IMPLEMENTATION_PLAN.md` (M7-1 to M7-5), `docs/DESIGN_SPEC.md` sections 4.4 and 11, `PROJECT_STATE.md` (known issues and "Next up") and the code as of `m6-done`. The plan wins where this file and it disagree. Nothing here has been built. The questions under "Decisions" are for the user at the start of M7; the answers go into the decisions log in `PROJECT_STATE.md`.
 
 - **Milestone items:** M7-1 to M7-5.
+- **Status (2026-11-19):** done and tagged `m7-done`; S7 (clean-install test, M7-5) deferred by the user.
 - **Branch:** `m7-polish` (from `main` at `m6-done`).
 - **Done when (plan):** a fresh install works from `install.bat` to a finished export.
 
@@ -38,6 +39,42 @@
 6. **S6 Channel templates (M7-4).** Save as template, pick a template for a new project (and apply to an open project if decided). Template files outside the repo (`%APPDATA%\PNGtuberStudio\templates\`) plus the built-in default. Tests for save and load round trips. **Manual check.**
 7. **S7 Clean-install test (M7-5).** The user creates a fresh Windows user account, clones the repo, runs `install.bat`, then `run.bat`, makes a project from footage, generates a line, places it, and exports. Everything that goes wrong is fixed here. **Manual check (the milestone's "done when").**
 8. **S8 Wrap-up.** `PROJECT_STATE.md`, ticks M7-1 to M7-5, spec sections 4.4 and 11 (packaging) as built, merge, tag `m7-done`.
+
+## S4 audit (2026-11-17)
+
+Empty states (what the screen shows with no data). "OK" means it already says what to do.
+
+| Screen | With no data | Status |
+|---|---|---|
+| Home | "No recent projects yet. Create one, or open an existing project folder." | OK |
+| Voice model page | missing / downloading / failed (Retry) / ready (S3) | OK |
+| Project page, footage | "No footage yet. Put recordings in `<folder>\footage`, then Rescan" | OK |
+| Project page, voice | problems as error banners ("no reference clip chosen") | OK |
+| Project page, avatar | status text plus warnings | OK |
+| Editor, no clips | stage: "Add a recording from the Footage tab." | OK |
+| Editor, Footage tab with no sources | "No footage in this project yet. Go back to the project screen and Rescan." | OK |
+| Line bank, no lines / no takes / nothing selected | "No lines yet. Add one ..." / "No takes yet. Generate this line ..." / "Select a line to edit it." | OK |
+| Avatar tab, no art | warning banner "No usable avatar art: choose the art folder on the project screen." | OK |
+| Storage tab, no lines | "No lines yet." (no next step) | gone: the Storage tab is part of the Line bank, whose empty state says what to do |
+| Export, pre-flight | errors and warnings with "Fix the errors ... then check again" | OK |
+
+Errors the UI can show:
+
+| Error | Before | After S4 |
+|---|---|---|
+| Missing ffmpeg (export) | "... (see PROJECT_STATE.md, How to run)" | "... (run install.bat again to download it)" (S2) |
+| Missing ffprobe (footage scan) | "... see PROJECT_STATE.md, 'ffmpeg' ..." | "ffprobe not found at ... Run install.bat again to download it." |
+| Voice model missing | worker load error | Generate refused: "download it from the start page" (S3) |
+| Model fails to load (no CUDA, driver) | "could not load the model: <torch text>" | adds "If the GPU or driver changed, run install.bat again to check it." |
+| Worker crash | "... see the worker log" (no path) | names the log file (`%APPDATA%\PNGtuberStudio\worker.log`) |
+| No voice reference when generating | "the voice reference is not ready: no reference clip chosen" | adds "Choose a reference clip in the Voice section of the project screen." |
+| Disk full / file in use / access denied (save, export, storing a take) | raw `[WinError 112] ...` | plain sentence with the drive or file and what to do (`backend/oserrors.py`) |
+| Project from a newer app version | "project schema version 5 is newer than supported (4)" | "this project was saved by a newer version of PNGtuber Studio ... Update the app to open it; the project was not changed." |
+| Backend not answering | "Failed to fetch" | "The app's background service is not answering. Close PNGtuber Studio and start it again ..." |
+| Backend error without a reason (HTTP 500) | "HTTP 500" | "Something went wrong inside the app (HTTP 500). The console window shows the details." |
+| GPU out of memory | already "the GPU ran out of memory (close other GPU programs and retry)" | OK |
+
+Carry-overs: clean-up of `media/envelopes/` and `media/avatar_preview/` is done (on idle, same ten-minute rule as `takes_fx`). The re-creatable files (processed takes, envelopes, preview sprites) are shown as "cache" beside the takes total in the Line bank toolbar.
 
 ## Acceptance checks (user runs these)
 

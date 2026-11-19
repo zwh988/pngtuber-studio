@@ -48,6 +48,8 @@ export function jobText(job: JobItem): string {
   switch (job.phase) {
     case "loading":
       return "Loading the voice model...";
+    case "warming_up":
+      return "Warming up the voice model...";
     case "storing":
       return "Saving the take...";
     case "unloading":

@@ -34,6 +34,7 @@ from typing import Protocol
 import numpy as np
 import soundfile
 
+from backend.oserrors import describe_error
 from backend.project.schema import new_id
 from backend.project.session import SessionError
 from backend.voice.generation import GenerationPlan
@@ -57,6 +58,7 @@ from backend.voice.protocol import (
     ReadyEvent,
     UnloadCommand,
     UnloadedEvent,
+    WarmingUpEvent,
     WorkerEvent,
     build_generate_command,
 )
@@ -458,7 +460,7 @@ class JobQueue:
         try:
             self._work_dir.mkdir(parents=True, exist_ok=True)
         except OSError as exc:
-            message = f"cannot create {self._work_dir}: {exc}"
+            message = f"cannot create {self._work_dir}: {describe_error(exc)}"
             self._finish(job, "failed", message=message)
             return _Step.FINISHED
         try:
@@ -550,7 +552,9 @@ class JobQueue:
             )
         except (OSError, RuntimeError, ValueError, SessionError) as exc:
             _remove(output)
-            self._finish(job, "failed", message=f"could not store the take: {exc}")
+            self._finish(
+                job, "failed", message=f"could not store the take: {describe_error(exc)}"
+            )
             return
         self._finish(
             job,
@@ -592,6 +596,9 @@ class JobQueue:
         deadline = time.monotonic() + self._load_timeout_s
         while True:
             event = self._worker.next_event(self._poll_s)
+            if isinstance(event, WarmingUpEvent):
+                self._set_phase(job, "warming_up")
+                continue
             if isinstance(event, ReadyEvent):
                 self._set_worker("ready", version=event.model_version)
                 return None

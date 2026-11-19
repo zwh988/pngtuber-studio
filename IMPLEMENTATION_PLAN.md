@@ -116,11 +116,11 @@ Done when: the export matches the preview at spot-check timestamps and the bundl
 
 ## M7. Polish (M)
 
-- [ ] M7-1 Hotkey map and settings screens
-- [ ] M7-2 First-run weights downloader plus `install.bat` and `run.bat`
-- [ ] M7-3 Error handling, empty states, helpful messages
-- [ ] M7-4 Channel template save/apply UI
-- [ ] M7-5 Clean-install test on a fresh Windows user account
+- [x] M7-1 Hotkey map and settings screens
+- [x] M7-2 First-run weights downloader plus `install.bat` and `run.bat`
+- [x] M7-3 Error handling, empty states, helpful messages
+- [x] M7-4 Channel template save/apply UI (save and pick for a new project; apply to an open project not built, decision 5)
+- [ ] M7-5 Clean-install test on a fresh Windows user account (deferred by the user on 2026-11-19; run before giving the app to anyone)
 
 Done when: a fresh install works from `install.bat` to a finished export.
 
@@ -132,7 +132,7 @@ Done when: a fresh install works from `install.bat` to a finished export.
 - A/B compare takes and loop-selected-line playback
 - Vertical 9:16 and 4K export
 - Zoom, freeze frame, and text overlay effects (via the effects registry)
-- Additional video tracks and music
+- Additional video tracks and music: drafted as M8 (`docs/tasks/M8-tracks-and-media.md`: audio lanes with drag and drop, extra video lanes, then optional PNG sequences), to start after M7
 - Global favorites library across projects
 - Rhubarb as an alternate mouth provider
 - Per-emotion reference clips in voice profiles

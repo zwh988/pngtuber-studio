@@ -8,8 +8,10 @@ worker's ``--engine tone`` mode for end-to-end tests.
 
 import gc
 import time
+from collections.abc import Callable
 from dataclasses import dataclass
 from importlib import metadata
+from pathlib import Path
 from typing import Any, Protocol
 
 import numpy as np
@@ -99,17 +101,36 @@ class ToneEngine:
         """Nothing to free."""
 
 
+MODEL_MISSING_MESSAGE = (
+    "the voice model is not downloaded yet: download it from the app's start page"
+)
+
+
 class ChatterboxEngine:
     """Original ``ChatterboxTTS`` (M0 findings). Generation follows the spike:
-    ``torch.manual_seed(seed)`` before each ``generate`` call."""
+    ``torch.manual_seed(seed)`` before each ``generate`` call.
 
-    def __init__(self) -> None:
+    M7 S3: the model loads from the pinned revision's folder on disk
+    (``backend/voice/model.py``), never from the network."""
+
+    def __init__(self, find_folder: Callable[[], Path | None] | None = None) -> None:
         self._model: Any = None
+        self._find_folder = find_folder
+
+    def _folder(self) -> Path | None:
+        if self._find_folder is not None:
+            return self._find_folder()
+        from backend.voice.model import hf_lookup, model_folder, present_files
+
+        return model_folder(present_files(hf_lookup()))
 
     def load(self, device: str) -> EngineInfo:
+        folder = self._folder()
+        if folder is None:
+            raise RuntimeError(MODEL_MISSING_MESSAGE)
         from chatterbox.tts import ChatterboxTTS  # slow import, only here
 
-        self._model = ChatterboxTTS.from_pretrained(device=device)
+        self._model = ChatterboxTTS.from_local(folder, device)
         return EngineInfo(
             model_version=chatterbox_model_version(),
             sample_rate=int(self._model.sr),

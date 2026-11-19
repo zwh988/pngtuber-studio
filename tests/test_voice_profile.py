@@ -182,3 +182,9 @@ def test_state_ready_carries_details_and_warnings() -> None:
     assert state.hash == DIGEST
     assert state.problems == []
     assert len(state.warnings) == 1
+
+
+def test_reference_filename_keeps_one_hash_tag_for_a_copy() -> None:
+    # M7 S6: a template's or project's copy is already named <stem>-<hash8>
+    assert reference_filename("My Voice-01234567.wav", DIGEST) == "My Voice-01234567.wav"
+    assert reference_filename("take-89abcdef.wav", DIGEST) == "take-89abcdef-01234567.wav"

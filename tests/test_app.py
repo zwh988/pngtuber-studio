@@ -79,3 +79,14 @@ def test_open_missing_project_is_400(tmp_path: Path) -> None:
     )
     assert response.status_code == 400
     assert "no project.json" in response.json()["detail"]
+
+
+def test_logo_is_served_from_assets(tmp_path: Path) -> None:
+    from backend.app import create_app, default_logo_path
+
+    client = TestClient(create_app(static_dir=tmp_path))
+    response = client.get("/app/logo.png")
+    assert response.status_code == 200
+    assert response.headers["content-type"] == "image/png"
+    assert response.headers["cache-control"] == "no-cache"
+    assert response.content == default_logo_path().read_bytes()

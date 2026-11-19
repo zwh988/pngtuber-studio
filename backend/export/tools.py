@@ -51,7 +51,7 @@ def encoder_problem(ffmpeg: Path | None = None, *, refresh: bool = False) -> str
         if not refresh and path in _cache:
             return _cache[path]
     if not path.is_file():
-        return f"ffmpeg was not found at {path} (see PROJECT_STATE.md, How to run)."
+        return f"ffmpeg was not found at {path} (run install.bat again to download it)."
     flags = subprocess.CREATE_NO_WINDOW if sys.platform == "win32" else 0
     try:
         result = subprocess.run(

@@ -53,9 +53,12 @@ Slider limits: exaggeration 0.0 to 2.0, cfg_weight 0.0 to 1.0, default emotion `
 ## Jobs (`backend/voice/jobs.py`)
 `POST /api/voice/generate`, `/reroll`, `/worker/unload` return `JobItem`; `GET /api/voice/jobs` and `POST /api/voice/jobs/cancel` return `JobStatus`.
 
-`JobItem`: `id`, `kind` (`generate` | `unload`), `line_id` (null for unload), `reroll`, `state` (`queued` | `running` | `cancelling` | `done` | `cancelled` | `failed` | `reused`), `phase` (`waiting` | `loading` | `generating` | `storing` | `unloading` | `finished`), `chunks_done`, `chunk_count`, `reused`, `take_id`, `message` (failure reason).
+`JobItem`: `id`, `kind` (`generate` | `unload`), `line_id` (null for unload), `reroll`, `state` (`queued` | `running` | `cancelling` | `done` | `cancelled` | `failed` | `reused`), `phase` (`waiting` | `loading` | `warming_up` (M7 S3) | `generating` | `storing` | `unloading` | `finished`), `chunks_done`, `chunk_count`, `reused`, `take_id`, `message` (failure reason).
 
 `JobStatus`: `jobs` (oldest first, newest 30 finished kept), `active`, `worker` (`stopped` | `loading` | `ready` | `unloaded` | `failed`), `model_version`, `worker_message`.
+
+## Voice model (M7 S3: `backend/voice/model.py`)
+`GET /api/voice/model` and `POST /api/voice/model/download` (start or retry; nothing happens when ready or already running) return `ModelStatus`: `state` (`missing` | `downloading` | `ready` | `failed`), `repo`, `revision` (pinned commit), `files_total`, `files_present`, `bytes_total`, `bytes_done` (finished files plus the file in flight), `current_file`, `cache_dir`, `message` (why the download stopped, only when failed). `POST /api/voice/generate` and `/reroll` answer 400 "the voice model is not downloaded yet ..." while it is not ready. An app built with a test queue and no `model` reports `ready`. Worker protocol: event `warming_up` comes between loading and `ready`.
 
 ## Placements (M3-7, S6a: `backend/project/placement_commands.py`, `backend/project/edit_ops.py`)
 Placement ops are part of the timeline `EditOp` union, so they also work inside `POST /api/timeline/batch` and mix with clip ops in one undo step. All are `extra="forbid"`. Times are **timeline** ms; the command turns them into an anchor (clip id plus source time) with `timemap.to_source` on the first apply and reuses that anchor on redo.

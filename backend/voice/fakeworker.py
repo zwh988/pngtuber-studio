@@ -38,6 +38,7 @@ from backend.voice.protocol import (
     ShutdownCommand,
     UnloadCommand,
     UnloadedEvent,
+    WarmingUpEvent,
     WorkerCommand,
     WorkerEvent,
 )
@@ -158,6 +159,7 @@ class FakeWorker:
             self._alive = False
             return
         self._loaded = True
+        self._events.append(WarmingUpEvent())  # as the real worker does (M7 S3)
         self._events.append(
             ReadyEvent(
                 model_version=self._model_version,

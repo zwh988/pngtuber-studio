@@ -306,6 +306,9 @@ class StorageReport(BaseModel):
     # crash). Reported only; the app never deletes them by itself.
     unreferenced: list[UnreferencedFile] = Field(default_factory=list)
     unreferenced_bytes: int = 0
+    # M7 S4: re-creatable files (processed takes, envelopes, avatar preview sprites)
+    # in media/; cleaned on idle, rebuilt when needed. Not part of total_bytes.
+    cache_bytes: int = 0
 
 
 def build_storage_report(

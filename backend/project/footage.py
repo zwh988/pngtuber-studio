@@ -160,8 +160,7 @@ def run_ffprobe(
     exe = ffprobe or default_ffprobe_path()
     if not exe.is_file():
         raise FfprobeNotFoundError(
-            f"ffprobe not found at {exe}. Download the pinned ffmpeg build "
-            "(see PROJECT_STATE.md, 'ffmpeg') and copy ffprobe.exe into bin/."
+            f"ffprobe not found at {exe}. Run install.bat again to download it."
         )
     cmd = [
         str(exe),

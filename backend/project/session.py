@@ -6,6 +6,7 @@ change made through the command stack is saved straight away (``on_change``).
 Pass ``recent_path`` to record opened projects; ``None`` records nothing.
 """
 
+import os
 import re
 import threading
 import time
@@ -17,7 +18,13 @@ from typing import Any
 import numpy as np
 
 from backend.audio.chainspec import FxChainError, processing_spec
-from backend.audio.cleanup import run_cleanup
+from backend.audio.cleanup import (
+    ENVELOPE_FILE,
+    PREVIEW_FILE,
+    envelope_keep_names,
+    run_cache_cleanup,
+    run_cleanup,
+)
 from backend.audio.fxpresets import load_fx_presets_file
 from backend.audio.fxstate import FxProcessing, FxState, build_fx_state
 from backend.audio.prefetch import Prefetcher, plan_jobs
@@ -35,8 +42,18 @@ from backend.audio.trim import (
     validate_manual_trim,
 )
 from backend.avatar.art import AvatarArt
-from backend.avatar.envelope import Envelope, EnvelopeReport, envelope_for
-from backend.avatar.preview import PREVIEW_DIR_NAME, PreviewError, ensure_preview
+from backend.avatar.envelope import (
+    ENVELOPE_DIR_NAME,
+    Envelope,
+    EnvelopeReport,
+    envelope_for,
+)
+from backend.avatar.preview import (
+    PREVIEW_DIR_NAME,
+    PreviewError,
+    ensure_preview,
+    preview_name,
+)
 from backend.avatar.scan import (
     ArtFolderError,
     AvatarState,
@@ -59,6 +76,7 @@ from backend.edl.anchoring import check_references, check_voice_references
 from backend.export.job import EXPORTS_DIR, ExportDefaults
 from backend.export.pipeline import ExportInputs
 from backend.export.preflight import PreflightReport, preflight
+from backend.oserrors import describe_error
 from backend.project.avatar_commands import SetAvatarArtFolder
 from backend.project.clip_commands import AddClip
 from backend.project.commands import (
@@ -86,7 +104,15 @@ from backend.project.recent import (
     save_recent,
 )
 from backend.project.relink import relink_mismatches, to_footage_relpath
-from backend.project.schema import FxChain, Line, Project, Source, Take, new_id
+from backend.project.schema import (
+    ExportSettings,
+    FxChain,
+    Line,
+    Project,
+    Source,
+    Take,
+    new_id,
+)
 from backend.project.store import (
     ProjectError,
     create_project,
@@ -101,11 +127,21 @@ from backend.project.summary import (
     summarize,
 )
 from backend.project.template import (
+    TemplateError,
     apply_template,
     external_source,
-    load_template_file,
 )
 from backend.project.timeline import EditResult, TimelineState, build_timeline
+from backend.project.usertemplates import (
+    TemplateInfo,
+    TemplateList,
+    list_templates,
+    resolve_template,
+    save_template,
+    template_folder_name,
+    template_from_project,
+    template_reference,
+)
 from backend.project.voice_commands import AddVoiceProfile, SetReferenceClip
 from backend.voice.generation import GenerationError, GenerationPlan
 from backend.voice.generation import plan_generation as build_generation_plan
@@ -140,6 +176,16 @@ from backend.voice.takes import (
     remove_takes,
 )
 from backend.voice.takestore import TakeStore
+from backend.voice.userpresets import (
+    PresetEdit,
+    PresetsState,
+    build_presets_state,
+    check_edit,
+    default_user_presets_path,
+    delete_user_presets,
+    load_effective,
+    save_user_presets,
+)
 
 Probe = Callable[[Path], dict[str, Any]]
 
@@ -175,6 +221,39 @@ def clean_folder_name(name: str) -> str:
     return text
 
 
+def _folder_bytes(folder: Path) -> int:
+    """Total size of the files directly in ``folder`` (0 when it is missing)."""
+    total = 0
+    try:
+        with os.scandir(folder) as scan:
+            for item in scan:
+                try:
+                    if item.is_file(follow_symlinks=False):
+                        total += item.stat(follow_symlinks=False).st_size
+                except OSError:
+                    continue
+    except OSError:
+        return 0
+    return total
+
+
+def _preview_keep_names(art_folder: str | None, project_folder: Path) -> set[str] | None:
+    """Preview file names of every sprite in the current art. Empty when no art
+    folder is set; None when the folder cannot be read (then nothing is deleted)."""
+    if art_folder is None:
+        return set()
+    root = resolve_art_folder(art_folder, project_folder)
+    try:
+        art = scan_art_folder(root)
+        return {
+            preview_name(root / Path(*rel.split("/")))
+            for expression in art.expressions
+            for rel in expression.sprites.values()
+        }
+    except (ArtFolderError, OSError):
+        return None
+
+
 class Session:
     def __init__(
         self,
@@ -185,6 +264,8 @@ class Session:
         audio_info: AudioInfoFn | None = None,
         presets: dict[str, EmotionPreset] | None = None,
         fx_presets: dict[str, FxChain] | None = None,
+        user_presets_path: Path | None = None,
+        user_templates_dir: Path | None = None,
     ) -> None:
         # Re-entrant: the stack's on_change callback runs while a command
         # method already holds the lock.
@@ -202,6 +283,11 @@ class Session:
         self._presets: dict[str, EmotionPreset] | None = presets
         # Loaded from templates/fx_presets.json on first use when not given.
         self._fx_presets: dict[str, FxChain] | None = fx_presets
+        # M7 S5: emotion presets edited in Settings (app-wide). None: built-in only,
+        # and Settings cannot save (tests and the default app).
+        self._user_presets_path = user_presets_path
+        # M7 S6: where "Save as template" writes; None: only the built-in template.
+        self._user_templates_dir = user_templates_dir
         self._folder: Path | None = None
         self._stack: CommandStack | None = None
         self._save_error: str | None = None
@@ -218,7 +304,9 @@ class Session:
                 return None
             return self._summary()
 
-    def new_project(self, parent: str, name: str) -> ProjectSummary:
+    def new_project(
+        self, parent: str, name: str, template_id: str | None = None
+    ) -> ProjectSummary:
         try:
             clean = clean_folder_name(name)
         except ValueError as exc:
@@ -230,7 +318,10 @@ class Session:
         if project_file(folder).exists():
             raise SessionError(f"a project already exists in {folder}")
 
-        template = load_template_file(self._template_path)
+        template, template_folder = resolve_template(
+            self._user_templates_dir, template_id, self._template_path
+        )
+        reference = template_reference(template, template_folder)
         intro = self._probe_bookend(template.intro.path) if template.intro else None
         outro = self._probe_bookend(template.outro.path) if template.outro else None
         project = apply_template(
@@ -239,8 +330,48 @@ class Session:
 
         with self._lock:
             folder.mkdir(exist_ok=True)
+            if template_folder is not None and project.voice_profiles:
+                # A saved template's clip path is relative to the template: copy the
+                # clip into media/voice/ (M7 S6). A clip that fails its check leaves
+                # the profile without one; the Voice section then says so.
+                profile = project.voice_profiles[0]
+                profile.reference_clips = []
+                if reference is not None:
+                    try:
+                        imported = import_reference(
+                            folder, reference, audio_info=self._audio_info, hashes=self._hashes
+                        )
+                    except VoiceProfileError:
+                        pass
+                    else:
+                        profile.reference_clips = [imported.rel_path]
             create_project(folder, project)
             return self._set_open(folder, project)
+
+    # ---- channel templates (M7 S6) -------------------------------------------
+
+    def templates(self) -> TemplateList:
+        try:
+            return list_templates(self._user_templates_dir, self._template_path)
+        except TemplateError as exc:
+            raise SessionError(str(exc)) from exc
+
+    def save_as_template(self, name: str, *, replace: bool = False) -> TemplateInfo:
+        """Save the open project's channel settings as a template (decision 5)."""
+        if self._user_templates_dir is None:
+            raise SessionError("saving templates is not available in this app instance")
+        with self._lock:
+            folder, stack = self._require_open()
+            try:
+                template_folder_name(name)
+                template, reference = template_from_project(stack.project, folder, name)
+                return save_template(
+                    self._user_templates_dir, template, reference, replace=replace
+                )
+            except TemplateError as exc:
+                raise SessionError(str(exc)) from exc
+            except OSError as exc:
+                raise SessionError(f"cannot save the template: {describe_error(exc)}") from exc
 
     def open_project(self, folder: str) -> ProjectSummary:
         folder_path = Path(folder.strip())
@@ -516,7 +647,10 @@ class Session:
                 or voice.reference_path is None
             ):
                 detail = "; ".join(voice.problems) or voice.status
-                raise SessionError(f"the voice reference is not ready: {detail}")
+                raise SessionError(
+                    f"the voice reference is not ready: {detail}. Choose a reference "
+                    "clip in the Voice section of the project screen."
+                )
             try:
                 return build_generation_plan(
                     stack.project,
@@ -756,9 +890,15 @@ class Session:
             sizes = {
                 take.raw_file: store.size(take.raw_file) for take in stack.project.takes
             }
-            return build_storage_report(
+            report = build_storage_report(
                 stack.project, sizes, store.unreferenced(set(sizes))
             )
+        media = folder / "media"
+        cache = sum(
+            _folder_bytes(media / name)
+            for name in (FX_DIR_NAME, ENVELOPE_DIR_NAME, PREVIEW_DIR_NAME)
+        )
+        return report.model_copy(update={"cache_bytes": cache})
 
     def project_key(self) -> str | None:
         """Identifies the open project (its folder), or None when none is open.
@@ -1137,10 +1277,68 @@ class Session:
     def _presets_or_raise(self) -> dict[str, EmotionPreset]:
         if self._presets is None:
             try:
-                self._presets = load_presets_file()
+                _, self._presets, _, _ = load_effective(self._user_presets_path)
             except PresetError as exc:
                 raise SessionError(str(exc)) from exc
         return self._presets
+
+    # ---- settings (M7 S5) --------------------------------------------------
+
+    def presets_state(self) -> PresetsState:
+        """The emotion presets as Settings shows them; also reloads them."""
+        with self._lock:
+            try:
+                builtin, effective, customized, problem = load_effective(
+                    self._user_presets_path
+                )
+            except PresetError as exc:
+                raise SessionError(str(exc)) from exc
+            self._presets = effective
+            self._avatar_track = None  # preset expressions feed the auto-keys
+            path = self._user_presets_path or default_user_presets_path()
+            return build_presets_state(
+                builtin, effective, customized=customized, path=path, problem=problem
+            )
+
+    def save_presets(self, edits: list[PresetEdit]) -> PresetsState:
+        """Save edited preset values app-wide. Values equal to the built-ins
+        remove the file (nothing customized)."""
+        with self._lock:
+            path = self._require_user_presets_path()
+            try:
+                builtin = load_presets_file()
+                edited = check_edit(builtin, edits)
+            except PresetError as exc:
+                raise SessionError(str(exc)) from exc
+            try:
+                if edited == builtin:
+                    delete_user_presets(path)
+                else:
+                    save_user_presets(path, edited)
+            except OSError as exc:
+                raise SessionError(f"cannot save the presets: {describe_error(exc)}") from exc
+            return self.presets_state()
+
+    def reset_presets(self) -> PresetsState:
+        with self._lock:
+            path = self._require_user_presets_path()
+            try:
+                delete_user_presets(path)
+            except OSError as exc:
+                raise SessionError(f"cannot reset the presets: {describe_error(exc)}") from exc
+            return self.presets_state()
+
+    def _require_user_presets_path(self) -> Path:
+        if self._user_presets_path is None:
+            raise SessionError("editing presets is not available in this app instance")
+        return self._user_presets_path
+
+    def export_settings(self) -> ExportSettings | None:
+        """The open project's export defaults (None without a project)."""
+        with self._lock:
+            if self._stack is None:
+                return None
+            return self._stack.project.export.model_copy(deep=True)
 
     def _fx_presets_or_raise(self) -> dict[str, FxChain]:
         if self._fx_presets is None:
@@ -1201,7 +1399,17 @@ class Session:
                 return  # an unusable chain wants nothing: delete nothing
             self._last_cleanup = now
             wanted = {job.dest.name for job in plan_jobs(folder, project)}
-        run_cleanup(folder / "media" / FX_DIR_NAME, folder / RAW_DIR, wanted)
+            art_folder = project.avatar.art_folder
+        media = folder / "media"
+        run_cleanup(media / FX_DIR_NAME, folder / RAW_DIR, wanted)
+        # M7 S4: envelopes of processed takes that are gone, and preview sprites of
+        # art that is no longer used (both re-created on demand).
+        run_cache_cleanup(
+            media / ENVELOPE_DIR_NAME, envelope_keep_names(media / FX_DIR_NAME), ENVELOPE_FILE
+        )
+        run_cache_cleanup(
+            media / PREVIEW_DIR_NAME, _preview_keep_names(art_folder, folder), PREVIEW_FILE
+        )
 
     def _line_bank_state(self) -> LineBankState:
         _, stack = self._require_open()
@@ -1272,7 +1480,7 @@ class Session:
         try:
             save_project(self._folder, self._stack.project)
         except (ProjectError, OSError) as exc:
-            self._save_error = str(exc)
+            self._save_error = describe_error(exc)
         else:
             self._save_error = None
         self._schedule_prefetch()

@@ -35,10 +35,22 @@ export type FootageReport = {
   errors: string[];
 };
 
+/** Shown when the backend cannot be reached at all (M7 S4). */
+export const BACKEND_GONE =
+  "The app's background service is not answering. Close PNGtuber Studio and start it again; your project was saved after the last change.";
+
 async function request<T>(url: string, init?: RequestInit): Promise<T> {
-  const response = await fetch(url, init);
+  let response: Response;
+  try {
+    response = await fetch(url, init);
+  } catch {
+    throw new Error(BACKEND_GONE); // network-level failure: no HTTP answer
+  }
   if (!response.ok) {
-    let message = `HTTP ${response.status}`;
+    let message =
+      response.status >= 500
+        ? `Something went wrong inside the app (HTTP ${response.status}). The console window shows the details.`
+        : `HTTP ${response.status}`;
     try {
       const body = (await response.json()) as { detail?: unknown };
       if (typeof body.detail === "string") {
@@ -64,8 +76,12 @@ export function getProject(): Promise<ProjectSummary | null> {
   return request<ProjectSummary | null>("/api/project");
 }
 
-export function newProject(name: string, parent: string): Promise<ProjectSummary> {
-  return post<ProjectSummary>("/api/project/new", { name, parent });
+export function newProject(
+  name: string,
+  parent: string,
+  templateId: string | null = null,
+): Promise<ProjectSummary> {
+  return post<ProjectSummary>("/api/project/new", { name, parent, template_id: templateId });
 }
 
 export function openProject(folder: string): Promise<ProjectSummary> {
@@ -294,6 +310,15 @@ export type EditOp =
       float_angle_deg?: number;
       blink_rate?: number;
       mouth_sensitivity?: number;
+    }
+  // M7 S5: export defaults saved back to the project (one undo step).
+  | {
+      op: "set_export_settings";
+      height?: number;
+      fps?: "match" | number;
+      include_avatar_overlay?: boolean;
+      include_raw_video_link?: boolean;
+      unload_tts_before_export?: boolean;
     };
 
 export function splitClip(timelineMs: number): Promise<TimelineState> {
@@ -578,6 +603,8 @@ export type StorageReport = {
   missing_file_count: number;
   unreferenced: UnreferencedFile[];
   unreferenced_bytes: number;
+  /** M7 S4: re-creatable files in media/ (processed takes, envelopes, previews). */
+  cache_bytes: number;
 };
 
 export type JobKind = "generate" | "unload";
@@ -833,4 +860,117 @@ export function cancelExport(): Promise<ExportStatus> {
 
 export function openExportFolder(): Promise<{ folder: string }> {
   return post<{ folder: string }>("/api/export/open-folder");
+}
+
+// ---- voice model (M7 S3) ----------------------------------------------------
+
+export type ModelState = "missing" | "downloading" | "ready" | "failed";
+
+/** `GET /api/voice/model`: are the voice model's files on disk, and the download. */
+export type ModelStatus = {
+  state: ModelState;
+  repo: string;
+  revision: string;
+  files_total: number;
+  files_present: number;
+  bytes_total: number;
+  bytes_done: number;
+  current_file: string | null;
+  cache_dir: string;
+  message: string | null;
+};
+
+export function getModelStatus(): Promise<ModelStatus> {
+  return request<ModelStatus>("/api/voice/model");
+}
+
+/** Starts (or retries) the download; does nothing when ready or already running. */
+export function startModelDownload(): Promise<ModelStatus> {
+  return post<ModelStatus>("/api/voice/model/download");
+}
+
+// ---- settings (M7 S5) -------------------------------------------------------------
+
+export type PresetItem = {
+  name: string;
+  exaggeration: number;
+  cfg_weight: number;
+  expression: string;
+  builtin_exaggeration: number;
+  builtin_cfg_weight: number;
+  builtin_expression: string;
+};
+
+export type PresetsState = {
+  presets: PresetItem[];
+  customized: boolean;
+  path: string;
+  problem: string | null;
+  exaggeration_min: number;
+  exaggeration_max: number;
+  cfg_weight_min: number;
+  cfg_weight_max: number;
+};
+
+export type PresetEdit = { name: string; exaggeration: number; cfg_weight: number; expression: string };
+
+export type ExportSettings = {
+  height: number;
+  fps: "match" | number;
+  include_avatar_overlay: boolean;
+  include_raw_video_link: boolean;
+  unload_tts_before_export: boolean;
+};
+
+export type PathItem = { key: string; label: string; path: string; exists: boolean; folder: boolean };
+
+/** `GET /api/settings`. */
+export type AppSettings = {
+  presets: PresetsState | null;
+  presets_error: string | null;
+  tools_problem: string | null;
+  export: ExportSettings | null;
+  paths: PathItem[];
+};
+
+export function getSettings(): Promise<AppSettings> {
+  return request<AppSettings>("/api/settings");
+}
+
+export function savePresets(presets: PresetEdit[]): Promise<PresetsState> {
+  return post<PresetsState>("/api/settings/presets", { presets });
+}
+
+export function resetPresets(): Promise<PresetsState> {
+  return post<PresetsState>("/api/settings/presets/reset");
+}
+
+/** Shows the folder of a Settings path in Explorer. */
+export function openSettingsPath(key: string): Promise<{ folder: string }> {
+  return post<{ folder: string }>("/api/settings/open", { key });
+}
+
+// ---- channel templates (M7 S6) ------------------------------------------------------
+
+export type TemplateInfo = {
+  id: string;
+  name: string;
+  builtin: boolean;
+  intro: string | null;
+  outro: string | null;
+  voice_reference: string | null;
+  art_folder: string | null;
+  folder: string | null;
+};
+
+/** `GET /api/templates`: the built-in default first, then saved templates by name. */
+export type TemplateList = { templates: TemplateInfo[]; problems: string[]; folder: string | null };
+
+export function getTemplates(): Promise<TemplateList> {
+  return request<TemplateList>("/api/templates");
+}
+
+/** Saves the open project's channel settings; `replace` overwrites a template of that name. */
+export function saveTemplate(name: string, replace = false): Promise<TemplateInfo> {
+  return post<TemplateInfo>("/api/templates/save", { name, replace });
 }
