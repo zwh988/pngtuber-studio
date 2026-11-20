@@ -21,7 +21,7 @@ const GAIN_SMOOTH_S = 0.015;
  *
  *   <video> -> gameGain ----\
  *                            +-> limiter -> destination
- *   voice sources -> voiceBus/                 |
+ *   voice sources -> voiceBus/   (audio-lane clips -> musicBus join the limiter too, M8-1)                 |
  *                                              +-> K-weighting -> splitter -> 2 analysers (meter)
  *
  * One AudioContext for everything, so the voice and the footage share one clock. The nodes are
@@ -32,6 +32,8 @@ export class AudioGraph {
   private ctx: AudioContext | null = null;
   private gameGain: GainNode | null = null;
   private voiceBus: GainNode | null = null;
+  /** Music and sound effects from the audio lanes (M8-1). */
+  private musicBus: GainNode | null = null;
   private analysers: [AnalyserNode, AnalyserNode] | null = null;
   private scratch: [Float32Array, Float32Array] | null = null;
   private videoEl: HTMLMediaElement | null = null;
@@ -52,6 +54,12 @@ export class AudioGraph {
   get voiceInput(): AudioNode {
     const bus = this.build().voiceBus;
     return bus;
+  }
+
+  /** Where audio-clip sources connect (M8-1). */
+  get musicInput(): AudioNode {
+    this.build();
+    return this.musicBus as GainNode;
   }
 
   /** Start the context if the browser suspended it (call from a play action). */
@@ -103,6 +111,7 @@ export class AudioGraph {
     this.ctx = null;
     this.gameGain = null;
     this.voiceBus = null;
+    this.musicBus = null;
     this.analysers = null;
     this.scratch = null;
     if (ctx !== null) {
@@ -125,6 +134,7 @@ export class AudioGraph {
     const ctx = new AudioContext();
     const gameGain = ctx.createGain();
     const voiceBus = ctx.createGain();
+    const musicBus = ctx.createGain();
 
     const limiter = ctx.createDynamicsCompressor();
     limiter.threshold.value = LIMITER_THRESHOLD_DB;
@@ -135,6 +145,7 @@ export class AudioGraph {
 
     gameGain.connect(limiter);
     voiceBus.connect(limiter);
+    musicBus.connect(limiter);
     limiter.connect(ctx.destination);
 
     // Meter tap: K-weighted, kept in stereo (explicit 2 channels) so the two channels can be
@@ -165,6 +176,7 @@ export class AudioGraph {
     this.ctx = ctx;
     this.gameGain = gameGain;
     this.voiceBus = voiceBus;
+    this.musicBus = musicBus;
     this.analysers = [left, right];
     this.scratch = [new Float32Array(left.fftSize), new Float32Array(right.fftSize)];
     gameGain.gain.value = Math.pow(10, this.gameDb / 20);

@@ -37,6 +37,7 @@
     type StorageReport,
     type TimelineState,
   } from "./api";
+  import { AudioClipPlayback } from "./audioClipPlayback";
   import { audioPeakBuckets } from "./audioLanes";
   import { clock } from "./format";
   import { lufsText } from "./loudness";
@@ -106,6 +107,10 @@
   const graph = new AudioGraph();
   /** Plays the processed placed takes in time with the video, on the graph's voice bus. */
   const voice = new VoicePlayback((text) => {
+    error = text;
+  }, graph);
+  /** Plays the music and sound effects of the audio lanes on the graph's music bus (M8-1). */
+  const sounds = new AudioClipPlayback((text) => {
     error = text;
   }, graph);
   /** Momentary loudness of the master bus, as status bar text. */
@@ -417,6 +422,7 @@
   onDestroy(() => {
     window.clearTimeout(pollTimer);
     voice.dispose();
+    sounds.dispose();
     graph.dispose();
   });
 
@@ -424,6 +430,13 @@
   $effect(() => {
     const list = timeline?.placements ?? [];
     untrack(() => voice.setPlacements(list));
+  });
+
+  /** Keep the audio-clip player's clips and lanes current (edits, mute, solo, undo). */
+  $effect(() => {
+    const clips = timeline?.audio_clips ?? [];
+    const lanes = timeline?.audio_lanes ?? [];
+    untrack(() => sounds.setClips(clips, lanes));
   });
 
   /** A voice chain change (or undo of one) drops the decoded voice audio and loads the new files. */
@@ -448,7 +461,7 @@
   });
 
   /**
-   * Voice follows the player. When playback begins the voice waits for the playhead to actually
+   * Voice and the audio clips follow the player. When playback begins the voice waits for the playhead to actually
    * move (the video may still be seeking), then starts there; after that every playhead change
    * is checked for drift. Pause, an edit or the end of the timeline sets `playing` to false.
    */
@@ -459,13 +472,16 @@
       if (!isPlaying) {
         voiceArmed = false;
         voice.stop();
+        sounds.stop();
       } else if (voice.running) {
         voice.sync(ms);
+        sounds.sync(ms);
       } else if (!voiceArmed) {
         voiceArmed = true;
         voiceArmedMs = ms;
       } else if (ms !== voiceArmedMs) {
         voice.start(ms);
+        sounds.start(ms);
       }
     });
   });
