@@ -124,6 +124,16 @@ Done when: the export matches the preview at spot-check timestamps and the bundl
 
 Done when: a fresh install works from `install.bat` to a finished export.
 
+## M8. Tracks and media (L)
+
+Task file: `docs/tasks/M8-tracks-and-media.md` (decisions settled 2026-11-20). One branch per part.
+
+- [x] M8-1 Audio lanes: music and sound effects dragged from Explorer onto several audio lanes, at timeline times (not anchored), level, fades, mute, solo; preview and export (branch `m8-1-audio-lanes`)
+- [ ] M8-2 Video lanes: upper lanes with clips and stills at timeline times, picture-in-picture (position, scale, opacity), their own sound at a level
+- [ ] M8-3 PNG sequences: a folder of PNGs plus a frame rate as a video source on a lane
+
+Done when: the acceptance checks in the task file pass.
+
 ---
 
 ## Backlog (designed for, not in v1)
@@ -132,7 +142,7 @@ Done when: a fresh install works from `install.bat` to a finished export.
 - A/B compare takes and loop-selected-line playback
 - Vertical 9:16 and 4K export
 - Zoom, freeze frame, and text overlay effects (via the effects registry)
-- Additional video tracks and music: drafted as M8 (`docs/tasks/M8-tracks-and-media.md`: audio lanes with drag and drop, extra video lanes, then optional PNG sequences), to start after M7
+- Additional video tracks and music: now M8 (above)
 - Global favorites library across projects
 - Rhubarb as an alternate mouth provider
 - Per-emotion reference clips in voice profiles

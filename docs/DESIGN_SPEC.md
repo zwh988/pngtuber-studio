@@ -67,6 +67,7 @@ A one-stop local desktop app that turns a recorded pool rack into a finished PNG
 - **Bottom:** timeline with a ruler and these lanes:
   - Video strip (clips, cut markers, speed badges)
   - Voice lane (placed lines as blocks with waveform; red edge on overflow)
+  - Audio lanes (M8-1): music and sound effects dragged from Explorer onto a lane (WAV, MP3, FLAC, OGG, M4A; several files go one after another; a drop on the "+ Audio lane" row makes a new lane; a drop where the lane is taken goes to the next lane with room, or a new one). Blocks with a waveform, the clip level and fade lines. Drag to move (also to another lane), drag an edge to trim; clips on one lane never overlap. The lane-name column holds the name (click to rename), M (mute), S (solo), the lane level in dB and a remove button for an empty lane (never the last). The bar under the timeline sets the selected clip's level and fades and removes it (also Delete)
   - Expression lane (keys as diamonds)
   - Reaction lane (one-shot events as bars)
   - Parameter lanes: one collapsed "Motion keys" row by default; "Lanes" opens one row per lane: bounce, float amplitude, float speed, blink rate, mouth sensitivity, scale, x, y, rotation. Keys and reactions are selected and dragged in time here; values are edited in the Avatar tab
@@ -114,11 +115,13 @@ MyRack/
   project.json          source of truth (autosaved, atomic writes)
   project.json.bak      rotating backup
   footage/              user places recordings here
+  audio/                copies of dropped music and sound effects (M8-1)
   media/
     takes_raw/          raw voice takes (kept until the user deletes them)
     takes_fx/           processed takes (re-creatable)
     envelopes/          mouth envelopes per processed take
     avatar_preview/     downscaled avatar sprites for the preview (re-creatable)
+    audio_decoded/      each imported audio file decoded to 48 kHz 16-bit WAV (re-creatable)
   exports/
 ```
 
@@ -138,12 +141,16 @@ MyRack/
 | Line | id, text, emotion, exaggeration override, cfg_weight override, active take id, allow-overlap flag |
 | VoiceProfile | id, name, reference clip(s), optional per-emotion reference clips (reserved) |
 | FxChain | EQ gains, compressor settings, effects list, loudness target |
+| AudioFile | id, path (`audio/<name>`, the copy), original name and size (a drop of the same name and size reuses the copy), duration_ms (of the decoded WAV), sample rate, channels (schema v5) |
+| AudioLane | id, name, gain_db (-60 to +12), mute, solo. A project always has at least one ("Audio 1") |
+| AudioClip | id, lane id, file id, timeline_ms (a timeline time, not an anchor), in_ms and out_ms (times in the file), gain_db (-60 to +12), fade_in_ms, fade_out_ms (together at most the clip length). Clips on one lane never overlap |
 | ChannelTemplate | bookend clips (referenced by absolute path, stored in the project as `external` sources), voice profile, FX chain, avatar defaults, export settings |
 
 **The anchoring rule:** every timed item (placements, keyframes, reactions) is anchored to footage, meaning a clip plus a source time. Timeline time is computed by mapping through the clip list.
 - Re-trimming, reordering, or changing speed never makes lines drift.
 - If a trim removes the moment an item was anchored to, the item is flagged as orphaned and parked at the nearest edge for the user to resolve.
 - Bookend clips (intro/outro) have overlay off and carry no anchored items.
+- **Exception (M8, user 2026-11-20):** audio clips on audio lanes (and, from M8-2, clips on upper video lanes) are not anchored. They sit at a timeline time; no video edit (cut, trim, ripple-delete, reorder, speed) moves or cuts them, so they are never orphaned. The user moves and trims them. A video's own sound always follows its video.
 
 ## 6. Voice system
 
@@ -190,7 +197,9 @@ The per-line **allow overlap** toggle clears the warning when overlap is intende
 
 The result is the **processed take**, cached by hash(raw key, stretch, processing spec). The processing spec is what the chain actually does (manual cut points, silence trim settings, the active stages, loudness settings), so a setting that does nothing never changes the key, and only a trimmed take gets a new key when its cut changes. Slider changes re-run only this stage. The editor and the export both play the processed files, so what is heard is what is exported.
 
-**Mix:** game audio at a fixed dB level plus the voice bus, summed with a master limiter to prevent clipping. The status bar meter shows live loudness of the mix.
+**Mix:** game audio at a fixed dB level plus the voice bus plus the audio-lane clips (M8-1), summed with a master limiter to prevent clipping. The status bar meter shows live loudness of the mix.
+
+**Audio-lane clips (M8-1):** a dropped file is copied into `audio/` and decoded once with ffmpeg to `media/audio_decoded/<id>.wav` (48 kHz, 16-bit); the preview, the waveform and the export all read that WAV. A clip plays at clip gain + lane gain (dB); fades are linear in amplitude (0 at the clip start up to full level at fade_in_ms; full level at length - fade_out_ms down to 0 at the clip end); a muted lane, or any lane not soloed while some lane is, is silent; a mono file plays on both channels. The rules live once per side, the same in both: `frontend/src/audioMix.ts` (preview) and `backend/export/audioclips.py` (export). No EQ, effects or ducking on audio clips.
 
 **Tooling:** Pedalboard (Spotify) for EQ, compressor, and effects; pyloudnorm for LUFS. Pedalboard is GPL licensed, which only matters if the app is distributed. Fallback: ffmpeg filters (equalizer, acompressor, loudnorm), which cover everything except high-quality reverb.
 
@@ -229,6 +238,7 @@ All randomness comes from a seeded generator keyed to the project seed and event
 ## 9. Editing (cut and splice)
 
 - **Operations:** split at playhead, ripple-delete a range, trim clip edges, reorder clips by dragging, set clip speed (0.25x to 8x), add or remove bookend clips.
+- **Audio lanes (M8-1):** add, rename, reorder, remove (empty, never the last), level, mute, solo; audio clips add (drop), move (time and lane), trim either edge (the start edge moves the timeline start and the file in-point together), level, fades, remove. Video edits never touch audio clips (section 5). Each is one undo step; a drop of several files is one step.
 - **Undo/redo:** a command stack over project.json changes, with grouped drag operations.
 - **Playback of cuts:** v1 hops between segments (a seek at each boundary, slight hitch possible). Later, a background-rendered low-res edited proxy gives seamless playback, cached by edit hash.
 - **Speed clips:** browser playback uses playback rate with pitch preserved; export uses ffmpeg time-scaling (setpts and atempo).
@@ -238,16 +248,18 @@ All randomness comes from a seeded generator keyed to the project seed and event
 
 The export screen (section 4.3) starts an export on a background thread; one runs at a time. While it runs, voice generation is refused, and an export does not start while a voice job is queued or running (rule 7). "Unload the voice model first" queues the unload job and waits for it. A test export can stop after the first N seconds.
 
-1. **Pre-flight:** errors block the export: no clips, a missing footage or take file, an unusable voice chain, an unknown clip effect, ffmpeg or NVENC not working. Warnings need a confirmation ("Export anyway"): a placed line with no take, orphaned placements, keys or reactions, overflow that is not allowed, no usable avatar art, art fallbacks. Each issue can carry a timeline time.
+1. **Pre-flight:** errors block the export: no clips, a missing footage or take file, an imported audio file missing from `audio/` (M8-1), an unusable voice chain, an unknown clip effect, ffmpeg or NVENC not working. Warnings need a confirmation ("Export anyway"): a placed line with no take, orphaned placements, keys or reactions, overflow that is not allowed, no usable avatar art, art fallbacks. Each issue can carry a timeline time.
 2. **Voice tracks:** every playing placement is placed at its timeline start and overlaps are summed. `voice_processed.wav` uses the processed takes; `voice_raw.wav` uses the raw takes with the same cut, silence trim and stretch but no EQ, compressor, effects or loudness, so the two line up. Both are mono 32-bit float at the takes' rate, as long as the timeline. `lines/` holds one processed file per playing placement (`001_01-05_hello-there.wav`).
+2b. **Audio clips (M8-1):** every heard audio clip is cut from its decoded WAV, given its level and fades (section 7) and summed at its timeline start into `audio_clips.wav`, stereo 32-bit float at 48 kHz, as long as the timeline (audio past the end is left out). Not written when no clip is heard.
 3. **Edit graph:** one ffmpeg filter graph from the clip list. Each clip is its own input with input seeking; per clip: speed, the output frame rate, scale into 16:9 with black bars, clip effects from the registry, then padded or cut to exactly its frame count. Game audio keeps its pitch at any speed (`atempo`) and is cut to exactly its sample count; a source with no audio gives silence. Totals equal the timeline, so cuts never drift.
-4. **Final render:** one ffmpeg run (NVENC). Inputs: the avatar frames as raw RGBA from the Python compositor on a pipe at the track's 30 fps, the voice track, the clips. The edited video and game audio are split: one copy is encoded as `video_edited.mp4` (footage audio at its own level); the other gets the avatar overlaid (each avatar frame shows until the next starts: frame `floor(t * 30)`, as in the preview) and the mix: game audio at the project's level plus the voice on both channels, summed without normalising, limited at -1 dBFS. When the overlay is asked for, the avatar stream is also written as the PNG sequence in the same run. Output: 1080p at the footage's frame rate, H.264 (`h264_nvenc`, `-cq 21`), AAC 192k.
+4. **Final render:** one ffmpeg run (NVENC). Inputs: the avatar frames as raw RGBA from the Python compositor on a pipe at the track's 30 fps, the voice track, the clips. The edited video and game audio are split: one copy is encoded as `video_edited.mp4` (footage audio at its own level); the other gets the avatar overlaid (each avatar frame shows until the next starts: frame `floor(t * 30)`, as in the preview) and the mix: game audio at the project's level plus the voice on both channels plus `audio_clips.wav` (an extra input when it exists), summed without normalising, limited at -1 dBFS. When the overlay is asked for, the avatar stream is also written as the PNG sequence in the same run. Output: 1080p at the footage's frame rate, H.264 (`h264_nvenc`, `-cq 21`), AAC 192k.
 5. **Bundle** (a dated folder `YYYY-MM-DD HHMM` in the project's `exports`, or in a chosen folder):
    - `final_1080p.mp4`, `video_edited.mp4`
    - `voice_raw.wav`, `voice_processed.wav`, and `lines/`
+   - `audio_clips.wav` (M8-1, when audio clips are heard)
    - `video_raw/`: NTFS hard links to the recordings the timeline uses (no extra disk), or `LINKS.txt` with their paths when a link is impossible (another drive)
    - `avatar_overlay/` (optional): transparent 1920x1080 PNGs, one per avatar frame at 30 fps, plus a README (DaVinci Resolve reads the folder as one clip)
-   - `project.json` snapshot, `export.json` (settings, ffmpeg version, counts, time per step), `export_ffmpeg.log`, `export_graph.txt`
+   - `project.json` snapshot, `export.json` (settings, ffmpeg version, counts, time per step, and the audio clips with the imported files they use), `export_ffmpeg.log`, `export_graph.txt`
 
 Progress is polled (`GET /api/export/status`: stage, fraction, elapsed time and time left), with cancel. A cancelled or failed export's folder is renamed with " (incomplete)"; nothing is deleted. Footage is only read. Export speed depends on the GPU's video encoder being free: other recording or streaming programs slow it down.
 
