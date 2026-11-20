@@ -22,6 +22,7 @@ export type TimelineColors = {
   cut: string;
   voice: string;
   voiceEmpty: string;
+  audio: string;
   wave: string;
   expression: string;
   reaction: string;
@@ -57,6 +58,7 @@ const TOKENS: Record<Exclude<keyof TimelineColors, "font">, string> = {
   cut: "--text-1",
   voice: "--lane-voice",
   voiceEmpty: "--surface-3",
+  audio: "--lane-audio",
   wave: "--text-1",
   expression: "--lane-expression",
   reaction: "--lane-reaction",
@@ -90,6 +92,7 @@ export const FALLBACK: TimelineColors = {
   cut: "#e7e9ee",
   voice: "#2c8f72",
   voiceEmpty: "#232833",
+  audio: "#b8683a",
   wave: "#e7e9ee",
   expression: "#d9ad3c",
   reaction: "#9b72de",

@@ -719,7 +719,12 @@ def create_app(
     @app.post("/api/audio/import")
     def import_audio(request: AudioImportRequest) -> AudioImportResult:
         try:
-            return active.import_audio(request.paths, request.lane_id, request.timeline_ms)
+            return active.import_audio(
+                request.paths,
+                request.lane_id,
+                request.timeline_ms,
+                new_lane=request.new_lane,
+            )
         except _API_ERRORS as exc:
             raise HTTPException(status_code=400, detail=str(exc)) from exc
 

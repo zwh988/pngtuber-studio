@@ -340,6 +340,15 @@ export type EditOp =
   | { op: "move_reaction"; reaction_id: string; timeline_ms: number }
   | { op: "set_reaction"; reaction_id: string; type?: string; intensity?: number; duration_ms?: number }
   | { op: "remove_reaction"; reaction_id: string }
+  // Audio lanes and clips (M8-1). Times are TIMELINE ms; clips are not anchored to footage.
+  | { op: "add_audio_lane"; name?: string | null; position?: number | null; lane_id?: string | null }
+  | { op: "remove_audio_lane"; lane_id: string }
+  | { op: "move_audio_lane"; lane_id: string; new_position: number }
+  | { op: "set_audio_lane"; lane_id: string; name?: string; gain_db?: number; mute?: boolean; solo?: boolean }
+  | { op: "move_audio_clip"; clip_id: string; timeline_ms: number; lane_id?: string | null }
+  | { op: "trim_audio_clip"; clip_id: string; edge: "start" | "end"; timeline_ms: number }
+  | { op: "set_audio_clip"; clip_id: string; gain_db?: number; fade_in_ms?: number; fade_out_ms?: number }
+  | { op: "remove_audio_clip"; clip_id: string }
   | {
       op: "set_avatar_settings";
       x?: number;
@@ -489,12 +498,19 @@ export function importAudio(
   paths: string[],
   laneId: string | null,
   timelineMs: number,
+  newLane = false,
 ): Promise<AudioImportResult> {
   return post<AudioImportResult>("/api/audio/import", {
     paths,
     lane_id: laneId,
     timeline_ms: Math.max(0, Math.round(timelineMs)),
+    new_lane: newLane,
   });
+}
+
+/** Waveform peaks of an imported audio file (the whole file). */
+export function getAudioPeaks(fileId: string, buckets: number): Promise<PeaksReport> {
+  return request<PeaksReport>(`/api/audio/${encodeURIComponent(fileId)}/peaks?buckets=${buckets}`);
 }
 
 /** The decoded WAV of an imported audio file (what preview and export play). */

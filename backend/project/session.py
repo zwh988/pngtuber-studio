@@ -1158,13 +1158,19 @@ class Session:
     # ---- audio lanes (M8-1) ---------------------------------------------------
 
     def import_audio(
-        self, paths: Sequence[str], lane_id: str | None, timeline_ms: int
+        self,
+        paths: Sequence[str],
+        lane_id: str | None,
+        timeline_ms: int,
+        *,
+        new_lane: bool = False,
     ) -> AudioImportResult:
         """Copy dropped files into ``audio/`` and put them on the timeline.
 
         The files go one after another from ``timeline_ms``, each on the first
         lane from ``lane_id`` down with room for it (a new lane below the last when
-        none has). All placed files are one undo step. A file that cannot be used
+        none has). ``new_lane`` puts them on a new lane below the last instead. All
+        placed files (and a new lane) are one undo step. A file that cannot be used
         is reported in ``errors``; the others are still placed.
         """
         if timeline_ms < 0:
@@ -1203,7 +1209,8 @@ class Session:
                 registered = {f.id for f in project.audio_files}
                 try:
                     target = lane_id if lane_id is not None else project.audio_lanes[0].id
-                    find_lane(project, target)
+                    if not new_lane:
+                        find_lane(project, target)
                     label = (
                         f"Import {prepared[0][0].name}"
                         if len(prepared) == 1
@@ -1211,6 +1218,10 @@ class Session:
                     )
                     start = timeline_ms
                     with stack.group(label):
+                        if new_lane:
+                            adding_lane = AddAudioLane()
+                            stack.execute(adding_lane)
+                            target = adding_lane.lane_id
                         for audio_file, reused in prepared:
                             if audio_file.id not in registered:
                                 stack.execute(AddAudioFile(audio_file))

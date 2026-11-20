@@ -344,6 +344,15 @@ def test_session_import_goes_to_a_free_or_new_lane(
     assert len(session.timeline().audio_lanes) == 1  # the new lane goes with the undo
 
 
+def test_session_import_onto_a_new_lane(session: Session, outside: Path) -> None:
+    a = write_wav(outside / "a.wav", 1.0)
+    result = session.import_audio([str(a)], None, 0, new_lane=True)
+    assert [lane.name for lane in result.timeline.audio_lanes] == ["Audio 1", "Audio 2"]
+    assert result.imported[0].lane_name == "Audio 2"
+    session.undo()
+    assert len(session.timeline().audio_lanes) == 1
+
+
 def test_session_import_reports_bad_files_and_places_the_rest(
     session: Session, outside: Path
 ) -> None:

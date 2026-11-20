@@ -13,6 +13,7 @@
     getFootage,
     getJobs,
     getStorage,
+    getAudioPeaks,
     getTakePeaks,
     getTimeline,
     importAudio,
@@ -36,6 +37,7 @@
     type StorageReport,
     type TimelineState,
   } from "./api";
+  import { audioPeakBuckets } from "./audioLanes";
   import { clock } from "./format";
   import { lufsText } from "./loudness";
   import AvatarOverlay from "./AvatarOverlay.svelte";
@@ -88,6 +90,10 @@
   /** Waveform peaks by take id, loaded once per take (a take's audio never changes). */
   let peaks = $state<Record<string, PeaksReport>>({});
   const peaksRequested = new Set<string>();
+  /** Waveforms of imported audio files by file id (M8-1). */
+  let audioPeaks = $state<Record<string, PeaksReport>>({});
+  const audioPeaksRequested = new Set<string>();
+  let selectedAudioClipId = $state<string | null>(null);
   let player = $state<ReturnType<typeof Player> | null>(null);
   /** True while the player plays (bound from `Player`). */
   let playing = $state(false);
@@ -135,6 +141,10 @@
   const selectedClip = $derived(timeline?.clips.find((c) => c.id === selectedId) ?? null);
   const selectedPlacement = $derived(
     timeline?.placements.find((p) => p.id === selectedPlacementId) ?? null,
+  );
+
+  const selectedAudioClip = $derived(
+    timeline?.audio_clips.find((a) => a.id === selectedAudioClipId) ?? null,
   );
 
   /** Index of the clip under the playhead (highlighted in the table). */
@@ -192,8 +202,14 @@
     error = null;
     notice = null;
     try {
-      const result = await importAudio(info.paths, target.laneId, target.timelineMs);
+      const result = await importAudio(info.paths, target.laneId, target.timelineMs, target.newLane);
       timeline = result.timeline;
+      const last = result.imported[result.imported.length - 1];
+      if (last !== undefined) {
+        selectedAudioClipId = last.clip_id;
+        selectedId = null;
+        selectedPlacementId = null;
+      }
       const placed = result.imported.map(
         (item) => `${item.name} on ${item.lane_name} at ${clock(item.timeline_ms)}${item.reused ? " (already in the project)" : ""}`,
       );
@@ -498,6 +514,28 @@
     }
   });
 
+  /** Fetch the waveform of every imported audio file on the timeline that has none yet. */
+  $effect(() => {
+    for (const clip of timeline?.audio_clips ?? []) {
+      const fileId = clip.file_id;
+      if (audioPeaksRequested.has(fileId)) {
+        continue;
+      }
+      audioPeaksRequested.add(fileId);
+      getAudioPeaks(fileId, audioPeakBuckets(clip.file_duration_ms))
+        .then((report) => {
+          audioPeaks[fileId] = report;
+        })
+        .catch(() => undefined);
+    }
+  });
+
+  /** One audio lane or clip edit, as one undo step (M8-1). */
+  async function audioEdit(label: string, ops: EditOp[]): Promise<void> {
+    player?.pause();
+    await edit(() => editBatch(label, ops));
+  }
+
   /** Place a line so that it starts at a timeline time, then select the new block. */
   async function placeAt(lineId: string, timelineMs: number): Promise<void> {
     const placementId = newLineId();
@@ -562,6 +600,15 @@
 
   /** Delete: remove the selected placed line, or else the selected clip. */
   function removeSelected(): void {
+    const sound = selectedAudioClip;
+    if (sound !== null) {
+      void audioEdit("Remove audio clip", [{ op: "remove_audio_clip", clip_id: sound.id }]).then(() => {
+        if (error === null) {
+          selectedAudioClipId = null;
+        }
+      });
+      return;
+    }
     if (selectedKeyId !== null || selectedReactionId !== null) {
       void avatarPanel?.deleteSelected();
       return;
@@ -1033,6 +1080,20 @@
             onmovereaction={async (id, ms) => {
               await commitAvatar("Move reaction", [{ op: "move_reaction", reaction_id: id, timeline_ms: ms }]);
             }}
+            audioLanes={timeline.audio_lanes}
+            audioClips={timeline.audio_clips}
+            {audioPeaks}
+            bind:selectedAudioClipId
+            onmoveaudio={(id, ms, laneId) =>
+              audioEdit("Move audio clip", [{ op: "move_audio_clip", clip_id: id, timeline_ms: ms, lane_id: laneId }])}
+            ontrimaudio={(id, edge, ms) =>
+              audioEdit("Trim audio clip", [{ op: "trim_audio_clip", clip_id: id, edge, timeline_ms: ms }])}
+            onaudiolane={(laneId, change) =>
+              audioEdit(change.name !== undefined ? "Rename audio lane" : "Change audio lane", [
+                { op: "set_audio_lane", lane_id: laneId, ...change },
+              ])}
+            onaddaudiolane={() => audioEdit("Add audio lane", [{ op: "add_audio_lane" }])}
+            onremoveaudiolane={(laneId) => audioEdit("Remove audio lane", [{ op: "remove_audio_lane", lane_id: laneId }])}
           />
           <div class="clipbar">
             {#if selectedClip !== null}
@@ -1057,8 +1118,90 @@
               <Button size="sm" variant="danger" icon={Trash2} disabled={busy} onclick={removeSelected}>
                 Remove clip
               </Button>
-            {:else if selectedPlacement === null}
+            {:else if selectedPlacement === null && selectedAudioClip === null}
               <span class="hint">No clip selected. Click a clip on the timeline.</span>
+            {/if}
+            {#if selectedAudioClip !== null}
+              {@const sound = selectedAudioClip}
+              {@const length = sound.end_ms - sound.timeline_ms}
+              <strong>Audio: {sound.name}</strong>
+              <span class="hint num">{clock(sound.timeline_ms)} to {clock(sound.end_ms)}</span>
+              {#if sound.end_ms > timeline.duration_ms}
+                <span class="hint">Runs past the end of the footage; the export stops there.</span>
+              {/if}
+              <label class="inline">
+                Level
+                <input
+                  class="num small"
+                  type="number"
+                  min="-60"
+                  max="12"
+                  step="0.5"
+                  value={sound.gain_db}
+                  disabled={busy}
+                  onkeydown={(e) => e.stopPropagation()}
+                  onchange={(e) => {
+                    const value = Math.min(12, Math.max(-60, e.currentTarget.valueAsNumber));
+                    if (Number.isFinite(value) && value !== sound.gain_db) {
+                      void audioEdit("Change audio clip level", [{ op: "set_audio_clip", clip_id: sound.id, gain_db: value }]);
+                    } else {
+                      e.currentTarget.value = String(sound.gain_db);
+                    }
+                  }}
+                />
+                dB
+              </label>
+              <label class="inline">
+                Fade in
+                <input
+                  class="num small"
+                  type="number"
+                  min="0"
+                  max={(length - sound.fade_out_ms) / 1000}
+                  step="0.1"
+                  value={sound.fade_in_ms / 1000}
+                  disabled={busy}
+                  onkeydown={(e) => e.stopPropagation()}
+                  onchange={(e) => {
+                    const ms = Math.round(Math.max(0, e.currentTarget.valueAsNumber) * 1000);
+                    if (Number.isFinite(ms) && ms !== sound.fade_in_ms) {
+                      void audioEdit("Change fade in", [
+                        { op: "set_audio_clip", clip_id: sound.id, fade_in_ms: Math.min(ms, length - sound.fade_out_ms) },
+                      ]);
+                    } else {
+                      e.currentTarget.value = String(sound.fade_in_ms / 1000);
+                    }
+                  }}
+                />
+                s
+              </label>
+              <label class="inline">
+                Fade out
+                <input
+                  class="num small"
+                  type="number"
+                  min="0"
+                  max={(length - sound.fade_in_ms) / 1000}
+                  step="0.1"
+                  value={sound.fade_out_ms / 1000}
+                  disabled={busy}
+                  onkeydown={(e) => e.stopPropagation()}
+                  onchange={(e) => {
+                    const ms = Math.round(Math.max(0, e.currentTarget.valueAsNumber) * 1000);
+                    if (Number.isFinite(ms) && ms !== sound.fade_out_ms) {
+                      void audioEdit("Change fade out", [
+                        { op: "set_audio_clip", clip_id: sound.id, fade_out_ms: Math.min(ms, length - sound.fade_in_ms) },
+                      ]);
+                    } else {
+                      e.currentTarget.value = String(sound.fade_out_ms / 1000);
+                    }
+                  }}
+                />
+                s
+              </label>
+              <Button size="sm" variant="danger" icon={Trash2} disabled={busy} onclick={removeSelected}>
+                Remove audio clip
+              </Button>
             {/if}
             {#if selectedPlacement !== null}
               {@const placed = selectedPlacement}
@@ -1163,6 +1306,7 @@
                     <button type="button" class="pick" onclick={() => {
                         selectedId = clip.id;
                         selectedPlacementId = null;
+                        selectedAudioClipId = null;
                         playheadMs = clip.start_ms;
                       }}>
                       {sourceName(clip.source_id)}
@@ -1433,6 +1577,9 @@
     align-items: center;
     gap: 6px;
     color: var(--text-2);
+  }
+  .inline input.small {
+    width: 64px;
   }
   .keys {
     margin-top: 8px;

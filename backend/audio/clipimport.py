@@ -52,6 +52,8 @@ class AudioImportRequest(BaseModel):
     # The lane under the drop point; None: the first lane.
     lane_id: str | None = None
     timeline_ms: int = Field(ge=0)
+    # True: dropped on "+ Audio lane", so the files go on a new lane below the last.
+    new_lane: bool = False
 
 
 class ImportedAudio(BaseModel):
