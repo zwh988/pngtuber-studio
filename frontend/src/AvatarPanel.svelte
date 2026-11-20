@@ -10,7 +10,7 @@
   } from "./api";
   import { LANE_INFO, REACTION_TYPES, laneInfo, laneLabel, reactionLabel } from "./avatarLanes";
   import { clock } from "./format";
-  import { keyNear, keySelection } from "./keyNav";
+  import { MOMENT_LANES, keyNear, keySelection, momentKeys } from "./keyNav";
   import FxSlider from "./FxSlider.svelte";
   import { Diamond, LocateFixed, Trash2, Zap } from "@lucide/svelte";
   import Banner from "./ui/Banner.svelte";
@@ -57,6 +57,15 @@
   const selectedKey = $derived(keyframes.find((k) => k.id === selectedKeyId) ?? null);
   const selectedReaction = $derived(reactions.find((r) => r.id === selectedReactionId) ?? null);
   const at = $derived(Math.round(playheadMs));
+  /** A motion key of x, y, size or rotation: those four of its moment are edited together. */
+  const moment = $derived(
+    selectedKey !== null &&
+      selectedKey.t_ms !== null &&
+      !selectedKey.orphaned &&
+      (MOMENT_LANES as readonly string[]).includes(selectedKey.lane_id)
+      ? momentKeys(keyframes, selectedKey.t_ms)
+      : null,
+  );
   const selectedCount = $derived(selectedKey === null ? 0 : keySelection(selectedKey.id, selectedKeyIds).length);
 
   onMount(() => {
@@ -169,20 +178,62 @@
           </select>
         </label>
       {:else}
-        {@const info = laneInfo(key.lane_id)}
-        {#if info !== undefined}
-          <FxSlider
-            label={info.label}
-            min={info.min}
-            max={info.max}
-            step={info.step}
-            unit={info.unit ?? ""}
-            value={Number(key.value)}
-            disabled={busy}
-            oncommit={async (v) => {
-              await oncommit("Change key", [{ op: "set_keyframe_value", keyframe_id: key.id, value: v }]);
-            }}
-          />
+        {#if moment !== null && key.t_ms !== null}
+          {@const t = key.t_ms}
+          <p class="hint">This moment (type a value, or drag):</p>
+          {#each moment as m (m.laneId)}
+            {@const info = laneInfo(m.laneId)}
+            {#if info !== undefined}
+              {#if m.key !== null}
+                {@const mk = m.key}
+                <div class="lane" class:current={mk.id === key.id}>
+                  <FxSlider
+                    label={info.label}
+                    min={info.min}
+                    max={info.max}
+                    step={info.step}
+                    unit={info.unit ?? ""}
+                    value={Number(mk.value)}
+                    disabled={busy}
+                    typed
+                    oncommit={async (v) => {
+                      await oncommit("Change key", [{ op: "set_keyframe_value", keyframe_id: mk.id, value: v }]);
+                    }}
+                  />
+                </div>
+              {:else}
+                <div class="lane unkeyed">
+                  <span>{info.label}: no key here</span>
+                  <IconButton
+                    icon={Diamond}
+                    size="sm"
+                    variant="secondary"
+                    label={`Key ${info.label} at this moment`}
+                    disabled={busy}
+                    onclick={() =>
+                      void oncommit(`Key ${info.label}`, [{ op: "key_lane_by", lane_id: m.laneId, timeline_ms: t }])}
+                  />
+                </div>
+              {/if}
+            {/if}
+          {/each}
+        {:else}
+          {@const info = laneInfo(key.lane_id)}
+          {#if info !== undefined}
+            <FxSlider
+              label={info.label}
+              min={info.min}
+              max={info.max}
+              step={info.step}
+              unit={info.unit ?? ""}
+              value={Number(key.value)}
+              disabled={busy}
+              typed
+              oncommit={async (v) => {
+                await oncommit("Change key", [{ op: "set_keyframe_value", keyframe_id: key.id, value: v }]);
+              }}
+            />
+          {/if}
         {/if}
         <label>
           Easing to the next key
@@ -345,6 +396,7 @@
           unit={info.unit ?? ""}
           value={settingValue(info.setting)}
           disabled={busy}
+          typed
           oncommit={(v) => setting(info.setting, v)}
         />
         <IconButton
@@ -418,6 +470,16 @@
   }
   .lane :global(> :first-child) {
     flex: 1;
+  }
+  .lane.current {
+    box-shadow: inset 3px 0 0 var(--accent);
+    padding-left: 8px;
+  }
+  .lane.unkeyed {
+    justify-content: space-between;
+    margin-bottom: 8px;
+    color: var(--text-3);
+    font-size: var(--fs-sm);
   }
   .check {
     flex-direction: row;

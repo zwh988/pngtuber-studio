@@ -1,5 +1,16 @@
 import { describe, expect, it } from "vitest";
-import { KEY_NEAR_MS, clampShift, keyGroup, keyNear, keySelection, stepKey, toggleGroup, type NavKey } from "./keyNav";
+import {
+  KEY_NEAR_MS,
+  clampShift,
+  keyGroup,
+  keyNear,
+  keySelection,
+  momentKeys,
+  stepKey,
+  toggleGroup,
+  typedValue,
+  type NavKey,
+} from "./keyNav";
 
 const k = (id: string, lane_id: string, t_ms: number | null, orphaned = false): NavKey => ({
   id,
@@ -32,6 +43,27 @@ describe("keyNear", () => {
     expect(keyNear(KEYS, "y", 1000 - KEY_NEAR_MS)?.id).toBe("y1");
     expect(keyNear(KEYS, "x", 1000 + KEY_NEAR_MS + 1)).toBeNull();
     expect(keyNear(KEYS, "x", 2000)).toBeNull(); // orphan
+  });
+});
+
+describe("moment", () => {
+  it("finds x, y, size and rotation keys of one moment", () => {
+    const keys = [...KEYS, k("s1", "scale", 1020), k("r", "rotation", 1100)];
+    expect(momentKeys(keys, 1000).map((m) => [m.laneId, m.key?.id ?? null])).toEqual([
+      ["x", "x1"],
+      ["y", "y1"],
+      ["scale", "s1"],
+      ["rotation", null],
+    ]);
+  });
+
+  it("reads a typed value, rounded and kept in range", () => {
+    expect(typedValue("0.4567", -0.5, 1.5, 0.005)).toBe(0.455);
+    expect(typedValue(" 0,25 ", -0.5, 1.5, 0.005)).toBe(0.25);
+    expect(typedValue("9", -0.5, 1.5, 0.005)).toBe(1.5);
+    expect(typedValue("-200", -180, 180, 1)).toBe(-180);
+    expect(typedValue("abc", 0, 1, 0.1)).toBeNull();
+    expect(typedValue("", 0, 1, 0.1)).toBeNull();
   });
 });
 

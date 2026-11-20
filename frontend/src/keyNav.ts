@@ -59,6 +59,30 @@ export function keyGroup<K extends NavKey>(keys: readonly K[], key: K, collapsed
   return keys.filter((k) => k.t_ms === key.t_ms && k.lane_id !== "expression" && !k.orphaned);
 }
 
+/** The lanes the inspector shows together for one moment (keyframes decision 1). */
+export const MOMENT_LANES = ["x", "y", "scale", "rotation"] as const;
+
+/**
+ * For a motion key at `ms`: each moment lane's key within `KEY_NEAR_MS` of it, or null
+ * where that lane has no key then (so x, y and size of one drag are edited together).
+ */
+export function momentKeys<K extends NavKey>(
+  keys: readonly K[],
+  ms: number,
+  lanes: readonly string[] = MOMENT_LANES,
+): { laneId: string; key: K | null }[] {
+  return lanes.map((laneId) => ({ laneId, key: keyNear(keys, laneId, ms) }));
+}
+
+/** A typed number: rounded to `step` and kept in the range; null when it is not a number. */
+export function typedValue(text: string, min: number, max: number, step: number): number | null {
+  const v = Number(text.trim().replace(",", "."));
+  if (text.trim() === "" || !Number.isFinite(v)) return null;
+  const clamped = Math.min(max, Math.max(min, v));
+  const places = String(step).includes(".") ? String(step).length - String(step).indexOf(".") - 1 : 0;
+  return Number((Math.round(clamped / step) * step).toFixed(places));
+}
+
 /** Shift-click: add the group to the selection, or take it out when all of it is in. */
 export function toggleGroup(selection: readonly string[], group: readonly string[]): string[] {
   const all = group.every((id) => selection.includes(id));

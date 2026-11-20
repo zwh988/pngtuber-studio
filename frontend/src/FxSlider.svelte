@@ -1,6 +1,7 @@
 <script lang="ts">
   import { onDestroy } from "svelte";
   import { decimals, roundTo } from "./fx";
+  import { typedValue } from "./keyNav";
 
   let {
     label,
@@ -11,6 +12,7 @@
     unit = "",
     signed = false,
     disabled = false,
+    typed = false,
     oncommit,
   }: {
     label: string;
@@ -23,6 +25,8 @@
     /** Show a plus sign for positive values (EQ gains). */
     signed?: boolean;
     disabled?: boolean;
+    /** The readout is a box the value can be typed into (Enter or leaving it sets it, Esc undoes). */
+    typed?: boolean;
     /** Called once after the thumb is released or the keys rest: one undo step. */
     oncommit: (value: number) => Promise<void>;
   } = $props();
@@ -56,11 +60,50 @@
     timer = window.setTimeout(() => void commit(v), 250);
   }
 
+  /** A typed value: set at once when it differs; anything that is not a number is put back. */
+  function typedCommit(box: HTMLInputElement): void {
+    const v = typedValue(box.value, min, max, step);
+    if (v === null || v === roundTo(shown, step)) {
+      box.value = shown.toFixed(decimals(step));
+      return;
+    }
+    window.clearTimeout(timer);
+    dragging = v;
+    void commit(v);
+  }
+
+  function typedKey(e: KeyboardEvent & { currentTarget: HTMLInputElement }): void {
+    if (e.key === "Enter") {
+      e.currentTarget.blur();
+    } else if (e.key === "Escape") {
+      e.currentTarget.value = shown.toFixed(decimals(step));
+      e.currentTarget.blur();
+    }
+  }
+
   onDestroy(() => window.clearTimeout(timer));
 </script>
 
 <label class="slider" class:off={disabled}>
-  <span class="head"><span class="name">{label}</span><strong class="num">{text(shown)}</strong></span>
+  <span class="head">
+    <span class="name">{label}</span>
+    {#if typed}
+      <span class="typed">
+        <input
+          class="num"
+          type="text"
+          inputmode="decimal"
+          aria-label={`${label} value`}
+          {disabled}
+          value={shown.toFixed(decimals(step))}
+          onkeydown={typedKey}
+          onchange={(e) => typedCommit(e.currentTarget)}
+        />{#if unit !== ""}<span class="unit">{unit}</span>{/if}
+      </span>
+    {:else}
+      <strong class="num">{text(shown)}</strong>
+    {/if}
+  </span>
   <input
     type="range"
     {min}
@@ -92,7 +135,21 @@
   .name {
     color: var(--text-2);
   }
-  input {
+  input[type="range"] {
     width: 100%;
+  }
+  .typed {
+    display: inline-flex;
+    align-items: baseline;
+    gap: 3px;
+  }
+  .typed input {
+    width: 5.5rem;
+    padding: 1px 4px;
+    font-weight: 600;
+    text-align: right;
+  }
+  .unit {
+    color: var(--text-2);
   }
 </style>
