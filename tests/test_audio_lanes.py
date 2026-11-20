@@ -107,9 +107,9 @@ def test_a_new_project_has_one_empty_audio_lane() -> None:
 
 
 def test_v4_projects_get_one_audio_lane_and_no_clips() -> None:
-    assert SCHEMA_VERSION == 5
+    assert SCHEMA_VERSION >= 5
     data = {"schema_version": 4, "name": "x"}
-    result = migrate(data)
+    result = migrate(data, target=5)
     assert result["schema_version"] == 5
     assert "audio_lanes" not in data  # input untouched
     project = Project.model_validate(result)

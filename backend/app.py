@@ -43,6 +43,7 @@ from backend.project.edit_ops import (
 )
 from backend.project.footage import FootageError, default_ffprobe_path
 from backend.project.fx_ops import FxEditBatch
+from backend.project.laneimport import LaneImportRequest, LaneImportResult
 from backend.project.line_ops import LineEditBatch
 from backend.project.recent import RecentItem, default_recent_path
 from backend.project.schema import SCHEMA_VERSION
@@ -727,6 +728,26 @@ def create_app(
             )
         except _API_ERRORS as exc:
             raise HTTPException(status_code=400, detail=str(exc)) from exc
+
+    @app.post("/api/lanes/import")
+    def import_lane_media(request: LaneImportRequest) -> LaneImportResult:
+        try:
+            return active.import_lane_media(
+                request.paths,
+                request.lane_id,
+                request.timeline_ms,
+                new_lane=request.new_lane,
+            )
+        except _API_ERRORS as exc:
+            raise HTTPException(status_code=400, detail=str(exc)) from exc
+
+    @app.get("/media/image/{image_id}")
+    def get_image_media(image_id: str, request: Request) -> Response:
+        # An imported still for the video lanes (M8-2); the path comes from the project.
+        path = active.image_path(image_id)
+        if path is None or not path.is_file():
+            raise HTTPException(status_code=404, detail="image not found")
+        return range_response(path, request.headers.get("range"))
 
     def decoded_audio(file_id: str) -> Path:
         try:

@@ -48,6 +48,17 @@ from backend.project.placement_commands import (
     RemovePlacement,
     SetPlacementStretch,
 )
+from backend.project.video_lane_commands import (
+    AddLaneClip,
+    AddVideoLane,
+    MoveLaneClip,
+    MoveVideoLane,
+    RemoveLaneClip,
+    RemoveVideoLane,
+    SetLaneClip,
+    SetVideoLane,
+    TrimLaneClip,
+)
 
 
 class _Op(BaseModel):
@@ -302,6 +313,77 @@ class SetAudioClipOp(_Op):
     fade_out_ms: int | None = None
 
 
+# ---- video lanes and lane clips (M8-2, schema v6) ----------------------------
+
+
+class AddVideoLaneOp(_Op):
+    op: Literal["add_video_lane"] = "add_video_lane"
+    name: str | None = None
+    position: int | None = None
+    lane_id: str | None = Field(default=None, pattern=r"^[0-9a-f]{12}$")
+
+
+class RemoveVideoLaneOp(_Op):
+    op: Literal["remove_video_lane"] = "remove_video_lane"
+    lane_id: str
+
+
+class MoveVideoLaneOp(_Op):
+    op: Literal["move_video_lane"] = "move_video_lane"
+    lane_id: str
+    new_position: int
+
+
+class SetVideoLaneOp(_Op):
+    op: Literal["set_video_lane"] = "set_video_lane"
+    lane_id: str
+    name: str | None = None
+    hidden: bool | None = None
+    locked: bool | None = None
+
+
+class AddLaneClipOp(_Op):
+    op: Literal["add_lane_clip"] = "add_lane_clip"
+    lane_id: str
+    timeline_ms: int
+    source_id: str | None = None
+    image_id: str | None = None
+    in_ms: int = 0
+    out_ms: int | None = None
+    length_ms: int = 5000
+    clip_id: str | None = Field(default=None, pattern=r"^[0-9a-f]{12}$")
+
+
+class RemoveLaneClipOp(_Op):
+    op: Literal["remove_lane_clip"] = "remove_lane_clip"
+    clip_id: str
+
+
+class MoveLaneClipOp(_Op):
+    op: Literal["move_lane_clip"] = "move_lane_clip"
+    clip_id: str
+    timeline_ms: int
+    lane_id: str | None = None
+
+
+class TrimLaneClipOp(_Op):
+    op: Literal["trim_lane_clip"] = "trim_lane_clip"
+    clip_id: str
+    edge: Literal["start", "end"]
+    timeline_ms: int
+
+
+class SetLaneClipOp(_Op):
+    op: Literal["set_lane_clip"] = "set_lane_clip"
+    clip_id: str
+    x: float | None = None
+    y: float | None = None
+    scale: float | None = None
+    opacity: float | None = None
+    gain_db: float | None = None
+    mute: bool | None = None
+
+
 EditOp = Annotated[
     AddClipOp
     | RemoveClipOp
@@ -335,7 +417,16 @@ EditOp = Annotated[
     | RemoveAudioClipOp
     | MoveAudioClipOp
     | TrimAudioClipOp
-    | SetAudioClipOp,
+    | SetAudioClipOp
+    | AddVideoLaneOp
+    | RemoveVideoLaneOp
+    | MoveVideoLaneOp
+    | SetVideoLaneOp
+    | AddLaneClipOp
+    | RemoveLaneClipOp
+    | MoveLaneClipOp
+    | TrimLaneClipOp
+    | SetLaneClipOp,
     Field(discriminator="op"),
 ]
 
@@ -373,7 +464,49 @@ def build_command(op: EditOp) -> Command:
     audio = _build_audio_command(op)
     if audio is not None:
         return audio
+    video = _build_video_lane_command(op)
+    if video is not None:
+        return video
     return _build_avatar_command(op)
+
+
+def _build_video_lane_command(op: EditOp) -> Command | None:
+    if isinstance(op, AddVideoLaneOp):
+        return AddVideoLane(op.name, position=op.position, lane_id=op.lane_id)
+    if isinstance(op, RemoveVideoLaneOp):
+        return RemoveVideoLane(op.lane_id)
+    if isinstance(op, MoveVideoLaneOp):
+        return MoveVideoLane(op.lane_id, op.new_position)
+    if isinstance(op, SetVideoLaneOp):
+        return SetVideoLane(op.lane_id, name=op.name, hidden=op.hidden, locked=op.locked)
+    if isinstance(op, AddLaneClipOp):
+        return AddLaneClip(
+            op.lane_id,
+            op.timeline_ms,
+            source_id=op.source_id,
+            image_id=op.image_id,
+            in_ms=op.in_ms,
+            out_ms=op.out_ms,
+            length_ms=op.length_ms,
+            clip_id=op.clip_id,
+        )
+    if isinstance(op, RemoveLaneClipOp):
+        return RemoveLaneClip(op.clip_id)
+    if isinstance(op, MoveLaneClipOp):
+        return MoveLaneClip(op.clip_id, op.timeline_ms, op.lane_id)
+    if isinstance(op, TrimLaneClipOp):
+        return TrimLaneClip(op.clip_id, op.edge, op.timeline_ms)
+    if isinstance(op, SetLaneClipOp):
+        return SetLaneClip(
+            op.clip_id,
+            x=op.x,
+            y=op.y,
+            scale=op.scale,
+            opacity=op.opacity,
+            gain_db=op.gain_db,
+            mute=op.mute,
+        )
+    return None
 
 
 def _build_audio_command(op: EditOp) -> Command | None:

@@ -101,6 +101,7 @@ class RemoveSource(Command):
     def apply(self, project: Project) -> None:
         index, source = _find_source(project, self.source_id)
         used = sum(1 for clip in project.clips if clip.source_id == self.source_id)
+        used += sum(1 for clip in project.lane_clips if clip.source_id == self.source_id)
         if used:
             raise CommandError(
                 f"cannot remove {source.path!r}: {used} clip(s) still use it"

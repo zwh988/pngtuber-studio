@@ -111,6 +111,14 @@ from backend.project.footage import (
     scan_footage,
 )
 from backend.project.fx_ops import FxEditOp, build_fx_command
+from backend.project.laneimport import (
+    ImportedLaneMedia,
+    LaneImportError,
+    LaneImportResult,
+    import_image,
+    import_video,
+    media_kind,
+)
 from backend.project.line_commands import NoChange
 from backend.project.line_ops import LineEditOp, build_line_command
 from backend.project.recent import (
@@ -125,6 +133,7 @@ from backend.project.schema import (
     AudioFile,
     ExportSettings,
     FxChain,
+    ImageFile,
     Line,
     Project,
     Source,
@@ -159,6 +168,14 @@ from backend.project.usertemplates import (
     template_folder_name,
     template_from_project,
     template_reference,
+)
+from backend.project.video_lane_commands import (
+    STILL_DEFAULT_MS,
+    AddImageFile,
+    AddLaneClip,
+    AddVideoLane,
+    find_video_lane,
+    free_video_lane_from,
 )
 from backend.project.voice_commands import AddVoiceProfile, SetReferenceClip
 from backend.voice.generation import GenerationError, GenerationPlan
@@ -1267,6 +1284,137 @@ class Session:
             return AudioImportResult(
                 imported=imported, errors=errors, timeline=self._timeline_state()
             )
+
+    # ---- video lanes (M8-2) ---------------------------------------------------
+
+    def import_lane_media(
+        self,
+        paths: Sequence[str],
+        lane_id: str | None,
+        timeline_ms: int,
+        *,
+        new_lane: bool = False,
+    ) -> LaneImportResult:
+        """Bring dropped images and videos onto the video lanes.
+
+        Images are copied into ``images/``; a video from outside ``footage/`` is
+        copied there first. The files go one after another from ``timeline_ms``, each
+        on the first unlocked lane from ``lane_id`` up with room (a new lane on top
+        when none has; the lowest lane when ``lane_id`` is None; a new lane first when
+        ``new_lane`` or when there are no lanes). One undo step; a file that cannot be
+        used is reported in ``errors`` and the others are still placed.
+        """
+        if timeline_ms < 0:
+            raise SessionError("timeline time must not be negative")
+        with self._lock:
+            folder, stack = self._require_open()
+            known_images = [i.model_copy() for i in stack.project.image_files]
+            known_sources = [s.model_copy() for s in stack.project.sources]
+        prepared: list[tuple[str, ImageFile | Source, bool, int, bool]] = []
+        errors: list[str] = []
+        for raw in paths:
+            source_path = Path(raw.strip())
+            if not raw.strip() or not source_path.is_file():
+                errors.append(f"{source_path.name or raw}: file not found")
+                continue
+            kind = media_kind(source_path.name)
+            try:
+                if kind == "image":
+                    image, reused = import_image(folder, source_path, known_images)
+                    if not reused:
+                        known_images.append(image)
+                    prepared.append(("image", image, not reused, STILL_DEFAULT_MS, False))
+                elif kind == "video":
+                    video, is_new, copied = import_video(
+                        folder, source_path, known_sources, probe=self._probe
+                    )
+                    if is_new:
+                        known_sources.append(video)
+                    prepared.append(("video", video, is_new, video.duration_ms, copied))
+                else:
+                    errors.append(
+                        f"{source_path.name}: not an image or video "
+                        "(PNG, JPG, or a video like MKV or MP4)"
+                    )
+            except LaneImportError as exc:
+                errors.append(str(exc))
+            except OSError as exc:
+                errors.append(f"{source_path.name}: {describe_error(exc)}")
+        with self._lock:
+            now_folder, stack = self._require_open()
+            if now_folder != folder:
+                raise SessionError("the project changed while the files were imported")
+            project = stack.project
+            imported: list[ImportedLaneMedia] = []
+            if prepared:
+                images_known = {i.id for i in project.image_files}
+                sources_known = {s.id for s in project.sources}
+                label = (
+                    f"Import {self._media_name(prepared[0][1])}"
+                    if len(prepared) == 1
+                    else f"Import {len(prepared)} files to video lanes"
+                )
+                try:
+                    if lane_id is not None and not new_lane:
+                        find_video_lane(project, lane_id)
+                    start = timeline_ms
+                    with stack.group(label):
+                        if new_lane or not project.video_lanes:
+                            adding_lane = AddVideoLane()
+                            stack.execute(adding_lane)
+                            target = adding_lane.lane_id
+                        else:
+                            target = lane_id if lane_id is not None else project.video_lanes[0].id
+                        for kind, item, is_new, length, copied in prepared:
+                            if isinstance(item, ImageFile):
+                                if is_new and item.id not in images_known:
+                                    stack.execute(AddImageFile(item))
+                                    images_known.add(item.id)
+                            elif is_new and item.id not in sources_known:
+                                stack.execute(AddSource(item))
+                                sources_known.add(item.id)
+                            lane = free_video_lane_from(project, target, start, length)
+                            if lane is None:
+                                adding = AddVideoLane()
+                                stack.execute(adding)
+                                lane = adding.lane_id
+                            adding_clip = AddLaneClip(
+                                lane,
+                                start,
+                                source_id=item.id if isinstance(item, Source) else None,
+                                image_id=item.id if isinstance(item, ImageFile) else None,
+                                length_ms=length,
+                            )
+                            stack.execute(adding_clip)
+                            imported.append(
+                                ImportedLaneMedia(
+                                    name=self._media_name(item),
+                                    kind="image" if kind == "image" else "video",
+                                    clip_id=adding_clip.clip_id,
+                                    lane_id=lane,
+                                    lane_name=find_video_lane(project, lane)[1].name,
+                                    timeline_ms=start,
+                                    copied_to_footage=copied,
+                                )
+                            )
+                            start += length
+                except CommandError as exc:
+                    raise SessionError(f"could not place the files: {exc}") from exc
+            return LaneImportResult(
+                imported=imported, errors=errors, timeline=self._timeline_state()
+            )
+
+    @staticmethod
+    def _media_name(item: "ImageFile | Source") -> str:
+        return item.name if isinstance(item, ImageFile) else item.path.rsplit("/", 1)[-1]
+
+    def image_path(self, image_id: str) -> Path | None:
+        """Disk path of an imported image, from the project (never from the request)."""
+        with self._lock:
+            if self._folder is None or self._stack is None:
+                return None
+            image = next((i for i in self._stack.project.image_files if i.id == image_id), None)
+            return None if image is None else self._folder / image.path
 
     def audio_decoded_path(self, file_id: str) -> Path | None:
         """The decoded WAV of an imported file (made again when missing); None for

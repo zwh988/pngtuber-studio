@@ -24,7 +24,11 @@ from pydantic import (
     model_validator,
 )
 
-SCHEMA_VERSION = 5
+SCHEMA_VERSION = 6
+
+# Picture-in-picture limits of a video-lane clip (schema v6, M8-2).
+LANE_SCALE_MIN = 0.05
+LANE_SCALE_MAX = 4.0
 
 # Level range of audio lanes and audio clips (schema v5, M8-1), in dB.
 AUDIO_GAIN_MIN_DB = -60.0
@@ -303,6 +307,80 @@ class AudioClip(_Model):
         return self.timeline_ms + self.length_ms
 
 
+class ImageFile(_Model):
+    """A still image copied into the project's ``images/`` folder (v6, M8-2).
+
+    ``name`` and ``size_bytes`` describe the dropped file, so dropping it again
+    reuses the copy.
+    """
+
+    id: EntityId
+    path: RelPath
+    name: str = Field(min_length=1)
+    size_bytes: int = Field(ge=0)
+    width: int = Field(gt=0)
+    height: int = Field(gt=0)
+
+
+class VideoLane(_Model):
+    """A video lane above the main footage (v6). ``Project.video_lanes`` is bottom to
+    top: the first lane draws just above the main footage. A hidden lane is neither
+    shown nor exported; a locked lane refuses edits to its clips."""
+
+    id: EntityId
+    name: str = Field(default="Video 2", min_length=1)
+    hidden: bool = False
+    locked: bool = False
+
+
+class LaneClip(_Model):
+    """A recording or a still on a video lane (v6, M8-2).
+
+    Not anchored to footage (decision 4, the exception to rule 4): it starts at
+    ``timeline_ms`` and plays at 1x; no edit of the main footage moves or cuts it.
+    Exactly one of ``source_id`` (a recording in ``footage/``) and ``image_id`` is
+    set. ``in_ms``/``out_ms`` are times in the recording; a still has ``in_ms`` 0
+    and ``out_ms`` its length on the timeline.
+
+    Picture-in-picture: the picture is fitted into the frame like the main footage
+    (``scale`` 1 = full frame), scaled by ``scale`` around its centre, which sits at
+    (``x``, ``y``) as fractions of the frame width and height, at ``opacity``.
+    A recording's own sound plays at ``gain_db`` unless ``mute``.
+    """
+
+    id: EntityId
+    lane_id: EntityId
+    source_id: EntityId | None = None
+    image_id: EntityId | None = None
+    timeline_ms: Ms
+    in_ms: Ms = 0
+    out_ms: PositiveMs
+    x: float = Field(default=0.5, ge=-1.0, le=2.0)
+    y: float = Field(default=0.5, ge=-1.0, le=2.0)
+    scale: float = Field(default=1.0, ge=LANE_SCALE_MIN, le=LANE_SCALE_MAX)
+    opacity: float = Field(default=1.0, ge=0.0, le=1.0)
+    gain_db: AudioGain = 0.0
+    mute: bool = False
+
+    @model_validator(mode="after")
+    def _check(self) -> "LaneClip":
+        if (self.source_id is None) == (self.image_id is None):
+            raise ValueError("a lane clip shows exactly one recording or image")
+        if self.out_ms <= self.in_ms:
+            raise ValueError("out_ms must be greater than in_ms")
+        if self.image_id is not None and self.in_ms != 0:
+            raise ValueError("a still starts at in_ms 0")
+        return self
+
+    @property
+    def length_ms(self) -> int:
+        return self.out_ms - self.in_ms
+
+    @property
+    def end_ms(self) -> int:
+        return self.timeline_ms + self.length_ms
+
+
 def _default_audio_lanes() -> list[AudioLane]:
     return [AudioLane(id=new_id(), name="Audio 1")]
 
@@ -406,6 +484,10 @@ class Project(_Model):
     audio_files: list[AudioFile] = Field(default_factory=list)
     audio_lanes: list[AudioLane] = Field(default_factory=_default_audio_lanes)
     audio_clips: list[AudioClip] = Field(default_factory=list)
+    # Schema v6 (M8-2): video lanes above the main footage, bottom to top.
+    image_files: list[ImageFile] = Field(default_factory=list)
+    video_lanes: list[VideoLane] = Field(default_factory=list)
+    lane_clips: list[LaneClip] = Field(default_factory=list)
 
     fx_chain: FxChain = Field(default_factory=FxChain)
     game_audio_db: float = 0.0
@@ -426,6 +508,9 @@ class Project(_Model):
             "audio_files": self.audio_files,
             "audio_lanes": self.audio_lanes,
             "audio_clips": self.audio_clips,
+            "image_files": self.image_files,
+            "video_lanes": self.video_lanes,
+            "lane_clips": self.lane_clips,
         }
         for name, items in collections.items():
             ids = [item.id for item in items]

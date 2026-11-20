@@ -60,8 +60,22 @@ def _v4_to_v5(data: dict[str, Any]) -> dict[str, Any]:
     return data
 
 
+def _v5_to_v6(data: dict[str, Any]) -> dict[str, Any]:
+    """v6 adds video lanes, their clips and imported images (M8-2), all empty."""
+    data.setdefault("image_files", [])
+    data.setdefault("video_lanes", [])
+    data.setdefault("lane_clips", [])
+    return data
+
+
 # Maps "from version" -> function upgrading that version to version + 1.
-MIGRATIONS: dict[int, Migration] = {1: _v1_to_v2, 2: _v2_to_v3, 3: _v3_to_v4, 4: _v4_to_v5}
+MIGRATIONS: dict[int, Migration] = {
+    1: _v1_to_v2,
+    2: _v2_to_v3,
+    3: _v3_to_v4,
+    4: _v4_to_v5,
+    5: _v5_to_v6,
+}
 
 
 class MigrationError(Exception):

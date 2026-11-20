@@ -14,7 +14,7 @@ from backend.audio.chainspec import FxChainError, processing_spec
 from backend.audio.trim import TrimBounds, processed_duration_ms, trimmed_duration_ms
 from backend.edl.anchoring import check_references, find_orphans
 from backend.edl.timemap import ClipSpan, clip_spans, timeline_duration, to_timeline
-from backend.project.schema import AudioLane, AvatarSettings, Project, Take
+from backend.project.schema import AudioLane, AvatarSettings, Project, Take, VideoLane
 from backend.voice.keys import fx_version as chain_version
 from backend.voice.overflow import PlacedLine, available_slack_ms, find_overflows
 from backend.voice.stretch import fit_stretch, stretched_duration_ms
@@ -167,6 +167,73 @@ def _build_audio_clips(project: Project) -> list[TimelineAudioClip]:
     return result
 
 
+class TimelineLaneClip(BaseModel):
+    """A clip on a video lane as the editor draws it (M8-2). Times are TIMELINE ms,
+    except ``in_ms``/``out_ms``/``source_duration_ms`` (times in the recording;
+    ``source_duration_ms`` is 0 for a still)."""
+
+    id: str
+    lane_id: str
+    source_id: str | None
+    image_id: str | None
+    name: str
+    timeline_ms: int
+    end_ms: int
+    in_ms: int
+    out_ms: int
+    source_duration_ms: int
+    x: float
+    y: float
+    scale: float
+    opacity: float
+    gain_db: float
+    mute: bool
+    # The recording or image file is missing on disk (the session marks it).
+    missing: bool = False
+
+
+def _build_lane_clips(
+    project: Project, missing_source_ids: Collection[str]
+) -> list[TimelineLaneClip]:
+    sources = {source.id: source for source in project.sources}
+    images = {image.id: image for image in project.image_files}
+    lane_order = {lane.id: index for index, lane in enumerate(project.video_lanes)}
+    result = []
+    for clip in project.lane_clips:
+        source = sources.get(clip.source_id or "")
+        image = images.get(clip.image_id or "")
+        if source is not None:
+            name = source.path.rsplit("/", 1)[-1]
+        elif image is not None:
+            name = image.name
+        else:
+            name = "(missing file)"
+        result.append(
+            TimelineLaneClip(
+                id=clip.id,
+                lane_id=clip.lane_id,
+                source_id=clip.source_id,
+                image_id=clip.image_id,
+                name=name,
+                timeline_ms=clip.timeline_ms,
+                end_ms=clip.end_ms,
+                in_ms=clip.in_ms,
+                out_ms=clip.out_ms,
+                source_duration_ms=source.duration_ms if source is not None else 0,
+                x=clip.x,
+                y=clip.y,
+                scale=clip.scale,
+                opacity=clip.opacity,
+                gain_db=clip.gain_db,
+                mute=clip.mute,
+                missing=(source is None and image is None)
+                or (clip.source_id is not None and clip.source_id in missing_source_ids),
+            )
+        )
+    result.sort(key=lambda c: (lane_order.get(c.lane_id, len(lane_order)), c.timeline_ms))
+    return result
+
+
 class TimelineState(BaseModel):
     clips: list[TimelineClip] = Field(default_factory=list)
     # Placed lines, ordered by start time (unmappable ones last).
@@ -195,6 +262,10 @@ class TimelineState(BaseModel):
     # Audio lanes (M8-1): lanes top to bottom, clips by lane then start time.
     audio_lanes: list[AudioLane] = Field(default_factory=list)
     audio_clips: list[TimelineAudioClip] = Field(default_factory=list)
+    # Video lanes (M8-2): bottom to top (the first draws just above the main footage),
+    # and their clips by lane, then start time.
+    video_lanes: list[VideoLane] = Field(default_factory=list)
+    lane_clips: list[TimelineLaneClip] = Field(default_factory=list)
 
 
 class EditResult(BaseModel):
@@ -280,6 +351,8 @@ def build_timeline(
         avatar=project.avatar.model_copy(deep=True),
         audio_lanes=[lane.model_copy() for lane in project.audio_lanes],
         audio_clips=_build_audio_clips(project),
+        video_lanes=[lane.model_copy() for lane in project.video_lanes],
+        lane_clips=_build_lane_clips(project, missing),
     )
 
 
