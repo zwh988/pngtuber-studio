@@ -78,6 +78,25 @@ def test_input_maps_keys_voices_and_reactions() -> None:
     assert inp.default_expression == "smile"
 
 
+def test_the_avatar_runs_to_the_last_clip_on_any_lane() -> None:
+    """M8-2: a video-lane clip past the 10 s footage makes the avatar run on."""
+    from backend.project.schema import ImageFile, LaneClip, VideoLane
+
+    project = make_project()
+    image, lane = "e" * 12, "f" * 12
+    project.image_files.append(
+        ImageFile(id=image, path="images/t.png", name="t.png", size_bytes=1, width=10, height=10)
+    )
+    project.video_lanes.append(VideoLane(id=lane))
+    project.lane_clips.append(
+        LaneClip(id="d" * 12, lane_id=lane, image_id=image, timeline_ms=9000, out_ms=4000)
+    )
+    inp = build_input(project, timeline_for(project), {}, ART, {})
+    assert inp.duration_ms == 13_000
+    track = build_frame_track(build_solver(inp), ART, "v")
+    assert track.duration_ms == 13_000
+
+
 def test_orphans_and_unknown_expressions() -> None:
     project = make_project()
     project.keyframes[0].orphaned = True

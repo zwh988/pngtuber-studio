@@ -1448,9 +1448,6 @@
               {@const length = sound.end_ms - sound.timeline_ms}
               <strong>Audio: {sound.name}</strong>
               <span class="hint num">{clock(sound.timeline_ms)} to {clock(sound.end_ms)}</span>
-              {#if sound.end_ms > timeline.duration_ms}
-                <span class="hint">Runs past the end of the footage; the export stops there.</span>
-              {/if}
               <label class="inline">
                 Level
                 <input

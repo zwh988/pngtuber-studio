@@ -153,10 +153,13 @@ def build_edit_graph(
     fmt: OutputFormat,
     *,
     first_input: int = 0,
+    total_ms: int | None = None,
 ) -> EditGraph:
     """The edit graph of the project's track-0 clips. ``source_paths`` maps a source
     id to its file on disk; ``first_input`` is the ffmpeg input index of the first
-    clip (inputs given before the clips, such as the avatar pipe, come first)."""
+    clip (inputs given before the clips, such as the avatar pipe, come first).
+    ``total_ms`` past the end of the footage (lane or audio clips run on, M8-2) pads
+    the edit with black frames and silence up to it."""
     sources = {s.id: s for s in project.sources}
     w, h = fmt.width, fmt.height
     inputs: list[ClipInput] = []
@@ -224,10 +227,20 @@ def build_edit_graph(
         pads.append(f"[v{k}][a{k}]")
     if not inputs:
         raise ExportError("the timeline has no clips to export")
-    filters.append(
-        "".join(pads) + f"concat=n={len(inputs)}:v=1:a=1[{VIDEO_LABEL}][{AUDIO_LABEL}]"
-    )
-    total = spans[-1].end_ms
+    footage_ms = spans[-1].end_ms
+    total = footage_ms if total_ms is None else max(total_ms, footage_ms)
+    concat = f"concat=n={len(inputs)}:v=1:a=1"
+    if total > footage_ms:
+        extra = frame_count(total, fmt) - frame_count(footage_ms, fmt)
+        filters.append("".join(pads) + f"{concat}[vcat][acat]")
+        filters.append(
+            f"[vcat]tpad=stop_mode=add:stop={extra}:color=black[{VIDEO_LABEL}]"
+        )
+        filters.append(
+            f"[acat]apad=whole_len={sample_count(total, fmt.sample_rate)}[{AUDIO_LABEL}]"
+        )
+    else:
+        filters.append("".join(pads) + f"{concat}[{VIDEO_LABEL}][{AUDIO_LABEL}]")
     return EditGraph(
         inputs=inputs,
         filters=filters,

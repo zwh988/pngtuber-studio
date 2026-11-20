@@ -849,10 +849,14 @@ class Session:
                 else resolve_art_folder(project.avatar.art_folder, folder)
             )
         paths: dict[str, Path] = {}
-        for clip in timeline.clips:
-            path = self.source_path(clip.source_id)
+        used = [clip.source_id for clip in timeline.clips]
+        used += [c.source_id for c in timeline.lane_clips if c.source_id is not None]
+        for source_id in used:
+            path = self.source_path(source_id)
             if path is not None:
-                paths[clip.source_id] = path
+                paths[source_id] = path
+        # M8-2: images on the video lanes.
+        image_paths = {image.id: folder / image.path for image in project.image_files}
         track = self.avatar_track() if art is not None else None
         # M8-1: decoded WAVs of the imported audio (made again when missing; a file that
         # cannot be decoded is left out and the export reports it).
@@ -872,6 +876,7 @@ class Session:
             art=art,
             art_root=art_root,
             audio_paths=audio_paths,
+            image_paths=image_paths,
         )
 
     def export_defaults(self) -> ExportDefaults:
@@ -914,6 +919,12 @@ class Session:
                 for f in project.audio_files
                 if f.id in used_files and not (folder / f.path).is_file()
             }
+            used_images = {c.image_id for c in project.lane_clips if c.image_id}
+            missing_images = {
+                i.id
+                for i in project.image_files
+                if i.id in used_images and not (folder / i.path).is_file()
+            }
         return preflight(
             project,
             timeline,
@@ -923,6 +934,7 @@ class Session:
             art_warnings=art.warnings,
             tools_problem=tools_problem,
             missing_audio_file_ids=missing_audio,
+            missing_image_ids=missing_images,
         )
 
     def envelope(self, take_id: str, stretch: float = 1.0) -> EnvelopeReport | None:

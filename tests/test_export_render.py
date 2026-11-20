@@ -75,13 +75,17 @@ def test_filters_with_and_without_avatar() -> None:
     tail = filters[len(graph.filters) :]
     assert tail[0] == "[vedit]split=2[vmain][vedit_out]"
     assert tail[2] == "[0:v]format=rgba[avatar]"
-    assert tail[3].startswith("[vmain][avatar]overlay=0:0")
-    assert tail[4] == "[agame]volume=-6.00dB[game]"
-    assert tail[5].startswith("[1:a:0]aresample=48000,pan=stereo|c0=c0|c1=c0,")
-    assert "atrim=end_sample=144000[voice]" in tail[5]
-    assert "amix=inputs=2:normalize=0:duration=first,alimiter=limit=0.891251:level=disabled" in tail[6]
+    # M8-2: lanes under the avatar (none here), the avatar, lanes over it (none).
+    assert tail[3] == "[vmain]null[vunder]"
+    assert tail[4] == "[vunder][avatar]overlay=0:0:format=auto[vavatar]"
+    assert tail[5] == "[vavatar]null[vover]"
+    assert tail[6] == "[vover]format=yuv420p,trim=end_frame=180[vfinal]"
+    assert tail[7] == "[agame]volume=-6.00dB[game]"
+    assert tail[8].startswith("[1:a:0]aresample=48000,pan=stereo|c0=c0|c1=c0,")
+    assert "atrim=end_sample=144000[voice]" in tail[8]
+    assert "amix=inputs=2:normalize=0:duration=first,alimiter=limit=0.891251:level=disabled" in tail[9]
     plain = final_filters(graph, FMT, with_avatar=False, game_db=0)
-    assert "[vmain]format=yuv420p[vfinal]" in plain and plain[-2].startswith("[0:a:0]")
+    assert "[vunder]null[vavatar]" in plain and plain[-2].startswith("[0:a:0]")
     assert first_clip_input(True) == 2 and first_clip_input(False) == 1
 
 
@@ -360,3 +364,70 @@ def test_pipeline_with_a_limit_exports_only_the_start(tmp_path: Path) -> None:
     assert result.render.frames == 90 and not result.with_avatar and result.overlay_frames == 0
     assert not (tmp_path / "short" / "video_raw").exists()
     assert soundfile.info(str(tmp_path / "short" / PROCESSED_NAME)).frames == 36_000  # 1.5 s
+
+
+@needs_ffmpeg
+def test_real_render_draws_lane_clips_past_the_footage(tmp_path: Path) -> None:
+    """M8-2: a yellow still on Video 2 runs past the 3 s footage to 4 s; a magenta
+    recording with an 880 Hz tone plays on Video 3 at 2 to 2.5 s."""
+    from backend.export.lanes import program_end_ms
+    from backend.project.schema import ImageFile, LaneClip, VideoLane
+
+    paths = footage(tmp_path / "footage")
+    pink = tmp_path / "footage" / "pink.mp4"
+    run([
+        str(FFMPEG), "-hide_banner", "-y", "-f", "lavfi", "-i", "color=c=magenta:s=640x360:r=30:d=2",
+        "-f", "lavfi", "-i", "sine=f=880:sample_rate=48000:d=2", "-c:v", "libx264",
+        "-pix_fmt", "yuv420p", "-c:a", "aac", "-shortest", str(pink),
+    ])  # fmt: skip
+    title = tmp_path / "title.png"
+    Image.new("RGBA", (400, 400), (255, 255, 0, 255)).save(title)
+    pink_id, img_id, v2, v3 = "5" * 12, "6" * 12, "7" * 12, "8" * 12
+    proj = project()
+    proj.sources.append(
+        Source(id=pink_id, path="footage/pink.mp4", duration_ms=2000, fps_num=30, width=640, height=360, audio_tracks=1)
+    )  # fmt: skip
+    proj.image_files.append(
+        ImageFile(id=img_id, path="images/title.png", name="title.png", size_bytes=1, width=400, height=400)
+    )  # fmt: skip
+    proj.video_lanes = [VideoLane(id=v2, name="Video 2"), VideoLane(id=v3, name="Video 3")]
+    proj.lane_clips = [
+        LaneClip(id="d" * 12, lane_id=v2, image_id=img_id, timeline_ms=500, out_ms=3500, x=0.15, y=0.2, scale=0.3),
+        LaneClip(id="e" * 12, lane_id=v3, source_id=pink_id, timeline_ms=2000, in_ms=0, out_ms=500, x=0.85, y=0.2, scale=0.25),
+    ]  # fmt: skip
+    total = program_end_ms(proj)
+    assert total == 4000
+    out = tmp_path / "out"
+    out.mkdir()
+    plan = make_plan(
+        proj, {**paths, pink_id: pink}, FMT, ffmpeg=FFMPEG, voice_wav=voice_wav(out / "voice.wav"),
+        avatar=None, out_dir=out, image_paths={img_id: title}, total_ms=total,
+    )  # fmt: skip
+    report = run_render(plan)
+    assert report.frames == 240
+
+    final = frames_of(plan.final_path)
+    assert final.shape[0] == 240
+    yellow, pink_px, footage_px = (21, 28), (21, 163), (80, 96)  # (row, col) at 192 x 108
+
+    def is_yellow(px: np.ndarray) -> bool:
+        return px[0] > 180 and px[1] > 180 and px[2] < 90
+
+    def is_pink(px: np.ndarray) -> bool:
+        return px[0] > 180 and px[1] < 90 and px[2] > 180
+
+    assert not is_yellow(final[20][yellow])  # 0.33 s: before the still
+    assert is_yellow(final[45][yellow]) and name(final[45][footage_px]) == "red"
+    assert is_pink(final[135][pink_px]) and not is_pink(final[160][pink_px])  # 2.25 s / 2.67 s
+    assert is_yellow(final[210][yellow])  # 3.5 s: past the footage, the still stays
+    assert final[210][footage_px].sum() < 60  # and the frame under it is black
+    assert is_yellow(final[239][yellow])  # the still lasts to the last frame (4 s)
+    # Frame-exact edges (60 fps): the still from frame 30, the recording 120 to 149.
+    assert [is_yellow(final[k][yellow]) for k in (29, 30)] == [False, True]
+    assert [is_pink(final[k][pink_px]) for k in (119, 120, 149, 150)] == [False, True, True, False]
+
+    pcm = pcm_of(plan.final_path)
+    assert abs(pcm.size - sample_count(4000)) <= 2048
+    assert band(pcm, 2050, 2450, 880) > 0.03  # the lane clip's sound is in the mix
+    assert band(pcm, 1000, 1900, 880) < 0.005
+    assert band(pcm, 3100, 3900) < 0.01  # silence past the footage

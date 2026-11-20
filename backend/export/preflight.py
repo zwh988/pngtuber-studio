@@ -60,6 +60,7 @@ def preflight(
     art_warnings: Sequence[str] = (),
     tools_problem: str | None = None,
     missing_audio_file_ids: Collection[str] = (),
+    missing_image_ids: Collection[str] = (),
 ) -> PreflightReport:
     """Check a project before export.
 
@@ -67,7 +68,8 @@ def preflight(
     disk marked); ``missing_take_ids`` are takes whose raw file is missing;
     ``art_status`` / ``art_problem`` / ``art_warnings`` come from the avatar state;
     ``tools_problem`` says why ffmpeg or NVENC cannot be used (None when they can);
-    ``missing_audio_file_ids`` are imported audio files no longer in ``audio/`` (M8-1).
+    ``missing_audio_file_ids`` are imported audio files no longer in ``audio/`` (M8-1);
+    ``missing_image_ids`` are imported images no longer in ``images/`` (M8-2).
     """
     issues: list[PreflightIssue] = []
 
@@ -193,6 +195,22 @@ def preflight(
                 "project's audio folder; remove its clips or drop the file again.",
                 sound.id,
                 sound.timeline_ms,
+            )
+
+    # --- video lanes (M8-2) -----------------------------------------------------------
+    hidden = {lane.id for lane in timeline.video_lanes if lane.hidden}
+    missing_images = set(missing_image_ids)
+    for shot in sorted(timeline.lane_clips, key=lambda c: (c.timeline_ms, c.id)):
+        if shot.lane_id in hidden:
+            continue  # hidden lanes are not exported
+        if shot.missing or (shot.image_id is not None and shot.image_id in missing_images):
+            add(
+                "error",
+                "lane_media_missing",
+                f"The file of {shot.name} on a video lane is missing; relink the "
+                "recording, drop the image again, or remove the clip.",
+                shot.id,
+                shot.timeline_ms,
             )
 
     # --- avatar ---------------------------------------------------------------------

@@ -298,6 +298,15 @@ class EditResult(BaseModel):
     timeline: TimelineState
 
 
+def timeline_end_ms(state: TimelineState) -> int:
+    """Where the whole timeline ends (M8-2): the last of the footage, the audio clips
+    and the video-lane clips. The player, the avatar and the export run to it."""
+    ends = [state.duration_ms]
+    ends += [clip.end_ms for clip in state.audio_clips]
+    ends += [clip.end_ms for clip in state.lane_clips]
+    return max(ends)
+
+
 def build_timeline(
     project: Project,
     *,

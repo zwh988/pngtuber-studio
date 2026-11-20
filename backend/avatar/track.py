@@ -37,7 +37,7 @@ from backend.avatar.solver import (
     build_solver,
 )
 from backend.project.schema import AvatarSettings, Project
-from backend.project.timeline import TimelineState
+from backend.project.timeline import TimelineState, timeline_end_ms
 
 TRACK_FPS = 30
 AVATAR_HEIGHT_FRACTION = 0.6  # sprite height at scale 1, as a fraction of the frame
@@ -87,7 +87,8 @@ def build_input(
         if not r.orphaned and r.t_ms is not None
     ]
     return SolverInput(
-        duration_ms=timeline.duration_ms,
+        # M8-2: the avatar runs to the end of the whole timeline, not just the footage.
+        duration_ms=timeline_end_ms(timeline),
         seed=project.seed,
         base=BaseTransform(
             x=avatar.x,

@@ -8,6 +8,7 @@ from fastapi.testclient import TestClient
 from PIL import Image
 
 from backend.app import create_app
+from backend.project.edit_ops import SetVideoLaneOp
 from backend.project.laneimport import (
     LaneImportError,
     import_image,
@@ -235,3 +236,25 @@ def test_api_import_and_image_route(session: Session, outside: Path) -> None:
     media = client.get(f"/media/image/{image_id}")
     assert media.status_code == 200 and media.content[:4] == b"\x89PNG"
     assert client.get("/media/image/ffffffffffff").status_code == 404
+
+
+def test_export_inputs_and_preflight_cover_lane_media(
+    session: Session, outside: Path
+) -> None:
+    png = write_png(outside / "title.png")
+    video = write_video(outside / "cut.mp4")
+    result = session.import_lane_media([str(png), str(video)], None, 0)
+    image_id = result.timeline.lane_clips[0].image_id
+    source_id = result.timeline.lane_clips[1].source_id
+    inputs = session.export_inputs()
+    assert inputs.image_paths[image_id].read_bytes() == png.read_bytes()
+    assert source_id in inputs.source_paths  # a lane recording, not on the main track
+    kinds = [i.kind for i in session.export_preflight().issues]
+    assert "lane_media_missing" not in kinds
+    inputs.image_paths[image_id].unlink()
+    issues = [i for i in session.export_preflight().issues if i.kind == "lane_media_missing"]
+    assert len(issues) == 1 and issues[0].severity == "error"
+    lane = result.timeline.lane_clips[0].lane_id
+    session.edit([SetVideoLaneOp(lane_id=lane, hidden=True)])
+    kinds = [i.kind for i in session.export_preflight().issues]
+    assert "lane_media_missing" not in kinds  # hidden lanes are not exported

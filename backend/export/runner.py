@@ -19,7 +19,7 @@ import subprocess
 import sys
 import threading
 from collections.abc import Callable
-from dataclasses import dataclass
+from dataclasses import dataclass, field
 from pathlib import Path
 
 from backend.audio.loudness import CEILING_DB, db_to_linear
@@ -33,6 +33,7 @@ from backend.export.editgraph import (
     build_edit_graph,
 )
 from backend.export.errors import ExportCancelled, ExportError
+from backend.export.lanes import LaneGraph, build_lane_graph, overlay_steps
 from backend.project.schema import Project
 
 FINAL_NAME = "final_1080p.mp4"
@@ -58,6 +59,8 @@ class RenderPlan:
     overlay_frames: int = 0  # avatar frames to write as PNGs (0: no PNG sequence)
     # M8-1: the audio-lane clips (``audio_clips.wav``), None when no clip is heard.
     music_wav: Path | None = None
+    # M8-2: the video-lane clips (inputs after the footage clips).
+    lanes: LaneGraph = field(default_factory=LaneGraph)
 
     @property
     def overlay_dir(self) -> Path:
@@ -105,12 +108,20 @@ def make_plan(
     out_dir: Path,
     overlay_frames: int = 0,
     music_wav: Path | None = None,
+    image_paths: dict[str, Path] | None = None,
+    total_ms: int | None = None,
 ) -> RenderPlan:
+    first = first_clip_input(avatar is not None, music_wav is not None)
     graph = build_edit_graph(
+        project, source_paths, fmt, first_input=first, total_ms=total_ms
+    )
+    lanes = build_lane_graph(
         project,
         source_paths,
+        image_paths or {},
         fmt,
-        first_input=first_clip_input(avatar is not None, music_wav is not None),
+        graph.duration_ms,
+        first_input=first + len(graph.inputs),
     )
     return RenderPlan(
         ffmpeg=ffmpeg,
@@ -122,6 +133,7 @@ def make_plan(
         out_dir=out_dir,
         overlay_frames=overlay_frames if avatar is not None else 0,
         music_wav=music_wav,
+        lanes=lanes,
     )
 
 
@@ -133,11 +145,16 @@ def final_filters(
     game_db: float,
     overlay_frames: int = 0,
     with_music: bool = False,
+    lanes: LaneGraph | None = None,
 ) -> list[str]:
     voice = 1 if with_avatar else 0
     limit = db_to_linear(CEILING_DB)
+    lanes = lanes if lanes is not None else LaneGraph()
+    under = [layer for layer in lanes.layers if not layer.over_avatar]
+    over = [layer for layer in lanes.layers if layer.over_avatar]
     filters = [
         *graph.filters,
+        *lanes.filters,
         f"[{graph.video}]split=2[vmain][vedit_out]",
         f"[{graph.audio}]asplit=2[agame][aedit_out]",
     ]
@@ -147,13 +164,15 @@ def final_filters(
             filters.append(f"[avpng]trim=end_frame={overlay_frames}[overlay_out]")
         else:
             filters.append("[0:v]format=rgba[avatar]")
-        # The avatar track runs one frame past the end; trim keeps the exact frame count.
-        filters.append(
-            "[vmain][avatar]overlay=0:0:format=auto,format=yuv420p,"
-            f"trim=end_frame={graph.frames}[vfinal]"
-        )
+    # M8-2: lane clips under the avatar, the avatar, then the lanes over it.
+    filters += overlay_steps("vmain", under, "vunder", fmt, "lu")
+    if with_avatar:
+        filters.append("[vunder][avatar]overlay=0:0:format=auto[vavatar]")
     else:
-        filters.append("[vmain]format=yuv420p[vfinal]")
+        filters.append("[vunder]null[vavatar]")
+    filters += overlay_steps("vavatar", over, "vover", fmt, "lo")
+    # The avatar track runs one frame past the end; trim keeps the exact frame count.
+    filters.append(f"[vover]format=yuv420p,trim=end_frame={graph.frames}[vfinal]")
     voice_chain = (
         f"[{voice}:a:0]aresample={fmt.sample_rate},pan=stereo|c0=c0|c1=c0,"
         "aformat=sample_fmts=fltp:channel_layouts=stereo,"
@@ -165,9 +184,11 @@ def final_filters(
         "aformat=sample_fmts=fltp:channel_layouts=stereo,"
         f"apad,atrim=end_sample={graph.samples}[music]"
     )
-    sources = "[game][voice][music]" if with_music else "[game][voice]"
+    sources = "[game][voice]" + ("[music]" if with_music else "")
+    sources += "".join(f"[{label}]" for label in lanes.audio)  # M8-2: lane clip sound
+    count = 2 + (1 if with_music else 0) + len(lanes.audio)
     mix = (
-        f"{sources}amix=inputs={3 if with_music else 2}:normalize=0:duration=first,"
+        f"{sources}amix=inputs={count}:normalize=0:duration=first,"
         f"alimiter=limit={limit:.6f}:level=disabled:latency=1,"
         f"atrim=end_sample={graph.samples}[afinal]"
     )
@@ -205,6 +226,7 @@ def final_args(plan: RenderPlan) -> list[str]:
         str(plan.ffmpeg), "-hide_banner", "-y", "-nostats",
         "-progress", "pipe:1", "-stats_period", PROGRESS_PERIOD_S,
         *inputs, *plan.graph.input_args(),
+        *plan.lanes.input_args(),
         "-/filter_complex", str(plan.script_path),
         *out,
     ]  # fmt: skip
@@ -247,6 +269,7 @@ def run_render(
             game_db=plan.game_db,
             overlay_frames=overlay,
             with_music=plan.music_wav is not None,
+            lanes=plan.lanes,
         )
     )
     plan.script_path.write_text(script + "\n", encoding="utf-8")

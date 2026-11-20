@@ -12,7 +12,7 @@ import numpy as np
 
 from backend.avatar.art import AvatarArt
 from backend.avatar.track import FrameTrack, track_frame_at
-from backend.edl.timemap import clip_spans, timeline_duration
+from backend.edl.timemap import clip_spans
 from backend.export.audioclips import (
     AUDIO_CLIPS_NAME,
     AudioClipTrackReport,
@@ -41,6 +41,7 @@ from backend.export.editgraph import (
     output_format,
 )
 from backend.export.errors import ExportCancelled, ExportError
+from backend.export.lanes import program_end_ms
 from backend.export.runner import RenderReport, make_plan, run_render
 from backend.export.voicetrack import (
     PROCESSED_NAME,
@@ -69,6 +70,8 @@ class ExportInputs:
     art_root: Path | None
     # M8-1: the decoded 48 kHz WAV of each imported audio file, by file id.
     audio_paths: dict[str, Path] = field(default_factory=dict)
+    # M8-2: each imported image (video lanes), by image id.
+    image_paths: dict[str, Path] = field(default_factory=dict)
 
 
 @dataclass(frozen=True)
@@ -144,7 +147,10 @@ def run_export(
         raise ExportError("the timeline has no clips")
     ensure_new_folder(out_dir)
     project = inputs.project if opts.limit_ms is None else limit_clips(inputs.project, opts.limit_ms)
-    total_ms = timeline_duration(project.clips)
+    # M8-2: the video runs to the last clip on any lane (black past the footage).
+    total_ms = program_end_ms(inputs.project)
+    if opts.limit_ms is not None:
+        total_ms = min(total_ms, opts.limit_ms)
     fmt = output_format(project)
     compositor = build_compositor(inputs, fmt)
     overlay_count = (
@@ -189,6 +195,8 @@ def run_export(
         out_dir=out_dir,
         overlay_frames=overlay_count,
         music_wav=None if music is None else out_dir / AUDIO_CLIPS_NAME,
+        image_paths=inputs.image_paths,
+        total_ms=total_ms,
     )
     render = run_render(
         plan,
@@ -248,6 +256,10 @@ def run_export(
                     "files": music.files,
                 }
             ),
+            "video_lanes": {
+                "clips": len(plan.lanes.layers),
+                "with_sound": len(plan.lanes.audio),
+            },
             "avatar": {
                 "drawn": compositor is not None,
                 "frames_fed": render.avatar_frames,
