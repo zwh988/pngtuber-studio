@@ -344,10 +344,13 @@ function Write-RunBat {
         $link = Join-Path $desktop 'PNGtuber Studio.lnk'
         $shell = New-Object -ComObject WScript.Shell
         $sc = $shell.CreateShortcut($link)
-        $sc.TargetPath = $runBat
+        # pythonw has no console window. Startup errors go to %APPDATA%\PNGtuberStudio\app.log
+        # and a message box. run.bat stays for starting with a console.
+        $sc.TargetPath = Join-Path $Root '.venv\Scripts\pythonw.exe'
+        $sc.Arguments = '-m backend.main'
         $sc.WorkingDirectory = $Root
         $sc.IconLocation = (Join-Path $Root 'assets\app.ico') + ',0'
-        $sc.WindowStyle = 7   # console minimized; the app window opens normally
+        $sc.WindowStyle = 1
         $sc.Description = 'PNGtuber Studio'
         $sc.Save()
         Ok "Desktop shortcut: $link"
