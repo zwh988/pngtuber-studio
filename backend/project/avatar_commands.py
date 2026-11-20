@@ -41,6 +41,10 @@ KeyValue = float | str
 # New transform keys ease (decision 14); expression keys always hold.
 SMOOTH_BY_DEFAULT = frozenset({"x", "y", "scale", "rotation"})
 REACTION_MAX_MS = 10_000
+# A key this close to the playhead (one 30 fps preview frame) is "the key there": a
+# preview drag, E or an inspector change edits it instead of adding a key beside it
+# (keyframes decision 1).
+KEY_NEAR_MS = 34
 REACTION_MAX_INTENSITY = 3.0
 
 
@@ -83,6 +87,22 @@ def _anchor_at(project: Project, timeline_ms: int) -> Anchor:
     if anchor is None:
         raise CommandError(f"there is no footage at {timeline_ms} ms on the timeline")
     return anchor
+
+
+def key_near(project: Project, lane_id: str, timeline_ms: int) -> Keyframe | None:
+    """The lane's key nearest a timeline time, within ``KEY_NEAR_MS``; orphans and
+    keys that do not map onto the timeline are left out. Ties go to the earlier key."""
+    best: tuple[float, Keyframe] | None = None
+    for key in project.keyframes:
+        if key.lane_id != lane_id or key.orphaned:
+            continue
+        t = to_timeline(project.clips, key.anchor)
+        if t is None:
+            continue
+        gap = abs(t - timeline_ms)
+        if gap <= KEY_NEAR_MS and (best is None or gap < best[0]):
+            best = (gap, key)
+    return None if best is None else best[1]
 
 
 def default_interpolation(lane_id: str) -> Interpolation:
@@ -325,9 +345,9 @@ class SetKeyframeInterpolation(Command):
 
 
 class KeyLane(Command):
-    """Set a lane's value at a timeline time: changes the key already exactly there
-    (same lane, same anchor, not orphaned), else adds one. Used by the E hotkey and
-    by dragging the avatar (decision 14)."""
+    """Set a lane's value at a timeline time: changes the lane's key within
+    ``KEY_NEAR_MS`` of it (``key_near``), else adds one. Used by the E hotkey and by
+    dragging the avatar (decision 14, keyframes decision 1)."""
 
     def __init__(
         self,
@@ -349,22 +369,14 @@ class KeyLane(Command):
 
     def apply(self, project: Project) -> None:
         if self._inner is None:
-            anchor = _anchor_at(project, self.timeline_ms)
-            existing = next(
-                (
-                    k
-                    for k in project.keyframes
-                    if k.lane_id == self.lane_id and k.anchor == anchor and not k.orphaned
-                ),
-                None,
-            )
+            existing = key_near(project, self.lane_id, self.timeline_ms)
             if existing is not None:
                 self._inner = SetKeyframeValue(existing.id, self.value)
             else:
                 add = AddKeyframe(
                     self.lane_id, self.timeline_ms, self.value, keyframe_id=self.keyframe_id
                 )
-                add._anchor = anchor
+                add._anchor = _anchor_at(project, self.timeline_ms)
                 self._inner = add
         self._inner.apply(project)
 
@@ -417,7 +429,11 @@ class KeyLaneBy(Command):
     def apply(self, project: Project) -> None:
         if self._inner is None:
             spec = LANES_BY_ID.get(self.lane_id)
-            current = lane_value_at(project, self.lane_id, self.timeline_ms)
+            existing = key_near(project, self.lane_id, self.timeline_ms)
+            if existing is not None and not isinstance(existing.value, str):
+                current = float(existing.value)  # the key being edited, not the curve
+            else:
+                current = lane_value_at(project, self.lane_id, self.timeline_ms)
             assert spec is not None
             value = min(spec.maximum, max(spec.minimum, current * self.factor + self.delta))
             self._inner = KeyLane(self.lane_id, self.timeline_ms, value)

@@ -859,6 +859,12 @@
         e.preventDefault();
         stepBy(-1);
         break;
+      case "<":
+      case ">":
+        e.preventDefault();
+        player?.pause();
+        timelineView?.gotoKey(e.key === ">" ? 1 : -1);
+        break;
       case ".":
         e.preventDefault();
         stepBy(1);

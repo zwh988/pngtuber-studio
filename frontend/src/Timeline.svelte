@@ -43,6 +43,7 @@
   import { LINE_DRAG_TYPE, dropSlot, peakSpan, trimTarget, withTrim } from "./timeline";
   import { FALLBACK, readTimelineColors, type TimelineColors } from "./timelineTheme";
   import { SNAP_PX, snapEdge, snapMove, snapPoints } from "./snap";
+  import { stepKey } from "./keyNav";
   import {
     ArrowDown,
     ArrowUp,
@@ -58,6 +59,8 @@
     X,
     Maximize2,
     Rows3,
+    StepBack,
+    StepForward,
     ZoomIn,
     ZoomOut,
   } from "@lucide/svelte";
@@ -310,6 +313,27 @@
    * lane under it (null: not over an audio lane, so the first one; `newLane`: the
    * "+ Audio lane" row). Null when the point is not over the timeline canvas.
    */
+  /** Previous / next avatar key (`<` and `>`, the toolbar buttons): select it and put the
+   * playhead on it, so a preview drag or the inspector edits that key (keyframes decision 1). */
+  export function gotoKey(direction: 1 | -1): boolean {
+    const current = keyframes.find((k) => k.id === selectedKeyId);
+    const key = stepKey(keyframes, playheadMs, direction, current?.lane_id ?? null);
+    if (key === null || key.t_ms === null) return false;
+    selectItem("key", key.id, key.t_ms);
+    return true;
+  }
+
+  /** Select a key or reaction alone and put the playhead on it. */
+  function selectItem(kind: "key" | "reaction", id: string, t: number): void {
+    selectedKeyId = kind === "key" ? id : null;
+    selectedReactionId = kind === "reaction" ? id : null;
+    selectedPlacementId = null;
+    selectedAudioClipId = null;
+    selectedLaneClipId = null;
+    selectedId = null;
+    playheadMs = t;
+  }
+
   export function dropTarget(
     clientX: number,
     clientY: number,
@@ -1253,13 +1277,9 @@
       }
       const item = hitItem(x, y);
       if (item !== null) {
-        // A key or a reaction: select it (and nothing else); drag sideways to move it.
-        selectedKeyId = item.kind === "key" ? item.id : null;
-        selectedReactionId = item.kind === "reaction" ? item.id : null;
-        selectedPlacementId = null;
-        selectedAudioClipId = null;
-        selectedLaneClipId = null;
-        selectedId = null;
+        // A key or a reaction: select it (and nothing else) and put the playhead on it, so
+        // a preview drag or the inspector edits it (keyframes decision 1); drag sideways to move it.
+        selectItem(item.kind, item.id, item.t);
         drag = locked
           ? null
           : { mode: "ipress", kind: item.kind, id: item.id, fromMs: item.t, startX: x, toMs: item.t };
@@ -1484,6 +1504,7 @@
       if (d.mode === "imove") {
         const handler = d.kind === "key" ? onmovekey : onmovereaction;
         if (d.toMs !== d.fromMs && handler !== undefined) {
+          playheadMs = d.toMs; // the playhead follows the moved key
           void finish(handler(d.id, d.toMs));
         } else {
           dragUi = null;
@@ -1645,6 +1666,9 @@
       pressed={snapOn}
       onclick={toggleSnap}
     />
+    <span class="sep" aria-hidden="true"></span>
+    <IconButton icon={StepBack} label="Previous avatar key (<)" onclick={() => gotoKey(-1)} />
+    <IconButton icon={StepForward} label="Next avatar key (>)" onclick={() => gotoKey(1)} />
     <span class="spacer"></span>
     <IconButton
       icon={CircleHelp}

@@ -10,6 +10,7 @@
   } from "./api";
   import { LANE_INFO, REACTION_TYPES, laneInfo, laneLabel, reactionLabel } from "./avatarLanes";
   import { clock } from "./format";
+  import { keyNear } from "./keyNav";
   import FxSlider from "./FxSlider.svelte";
   import { Diamond, LocateFixed, Trash2, Zap } from "@lucide/svelte";
   import Banner from "./ui/Banner.svelte";
@@ -114,8 +115,8 @@
   /** Key a motion lane at the playhead with the value it already has there. */
   async function keyHere(laneId: string): Promise<void> {
     await oncommit(`Key ${laneLabel(laneId)}`, [{ op: "key_lane_by", lane_id: laneId, timeline_ms: at }]);
-    const key = keyframes.find((k) => k.lane_id === laneId && k.t_ms === at);
-    if (key !== undefined) {
+    const key = keyNear(keyframes, laneId, at);
+    if (key !== null) {
       selectedKeyId = key.id;
       selectedReactionId = null;
     }
