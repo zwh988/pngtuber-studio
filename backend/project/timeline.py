@@ -182,6 +182,10 @@ class TimelineLaneClip(BaseModel):
     in_ms: int
     out_ms: int
     source_duration_ms: int
+    # Pixel size of the recording or image (0 when its file is unknown): the preview and
+    # the export fit the picture into the frame from it.
+    media_width: int = 0
+    media_height: int = 0
     x: float
     y: float
     scale: float
@@ -220,6 +224,16 @@ def _build_lane_clips(
                 in_ms=clip.in_ms,
                 out_ms=clip.out_ms,
                 source_duration_ms=source.duration_ms if source is not None else 0,
+                media_width=(
+                    source.width if source is not None else image.width if image is not None else 0
+                ),
+                media_height=(
+                    source.height
+                    if source is not None
+                    else image.height
+                    if image is not None
+                    else 0
+                ),
                 x=clip.x,
                 y=clip.y,
                 scale=clip.scale,

@@ -93,3 +93,62 @@ export function withLaneTrim(clip: TimelineLaneClip, edge: "start" | "end", ms: 
 export function laneEndMs(clips: TimelineLaneClip[]): number {
   return Math.max(0, ...clips.map((c) => c.end_ms));
 }
+
+/**
+ * Lane clips showing at timeline time `t`, bottom lane first (so later ones draw on top).
+ * Hidden lanes, missing files and clips not on a known lane are left out.
+ */
+export function activeLaneClips(
+  clips: TimelineLaneClip[],
+  lanes: { id: string; hidden: boolean }[],
+  t: number,
+): TimelineLaneClip[] {
+  const order = new Map(lanes.filter((lane) => !lane.hidden).map((lane) => [lane.id, lanes.indexOf(lane)]));
+  return clips
+    .filter((c) => order.has(c.lane_id) && !c.missing && c.timeline_ms <= t && t < c.end_ms)
+    .sort((a, b) => (order.get(a.lane_id) ?? 0) - (order.get(b.lane_id) ?? 0));
+}
+
+/** Lane clips (visible, file present) starting within `aheadMs` after `t`: worth preloading. */
+export function upcomingLaneClips(
+  clips: TimelineLaneClip[],
+  lanes: { id: string; hidden: boolean }[],
+  t: number,
+  aheadMs: number,
+): TimelineLaneClip[] {
+  const shown = new Set(lanes.filter((lane) => !lane.hidden).map((lane) => lane.id));
+  return clips.filter((c) => shown.has(c.lane_id) && !c.missing && c.timeline_ms > t && c.timeline_ms <= t + aheadMs);
+}
+
+/** Time in the recording (ms) a lane clip shows at timeline time `t`. */
+export function laneSourceMs(clip: TimelineLaneClip, t: number): number {
+  return clip.in_ms + (t - clip.timeline_ms);
+}
+
+export type PipRect = { left: number; top: number; width: number; height: number };
+
+/**
+ * Where a lane clip's picture goes in a frame `frameW` x `frameH` (px, frame at 0,0): fitted
+ * into the frame (contain) like the main footage, times `scale`, centred at (x, y) as fractions
+ * of the frame. The export uses the same maths (backend/export/lanes.py).
+ */
+export function pipRect(
+  frameW: number,
+  frameH: number,
+  mediaW: number,
+  mediaH: number,
+  clip: { x: number; y: number; scale: number },
+): PipRect {
+  if (frameW <= 0 || frameH <= 0 || mediaW <= 0 || mediaH <= 0) {
+    return { left: 0, top: 0, width: 0, height: 0 };
+  }
+  const fit = Math.min(frameW / mediaW, frameH / mediaH) * clip.scale;
+  const width = mediaW * fit;
+  const height = mediaH * fit;
+  return {
+    left: clip.x * frameW - width / 2,
+    top: clip.y * frameH - height / 2,
+    width,
+    height,
+  };
+}

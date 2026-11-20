@@ -144,6 +144,7 @@ def test_round_trip_and_timeline_state() -> None:
         ("title.png", 2000, 7000, False),
     ]
     assert state.lane_clips[1].source_duration_ms == 0
+    assert (state.lane_clips[0].media_width, state.lane_clips[1].media_height) == (1920, 200)
     assert state.other_track_clips == 0
 
 

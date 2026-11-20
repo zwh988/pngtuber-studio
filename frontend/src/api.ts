@@ -226,6 +226,9 @@ export type TimelineLaneClip = {
   in_ms: number;
   out_ms: number;
   source_duration_ms: number;
+  /** Pixel size of the recording or image (0 when unknown). */
+  media_width: number;
+  media_height: number;
   x: number;
   y: number;
   scale: number;

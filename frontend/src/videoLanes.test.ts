@@ -1,6 +1,10 @@
 import { describe, expect, it } from "vitest";
 import type { TimelineLaneClip } from "./api";
 import {
+  activeLaneClips,
+  laneSourceMs,
+  pipRect,
+  upcomingLaneClips,
   VIDEO_ADD_H,
   VIDEO_GAP,
   VIDEO_LANE_H,
@@ -24,6 +28,8 @@ function clip(id: string, lane: string, start: number, inMs: number, outMs: numb
     in_ms: inMs,
     out_ms: outMs,
     source_duration_ms: 10_000,
+    media_width: 1920,
+    media_height: 1080,
     x: 0.5,
     y: 0.5,
     scale: 1,
@@ -85,5 +91,38 @@ describe("trim", () => {
     expect(withLaneTrim(a, "start", 1500)).toMatchObject({ timeline_ms: 1500, in_ms: 2500 });
     expect(withLaneTrim(a, "end", 2500)).toMatchObject({ end_ms: 2500, out_ms: 3500 });
     expect(laneEndMs([a, clip("b", "L", 5000, 0, 1000)])).toBe(6000);
+  });
+});
+
+describe("preview", () => {
+  const lanes = [
+    { id: "L1", hidden: false },
+    { id: "L2", hidden: false },
+    { id: "L3", hidden: true },
+  ];
+  const clips = [
+    clip("top", "L2", 1000, 0, 2000),
+    clip("bottom", "L1", 0, 0, 5000),
+    clip("hidden", "L3", 0, 0, 5000),
+    clip("gone", "L1", 6000, 0, 1000, { missing: true }),
+    clip("later", "L1", 5000, 0, 1000),
+  ];
+
+  it("lists the clips showing now, bottom lane first", () => {
+    expect(activeLaneClips(clips, lanes, 1500).map((c) => c.id)).toEqual(["bottom", "top"]);
+    expect(activeLaneClips(clips, lanes, 3000).map((c) => c.id)).toEqual(["bottom"]);
+    expect(activeLaneClips(clips, lanes, 6500).map((c) => c.id)).toEqual([]);
+    expect(upcomingLaneClips(clips, lanes, 4000, 1500).map((c) => c.id)).toEqual(["later"]);
+  });
+
+  it("maps timeline time into the recording", () => {
+    expect(laneSourceMs(clip("a", "L", 1000, 2000, 4000), 1500)).toBe(2500);
+  });
+
+  it("fits the picture into the frame, scaled around its centre", () => {
+    expect(pipRect(1920, 1080, 1280, 720, { x: 0.5, y: 0.5, scale: 1 })).toEqual({ left: 0, top: 0, width: 1920, height: 1080 });
+    expect(pipRect(1920, 1080, 1000, 1000, { x: 0.5, y: 0.5, scale: 1 })).toEqual({ left: 420, top: 0, width: 1080, height: 1080 });
+    expect(pipRect(1920, 1080, 1920, 1080, { x: 0.75, y: 0.25, scale: 0.5 })).toEqual({ left: 960, top: 0, width: 960, height: 540 });
+    expect(pipRect(0, 1080, 1920, 1080, { x: 0.5, y: 0.5, scale: 1 }).width).toBe(0);
   });
 });

@@ -44,6 +44,7 @@
   import { clock } from "./format";
   import { lufsText } from "./loudness";
   import AvatarOverlay from "./AvatarOverlay.svelte";
+  import LaneLayers from "./LaneLayers.svelte";
   import AvatarPanel from "./AvatarPanel.svelte";
   import LineBank from "./LineBank.svelte";
   import VoiceFx from "./VoiceFx.svelte";
@@ -996,6 +997,13 @@
               onstep={stepBy}
             >
               {#snippet overlay()}
+                <LaneLayers
+                  clips={timeline?.lane_clips ?? []}
+                  lanes={timeline?.video_lanes ?? []}
+                  {playheadMs}
+                  {playing}
+                  {graph}
+                />
                 <AvatarOverlay
                   track={avatarTrack}
                   {playheadMs}
