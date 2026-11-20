@@ -129,7 +129,8 @@ Done when: a fresh install works from `install.bat` to a finished export.
 Task file: `docs/tasks/M8-tracks-and-media.md` (decisions settled 2026-11-20). One branch per part.
 
 - [x] M8-1 Audio lanes: music and sound effects dragged from Explorer onto several audio lanes, at timeline times (not anchored), level, fades, mute, solo; preview and export (branch `m8-1-audio-lanes`)
-- [ ] M8-2 Video lanes: upper lanes with clips and stills at timeline times, picture-in-picture (position, scale, opacity), their own sound at a level
+- [x] M8-2 Video lanes: upper lanes with clips and stills at timeline times, picture-in-picture (position, scale, opacity), their own sound at a level; also split, snap, preview handles, freeze frames, the avatar's layer, the timeline running to its last clip (branch `m8-2-video-lanes`)
+- [ ] M8-4 Audio FX on audio clips: one FX chain per clip (user 2026-11-20)
 - [ ] M8-3 PNG sequences: a folder of PNGs plus a frame rate as a video source on a lane
 
 Done when: the acceptance checks in the task file pass.
