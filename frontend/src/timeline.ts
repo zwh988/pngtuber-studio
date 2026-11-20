@@ -71,7 +71,8 @@ export function trimTarget(clip: TimelineClip, edge: "in" | "out", timelineMs: n
   if (edge === "in") {
     return Math.min(Math.max(snapped, 0), clip.out_ms - minLength);
   }
-  const sourceEnd = clip.source === null ? clip.out_ms : clip.source.duration_ms;
+  // A freeze frame's hold range is not bound by its recording.
+  const sourceEnd = clip.freeze_ms !== null ? Infinity : clip.source === null ? clip.out_ms : clip.source.duration_ms;
   return Math.max(Math.min(snapped, sourceEnd), clip.in_ms + minLength);
 }
 

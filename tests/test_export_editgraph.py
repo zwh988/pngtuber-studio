@@ -239,3 +239,45 @@ def test_limit_clips_cuts_the_timeline_at_the_limit() -> None:
     assert len(proj.clips) == 4  # the input is not changed
     with pytest.raises(ExportError):
         limit_clips(proj, 0)
+
+
+FROZEN = [clip("a", RED, 0, 500), clip("f", RED, 0, 1000, freeze_ms=500), clip("b", RED, 500, 1000)]
+
+
+def test_a_freeze_frame_reads_one_frame_clones_it_and_is_silent() -> None:
+    graph = build_edit_graph(project(FROZEN), PATHS, FMT)
+    assert (graph.frames, graph.duration_ms) == (120, 2000)
+    assert graph.inputs[1].args()[:4] == ["-ss", "0.500", "-t", "0.250"]
+    v1 = graph.filters[2]
+    assert v1.startswith("[1:v:0]trim=end_frame=1,setpts=")
+    assert "tpad=stop_mode=clone:stop=60,trim=end_frame=60" in v1
+    assert graph.filters[3] == "anullsrc=r=48000:cl=stereo,atrim=end_sample=48000[a1]"
+
+
+@needs_ffmpeg
+def test_real_ffmpeg_holds_the_frame_for_its_length(tmp_path: Path) -> None:
+    paths = make_footage(tmp_path / "footage")
+    graph = build_edit_graph(project(FROZEN), paths, FMT)
+    script = tmp_path / "graph.txt"
+    script.write_text(graph.script(), encoding="utf-8")
+    dest = tmp_path / "frozen.mp4"
+    run(edited_video_args(FFMPEG, graph, script, dest, FMT))
+    raw = run([
+        str(FFMPEG), "-v", "error", "-i", str(dest), "-vf", "scale=16:9:flags=area",
+        "-f", "rawvideo", "-pix_fmt", "rgb24", "-",
+    ]).stdout  # fmt: skip
+    frames = np.frombuffer(raw, dtype=np.uint8).reshape(-1, 9, 16, 3).astype(int)
+    assert frames.shape[0] == 120
+    assert frames[60, 4, 8, 0] > 150  # the hold shows the red frame
+    pcm = run([
+        str(FFMPEG), "-v", "error", "-i", str(dest), "-ac", "1", "-f", "f32le", "-",
+    ]).stdout  # fmt: skip
+    mono = np.frombuffer(pcm, dtype=np.float32)
+
+    def rms(a_ms: int, b_ms: int) -> float:
+        part = mono[sample_count(a_ms) : sample_count(b_ms)]
+        return float(np.sqrt(np.mean(part**2)))
+
+    assert rms(100, 400) > 0.05
+    assert rms(700, 1300) < 0.01  # the hold is silent
+    assert rms(1600, 1900) > 0.05

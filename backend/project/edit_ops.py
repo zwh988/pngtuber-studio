@@ -41,7 +41,7 @@ from backend.project.avatar_commands import (
 )
 from backend.project.clip_commands import AddClip, RemoveClip, ReorderClip, SetSpeed
 from backend.project.commands import Command, CommandError
-from backend.project.cut_commands import RippleDelete, SplitClip, TrimClip
+from backend.project.cut_commands import FreezeClip, RippleDelete, SplitClip, TrimClip
 from backend.project.export_commands import SetExportSettings
 from backend.project.placement_commands import (
     AddPlacement,
@@ -97,6 +97,14 @@ class SplitClipOp(_Op):
     op: Literal["split_clip"] = "split_clip"
     timeline_ms: int
     right_clip_id: str | None = None
+
+
+class FreezeClipOp(_Op):
+    op: Literal["freeze_clip"] = "freeze_clip"
+    timeline_ms: int
+    hold_ms: int = Field(default=2000, ge=40, le=600_000)
+    freeze_clip_id: str | None = Field(default=None, pattern=r"^[0-9a-f]{12}$")
+    right_clip_id: str | None = Field(default=None, pattern=r"^[0-9a-f]{12}$")
 
 
 class TrimClipOp(_Op):
@@ -423,6 +431,7 @@ EditOp = Annotated[
     | SetSpeedOp
     | ReorderClipOp
     | SplitClipOp
+    | FreezeClipOp
     | TrimClipOp
     | RippleDeleteOp
     | AddPlacementOp
@@ -486,6 +495,13 @@ def build_command(op: EditOp) -> Command:
         return ReorderClip(op.clip_id, op.new_position)
     if isinstance(op, SplitClipOp):
         return SplitClip(op.timeline_ms, right_clip_id=op.right_clip_id)
+    if isinstance(op, FreezeClipOp):
+        return FreezeClip(
+            op.timeline_ms,
+            op.hold_ms,
+            freeze_clip_id=op.freeze_clip_id,
+            right_clip_id=op.right_clip_id,
+        )
     if isinstance(op, TrimClipOp):
         return TrimClip(op.clip_id, op.edge, op.source_ms)
     if isinstance(op, RippleDeleteOp):

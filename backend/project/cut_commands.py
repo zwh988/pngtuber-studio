@@ -51,6 +51,21 @@ def _snap_source(source: Source, ms: int) -> int:
     return min(snapped, source.duration_ms)
 
 
+# How long a freeze frame's hold range may get (ms): it is not bound by its recording.
+FREEZE_RANGE_MAX_MS = 24 * 60 * 60 * 1000
+# Length of a new freeze frame (ms).
+FREEZE_DEFAULT_MS = 2000
+
+
+def _domain(project: Project, clip: Clip) -> Source:
+    """The time range a clip's in/out points live in: its recording, or for a freeze
+    frame a hold range (same frame grid) that is not bound by the recording's end."""
+    _, source = _find_source(project, clip.source_id)
+    if clip.freeze_ms is None:
+        return source
+    return source.model_copy(update={"duration_ms": FREEZE_RANGE_MAX_MS})
+
+
 def _clamped_cut(source: Source, clip: Clip, ms: int) -> int:
     """Snapped cut point, kept inside the clip's own ``[in_ms, out_ms]``."""
     return min(max(_snap_source(source, ms), clip.in_ms), clip.out_ms)
@@ -142,7 +157,7 @@ class SplitClip(Command):
         if any(c.id == self.right_clip_id for c in project.clips):
             raise CommandError(f"clip id {self.right_clip_id!r} already exists")
         clip = project.clips[span.index]
-        _, source = _find_source(project, clip.source_id)
+        source = _domain(project, clip)
         anchor = to_source(project.clips, self.timeline_ms, spans=spans)
         if anchor is None:
             raise CommandError(f"time {self.timeline_ms} ms is outside the timeline")
@@ -161,6 +176,97 @@ class SplitClip(Command):
             raise CommandError("nothing to restore: command was not applied")
         _, clip = _find_timeline_clip(project, self._left_id)
         _unsplit(project, clip, self.right_clip_id, self._old_out, self._moved)
+
+
+# --------------------------------------------------------------------------
+# FreezeClip
+# --------------------------------------------------------------------------
+
+
+class FreezeClip(Command):
+    """Hold the frame under ``timeline_ms`` for ``hold_ms`` (M8-2 addition).
+
+    The clip is split at the playhead (snapped to its frame grid) and a freeze
+    frame of that frame goes in between; everything after it moves later, as after
+    any edit of the main footage. At a clip's first frame the hold goes before the
+    clip, at its last frame after it. Items anchored after the cut move to the right
+    half, as with a split; nothing is orphaned. A freeze frame cannot be frozen.
+    """
+
+    def __init__(
+        self,
+        timeline_ms: int,
+        hold_ms: int = FREEZE_DEFAULT_MS,
+        *,
+        freeze_clip_id: str | None = None,
+        right_clip_id: str | None = None,
+    ) -> None:
+        if not 1 <= hold_ms <= FREEZE_RANGE_MAX_MS:
+            raise CommandError("the freeze frame length is out of range")
+        self.timeline_ms = timeline_ms
+        self.hold_ms = hold_ms
+        self.freeze_clip_id = freeze_clip_id or new_id()
+        self.right_clip_id = right_clip_id or new_id()
+        self._left_id: str | None = None
+        self._old_out = 0
+        self._moved: list[AnchoredItem] | None = None
+
+    @property
+    def label(self) -> str:
+        return "Freeze frame"
+
+    def apply(self, project: Project) -> None:
+        spans = clip_spans(project.clips)
+        span = next(
+            (s for s in spans if s.start_ms <= self.timeline_ms < s.end_ms), None
+        )
+        if span is None:
+            raise CommandError(f"time {self.timeline_ms} ms is outside the timeline")
+        for new in (self.freeze_clip_id, self.right_clip_id):
+            if any(c.id == new for c in project.clips):
+                raise CommandError(f"clip id {new!r} already exists")
+        clip = project.clips[span.index]
+        if clip.freeze_ms is not None:
+            raise CommandError("that is already a freeze frame")
+        _, source = _find_source(project, clip.source_id)
+        anchor = to_source(project.clips, self.timeline_ms, spans=spans)
+        if anchor is None:
+            raise CommandError(f"time {self.timeline_ms} ms is outside the timeline")
+        point = _clamped_cut(source, clip, anchor.source_ms)
+        minimum = _min_clip_ms(source)
+        hold = Clip(
+            id=self.freeze_clip_id,
+            source_id=clip.source_id,
+            in_ms=0,
+            out_ms=self.hold_ms,
+            track=clip.track,
+            overlay=clip.overlay,
+            effects=[e.model_copy(deep=True) for e in clip.effects],
+            freeze_ms=point,
+        )
+        self._left_id = clip.id
+        self._old_out = clip.out_ms
+        if point - clip.in_ms < minimum:  # the clip's first frame: hold before it
+            hold.freeze_ms = clip.in_ms
+            project.clips.insert(span.index, hold)
+            self._moved = None
+        elif clip.out_ms - point < minimum:  # its last frame: hold after it
+            hold.freeze_ms = max(clip.in_ms, clip.out_ms - minimum)
+            project.clips.insert(span.index + 1, hold)
+            self._moved = None
+        else:
+            self._moved = _split_clip(
+                project, span.index, clip, point, point, self.right_clip_id
+            )
+            project.clips.insert(span.index + 1, hold)
+
+    def revert(self, project: Project) -> None:
+        if self._left_id is None:
+            raise CommandError("nothing to restore: command was not applied")
+        project.clips = [c for c in project.clips if c.id != self.freeze_clip_id]
+        if self._moved is not None:
+            _, clip = _find_timeline_clip(project, self._left_id)
+            _unsplit(project, clip, self.right_clip_id, self._old_out, self._moved)
 
 
 # --------------------------------------------------------------------------
@@ -194,7 +300,7 @@ class TrimClip(Command):
         if self.edge not in ("in", "out"):
             raise CommandError(f"edge must be 'in' or 'out', not {self.edge!r}")
         _, clip = _find_timeline_clip(project, self.clip_id)
-        _, source = _find_source(project, clip.source_id)
+        source = _domain(project, clip)
         value = _snap_source(source, self.source_ms)
         minimum = _min_clip_ms(source)
         cut: tuple[int, int] | None  # source range that is trimmed away
@@ -312,7 +418,7 @@ class RippleDelete(Command):
             if span.end_ms <= self.start_ms or span.start_ms >= self.end_ms:
                 continue
             clip = project.clips[span.index]
-            _, source = _find_source(project, clip.source_id)
+            source = _domain(project, clip)
             minimum = _min_clip_ms(source)
             covers_left = self.start_ms <= span.start_ms
             covers_right = self.end_ms >= span.end_ms

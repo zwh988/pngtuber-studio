@@ -184,6 +184,8 @@ class SetSpeed(Command):
             raise CommandError(
                 f"speed {self.speed} is outside {SPEED_MIN} to {SPEED_MAX}"
             )
+        if clip.freeze_ms is not None:
+            raise CommandError("a freeze frame has no speed: trim it to change its length")
         if self.speed == clip.speed:
             raise CommandError(f"clip speed is already {self.speed}")
         self._old_speed = clip.speed

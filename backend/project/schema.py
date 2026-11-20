@@ -168,11 +168,17 @@ class Clip(_Model):
     track: int = Field(default=0, ge=0)
     overlay: bool = True
     effects: list[EffectSpec] = Field(default_factory=list)
+    # Freeze frame (M8-2 addition): the clip holds this one frame of its recording
+    # (ms into the recording), silently. Its in_ms/out_ms are then a plain hold time
+    # range at 1x, so anchors, splits and trims work on it like on any clip.
+    freeze_ms: Ms | None = None
 
     @model_validator(mode="after")
     def _out_after_in(self) -> "Clip":
         if self.out_ms <= self.in_ms:
             raise ValueError("out_ms must be greater than in_ms")
+        if self.freeze_ms is not None and self.speed != 1.0:
+            raise ValueError("a freeze frame plays at 1x")
         return self
 
 

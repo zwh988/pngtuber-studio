@@ -132,6 +132,8 @@ export type TimelineClip = {
   speed: number;
   overlay: boolean;
   source: TimelineSource | null;
+  /** A freeze frame: the recording frame it holds (ms); its in_ms/out_ms are then a hold range. */
+  freeze_ms: number | null;
 };
 
 export type TimelineProblem = {
@@ -368,6 +370,7 @@ export type EditOp =
   | { op: "set_speed"; clip_id: string; speed: number }
   | { op: "reorder_clip"; clip_id: string; new_position: number }
   | { op: "split_clip"; timeline_ms: number; right_clip_id?: string | null }
+  | { op: "freeze_clip"; timeline_ms: number; hold_ms?: number; freeze_clip_id?: string | null; right_clip_id?: string | null }
   | { op: "trim_clip"; clip_id: string; edge: "in" | "out"; source_ms: number }
   | { op: "ripple_delete"; start_ms: number; end_ms: number; right_clip_id?: string | null }
   | { op: "add_placement"; line_id: string; timeline_ms: number; placement_id?: string | null }

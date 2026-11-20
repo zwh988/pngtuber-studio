@@ -9,6 +9,9 @@ then padded or cut to exactly its number of output frames. The audio is sped up 
 ``atempo`` (pitch kept, as in the preview), resampled to 48 kHz stereo and padded or
 cut to exactly its number of samples. A clip whose source has no audio gets silence.
 
+A freeze frame (``Clip.freeze_ms``) reads a moment from its frame, keeps one frame,
+clones it to the clip's length (the same ``tpad`` that pads every clip) and is silent.
+
 Frame and sample counts come from the clip's timeline start and end
 (``count(end) - count(start)``), so the totals equal the timeline length and the cuts
 never drift, however many clips there are. The clips are joined with ``concat``.
@@ -36,6 +39,8 @@ VIDEO_ENCODE_ARGS: tuple[str, ...] = (
 )  # fmt: skip
 AUDIO_ENCODE_ARGS: tuple[str, ...] = ("-c:a", "aac", "-b:a", "192k", "-ar", str(SAMPLE_RATE))
 VIDEO_LABEL = "vedit"
+# How much of the recording a freeze frame's input decodes (ms): enough for one frame.
+FREEZE_READ_MS = 250
 AUDIO_LABEL = "aedit"
 
 
@@ -174,13 +179,22 @@ def build_edit_graph(
             continue
         k = len(inputs)
         index = first_input + k
-        inputs.append(ClipInput(clip.id, path, clip.in_ms, clip.out_ms - clip.in_ms))
+        frozen = clip.freeze_ms is not None
+        if frozen:
+            # A freeze frame: decode a moment from its frame, keep that one frame and
+            # clone it to the clip's length below; its sound is silence.
+            inputs.append(ClipInput(clip.id, path, clip.freeze_ms or 0, FREEZE_READ_MS))
+        else:
+            inputs.append(
+                ClipInput(clip.id, path, clip.in_ms, clip.out_ms - clip.in_ms)
+            )
         speed = speed_fraction(clip.speed)
         try:
             effects = [video_filter_for(e.type, e.params) for e in clip.effects]
         except ClipEffectError as exc:
             raise ExportError(str(exc)) from exc
         video = [
+            *(["trim=end_frame=1"] if frozen else []),
             f"setpts=(PTS-STARTPTS)*{speed.denominator}/{speed.numerator}",
             f"fps={fmt.fps_text}",
             f"scale={w}:{h}:force_original_aspect_ratio=decrease",
@@ -200,7 +214,7 @@ def build_edit_graph(
             f"atrim=end_sample={samples}",
             "asetpts=PTS-STARTPTS",
         ]
-        if source.audio_tracks > 0:
+        if source.audio_tracks > 0 and not frozen:
             audio = ["asetpts=PTS-STARTPTS", *atempo_chain(clip.speed), *tail]
             filters.append(f"[{index}:a:0]" + ",".join(audio) + f"[a{k}]")
         else:

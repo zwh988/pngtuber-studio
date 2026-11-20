@@ -53,8 +53,11 @@
   const lastMs = $derived(Math.max(durationMs, endMs ?? 0));
   /** Past the end of the footage: no main picture (black), only lanes and the avatar. */
   const beyond = $derived(lastMs > durationMs && playheadMs >= durationMs);
-  /** Playback past the footage: the wall-clock time and playhead it started from. */
-  let tail: { wall: number; ms: number } | null = null;
+  /**
+   * Playback the wall clock drives instead of the video: a freeze frame (the video is paused on
+   * its frame) or past the end of the footage. From playhead `ms` at time `wall` up to `until`.
+   */
+  let wallClock: { wall: number; ms: number; until: number } | null = null;
 
   function setPlayhead(ms: number): void {
     const rounded = Math.round(ms);
@@ -65,7 +68,7 @@
   function stop(): void {
     cancelAnimationFrame(frame);
     pending = null;
-    tail = null;
+    wallClock = null;
     playing = false;
     video?.pause();
   }
@@ -112,7 +115,26 @@
       return;
     }
     curIdx = i;
-    show(clip, toSource(clip, timelineMs), false);
+    show(clip, clip.freeze_ms ?? toSource(clip, timelineMs), false);
+  }
+
+  /** Start playing clip `i` from timeline time `t`: a freeze frame runs on the wallClock. */
+  function enter(i: number, t: number): void {
+    const clip = clips[i];
+    if (clip === undefined) {
+      stop();
+      return;
+    }
+    curIdx = i;
+    setPlayhead(t);
+    if (clip.freeze_ms !== null) {
+      video?.pause();
+      show(clip, clip.freeze_ms, false);
+      wallClock = { wall: performance.now(), ms: t, until: clip.end_ms };
+      return;
+    }
+    wallClock = null;
+    show(clip, toSource(clip, t), true);
   }
 
   function hop(clip: TimelineClip, sourceMs: number): void {
@@ -125,10 +147,15 @@
       video.currentTime = (clip.out_ms - 1) / 1000;
       setPlayhead(durationMs);
       if (lastMs > durationMs) {
-        tail = { wall: performance.now(), ms: durationMs }; // play on past the footage
+        wallClock = { wall: performance.now(), ms: durationMs, until: lastMs }; // play on past the footage
       } else {
         stop();
       }
+      return;
+    }
+    if (next.freeze_ms !== null) {
+      video.pause();
+      enter(curIdx + 1, next.start_ms);
       return;
     }
     curIdx += 1;
@@ -147,13 +174,22 @@
       return;
     }
     frame = requestAnimationFrame(tick);
-    if (tail !== null) {
-      const t = tail.ms + (performance.now() - tail.wall);
-      if (t >= lastMs) {
+    if (wallClock !== null) {
+      const t = wallClock.ms + (performance.now() - wallClock.wall);
+      if (t < wallClock.until) {
+        setPlayhead(t);
+        return;
+      }
+      const until = wallClock.until;
+      wallClock = null;
+      if (until >= lastMs) {
         setPlayhead(lastMs);
         stop();
+      } else if (until >= durationMs) {
+        setPlayhead(until);
+        wallClock = { wall: performance.now(), ms: until, until: lastMs }; // past the footage
       } else {
-        setPlayhead(t);
+        enter(clipIndexAt(clips, until), until); // the clip after a freeze frame
       }
       return;
     }
@@ -199,11 +235,11 @@
     routeAudio();
     const t = playheadMs >= lastMs - 1 ? 0 : Math.max(0, playheadMs);
     if (t >= durationMs) {
-      // Past the footage: only the clock runs.
+      // Past the footage: only the wallClock runs.
       video?.pause();
       playing = true;
       setPlayhead(t);
-      tail = { wall: performance.now(), ms: t };
+      wallClock = { wall: performance.now(), ms: t, until: lastMs };
       cancelAnimationFrame(frame);
       frame = requestAnimationFrame(tick);
       return;
@@ -213,10 +249,8 @@
     if (clip === undefined) {
       return;
     }
-    curIdx = i;
     playing = true;
-    setPlayhead(t);
-    show(clip, toSource(clip, t), true);
+    enter(i, t);
     if (playing) {
       cancelAnimationFrame(frame);
       frame = requestAnimationFrame(tick);

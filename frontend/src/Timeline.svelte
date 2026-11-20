@@ -555,7 +555,7 @@
       const missing = clip.source?.file_missing ?? true;
       ctx.globalAlpha = dragUi?.kind === "move" && dragUi.clipId === clip.id ? 0.35 : 1;
       const selected = clip.id === selectedId;
-      ctx.fillStyle = tones.get(clip.source_id) === 1 ? c.clipAlt : c.clip;
+      ctx.fillStyle = clip.freeze_ms !== null ? c.freeze : tones.get(clip.source_id) === 1 ? c.clipAlt : c.clip;
       if (selected) {
         ctx.filter = "brightness(1.2)";
       }
@@ -577,7 +577,8 @@
         ctx.fillStyle = c.clipText;
         ctx.textBaseline = "top";
         ctx.font = font(11, 600);
-        ctx.fillText(missing ? `${label(clip)} (missing)` : label(clip), x0 + 6, LANE_Y + 6);
+        const name = clip.freeze_ms !== null ? `Freeze ${clock(clip.freeze_ms)} · ${label(clip)}` : label(clip);
+        ctx.fillText(missing ? `${name} (missing)` : name, x0 + 6, LANE_Y + 6);
         ctx.font = font(11);
         ctx.fillStyle = c.clipTextMuted;
         ctx.fillText(clock(clip.duration_ms), x0 + 6, LANE_Y + 22);

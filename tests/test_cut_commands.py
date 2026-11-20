@@ -7,8 +7,9 @@ exactly on the frame grid; 1008 snaps to 1000 and 1010 snaps to 1017.
 import pytest
 
 from backend.edl.timemap import clip_spans, timeline_duration, to_timeline
+from backend.project.clip_commands import SetSpeed
 from backend.project.commands import CommandError, CommandStack
-from backend.project.cut_commands import RippleDelete, SplitClip, TrimClip
+from backend.project.cut_commands import FreezeClip, RippleDelete, SplitClip, TrimClip
 from backend.project.schema import (
     Anchor,
     Clip,
@@ -473,3 +474,59 @@ def test_ripple_and_trim_in_a_group_undo_together() -> None:
     assert layout(project) == [(cid(1), 1000, 4000), (cid(2), 0, 1000)]
     assert stack.undo() == "Cut and trim"
     assert project.model_dump() == before
+
+
+# --------------------------------------------------------------------------
+# FreezeClip (M8-2 addition)
+# --------------------------------------------------------------------------
+
+
+def test_freeze_splits_and_inserts_a_hold_and_anchors_follow() -> None:
+    project = two_clips()
+    add_item(project, "placement", 1, 3000, 70)  # after the cut: moves right
+    add_item(project, "keyframe", 1, 500, 71)  # before it: stays
+    add_item(project, "reaction", 2, 1000, 72)  # in clip B: shifts with it
+    stack = CommandStack(project)
+    stack.execute(FreezeClip(1000, 2000, freeze_clip_id=cid(8), right_clip_id=cid(9)))
+    assert layout(project) == [
+        (cid(1), 0, 1000),
+        (cid(8), 0, 2000),
+        (cid(9), 1000, 4000),
+        (cid(2), 0, 2000),
+    ]
+    hold = project.clips[1]
+    assert hold.freeze_ms == 1000 and hold.speed == 1.0
+    assert spans(project) == [(0, 1000), (1000, 3000), (3000, 6000), (6000, 8000)]
+    assert anchors_of(project) == [(cid(9), 3000), (cid(1), 500), (cid(2), 1000)]
+    assert to_timeline(project.clips, project.placements[0].anchor) == 5000
+    stack.undo()
+    assert layout(project) == [(cid(1), 0, 4000), (cid(2), 0, 2000)]
+    assert anchors_of(project) == [(cid(1), 3000), (cid(1), 500), (cid(2), 1000)]
+
+
+def test_freeze_at_a_clip_edge_inserts_without_a_split() -> None:
+    project = two_clips()
+    stack = CommandStack(project)
+    stack.execute(FreezeClip(4000, 500, freeze_clip_id=cid(8)))  # first frame of B
+    assert layout(project)[1:3] == [(cid(8), 0, 500), (cid(2), 0, 2000)]
+    assert project.clips[1].freeze_ms == 0
+    stack.undo()
+    stack.execute(FreezeClip(5995, 500, freeze_clip_id=cid(8)))  # last frame of B
+    assert layout(project)[-1] == (cid(8), 0, 500)
+    assert project.clips[-1].freeze_ms == 1983  # 2000 minus one 60 fps frame
+
+
+def test_a_hold_trims_past_its_recording_and_refuses_speed_and_refreeze() -> None:
+    project = make_project(make_clip(1, 0, 1000), duration_ms=1000)
+    stack = CommandStack(project)
+    stack.execute(FreezeClip(500, 2000, freeze_clip_id=cid(8), right_clip_id=cid(9)))
+    stack.execute(TrimClip(cid(8), "out", 5000))  # longer than the 1 s recording
+    assert (project.clips[1].in_ms, project.clips[1].out_ms) == (0, 5000)
+    stack.execute(SplitClip(2500, right_clip_id=cid(10)))  # a hold splits like a clip
+    assert [c.freeze_ms for c in project.clips] == [None, 500, 500, None]
+    with pytest.raises(CommandError, match="already a freeze frame"):
+        stack.execute(FreezeClip(1000))
+    with pytest.raises(CommandError, match="no speed"):
+        stack.execute(SetSpeed(cid(8), 2.0))
+    with pytest.raises(ValueError, match="1x"):
+        Clip(id=cid(20), source_id=SRC, in_ms=0, out_ms=10, speed=2.0, freeze_ms=0)

@@ -591,8 +591,12 @@
   /** F: hold the frame at the playhead of the selected lane recording for 2 s, then select the hold. */
   function freezeAtPlayhead(): void {
     const shot = selectedLaneClip;
-    if (shot === null || shot.source_id === null || shot.freeze_ms !== null) {
-      notice = "Select a recording on a video lane, put the playhead on a frame, then press F.";
+    if (shot === null) {
+      freezeFootageAtPlayhead();
+      return;
+    }
+    if (shot.source_id === null || shot.freeze_ms !== null) {
+      notice = "Only a recording can be frozen: a still or a freeze frame already holds one picture.";
       return;
     }
     const holdId = newLineId();
@@ -602,6 +606,28 @@
     ]).then(() => {
       // At the clip's very start the hold keeps the clip's id.
       selectedLaneClipId = atStart ? shot.id : holdId;
+    });
+  }
+
+  /** F with no lane clip selected: hold the main footage's frame at the playhead for 2 s. */
+  function freezeFootageAtPlayhead(): void {
+    if (timeline === null) return;
+    const at = playheadMs;
+    const clip = timeline.clips[clipIndexAt(timeline.clips, at)];
+    if (clip === undefined || at >= timeline.duration_ms) {
+      notice = "Put the playhead on the footage to freeze a frame.";
+      return;
+    }
+    if (clip.freeze_ms !== null) {
+      notice = "That is already a freeze frame: trim it to make it longer or shorter.";
+      return;
+    }
+    const holdId = newLineId();
+    player?.pause();
+    void edit(() =>
+      editBatch("Freeze frame", [{ op: "freeze_clip", timeline_ms: at, freeze_clip_id: holdId }]),
+    ).then(() => {
+      selectedId = holdId;
     });
   }
 
@@ -1295,7 +1321,19 @@
           <div class="clipbar">
             {#if selectedClip !== null}
               {@const clip = selectedClip}
-              <strong>Clip {clip.position + 1}: {sourceName(clip.source_id)}</strong>
+              <strong>{clip.freeze_ms !== null ? "Freeze frame" : "Clip"} {clip.position + 1}: {sourceName(clip.source_id)}</strong>
+              {#if clip.freeze_ms !== null}
+                <span class="hint num">holds the frame at {clock(clip.freeze_ms)}; trim it to change its length</span>
+              {:else}
+              <Button
+                size="sm"
+                icon={Snowflake}
+                disabled={busy || playheadMs < clip.start_ms || playheadMs >= clip.end_ms}
+                title="Hold the frame at the playhead for 2 s; everything after it moves later (F)"
+                onclick={freezeFootageAtPlayhead}
+              >
+                Freeze frame
+              </Button>
               <label class="inline">
                 Speed
                 <select
@@ -1312,6 +1350,7 @@
                   {/each}
                 </select>
               </label>
+              {/if}
               <Button size="sm" variant="danger" icon={Trash2} disabled={busy} onclick={removeSelected}>
                 Remove clip
               </Button>
@@ -1547,7 +1586,7 @@
           <details class="keys">
             <summary>Shortcuts</summary>
             <p>
-              Space play/pause, , and . step a frame, S split at playhead (the selected audio or lane clip, else the footage), F freeze frame (the selected lane recording, at the playhead), N new voice line, G generate, Shift+G reroll, M place the selected line at the playhead, E add an expression key at the playhead (Avatar tab picks which), R drop a reaction at the playhead, Delete remove the selected clip, placed line, key or reaction,
+              Space play/pause, , and . step a frame, S split at playhead (the selected audio or lane clip, else the footage), F freeze frame at the playhead (the selected lane recording, else the footage), N new voice line, G generate, Shift+G reroll, M place the selected line at the playhead, E add an expression key at the playhead (Avatar tab picks which), R drop a reaction at the playhead, Delete remove the selected clip, placed line, key or reaction,
               [ and ] cut the selected clip's in/out at the playhead, Ctrl+Z / Ctrl+Y undo / redo.
               Drag a clip's edge to trim it, drag a clip sideways to reorder, drag a voice block to move it, drag a line from the bank onto the timeline to place it; each drag is one undo step.
               Drag the thin bars between the panels to resize them (arrow keys work when a bar is focused).

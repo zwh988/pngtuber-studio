@@ -46,6 +46,9 @@ class TimelineClip(BaseModel):
     overlay: bool
     # None when the clip points at a source that is not in the project.
     source: TimelineSource | None
+    # A freeze frame: the recording frame it holds (ms into the recording); its
+    # in_ms/out_ms are then a hold range, not recording times.
+    freeze_ms: int | None = None
 
 
 class TimelineProblem(BaseModel):
@@ -342,6 +345,7 @@ def build_timeline(
                 speed=clip.speed,
                 overlay=clip.overlay,
                 source=sources.get(clip.source_id),
+                freeze_ms=clip.freeze_ms,
             )
         )
     return TimelineState(
