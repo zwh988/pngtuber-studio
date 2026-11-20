@@ -402,6 +402,7 @@ export type EditOp =
   | { op: "set_audio_lane"; lane_id: string; name?: string; gain_db?: number; mute?: boolean; solo?: boolean }
   | { op: "move_audio_clip"; clip_id: string; timeline_ms: number; lane_id?: string | null }
   | { op: "trim_audio_clip"; clip_id: string; edge: "start" | "end"; timeline_ms: number }
+  | { op: "split_audio_clip"; clip_id: string; timeline_ms: number; right_clip_id?: string | null }
   | { op: "set_audio_clip"; clip_id: string; gain_db?: number; fade_in_ms?: number; fade_out_ms?: number }
   | { op: "remove_audio_clip"; clip_id: string }
   // Video lanes and lane clips (M8-2). Times are TIMELINE ms; clips are not anchored to footage.
@@ -423,6 +424,7 @@ export type EditOp =
   | { op: "remove_lane_clip"; clip_id: string }
   | { op: "move_lane_clip"; clip_id: string; timeline_ms: number; lane_id?: string | null }
   | { op: "trim_lane_clip"; clip_id: string; edge: "start" | "end"; timeline_ms: number }
+  | { op: "split_lane_clip"; clip_id: string; timeline_ms: number; right_clip_id?: string | null }
   | {
       op: "set_lane_clip";
       clip_id: string;

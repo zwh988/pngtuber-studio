@@ -39,6 +39,7 @@
   import { clock } from "./format";
   import { LINE_DRAG_TYPE, dropSlot, peakSpan, trimTarget, withTrim } from "./timeline";
   import { FALLBACK, readTimelineColors, type TimelineColors } from "./timelineTheme";
+  import { SNAP_PX, snapEdge, snapMove, snapPoints } from "./snap";
   import {
     ChevronDown,
     ChevronRight,
@@ -47,6 +48,7 @@
     EyeOff,
     Lock,
     LockOpen,
+    Magnet,
     Plus,
     X,
     Maximize2,
@@ -179,6 +181,38 @@
   let lanesOpen = $state(false);
   /** The how-to text under the toolbar (the "?" button). */
   let helpOpen = $state(false);
+  /** Snap dragged audio and lane clips to other clip edges and the playhead (Alt: not this drag). */
+  const SNAP_KEY = "pngtuber.timeline.snap";
+  let snapOn = $state(readSnap());
+  function readSnap(): boolean {
+    try {
+      return localStorage.getItem(SNAP_KEY) !== "off";
+    } catch {
+      return true;
+    }
+  }
+  function toggleSnap(): void {
+    snapOn = !snapOn;
+    try {
+      localStorage.setItem(SNAP_KEY, snapOn ? "on" : "off");
+    } catch {
+      // Not remembered: fine.
+    }
+  }
+  /** The times a dragged clip may snap to, or null when snapping is off for this move. */
+  function snapTargets(exceptId: string, alt: boolean): number[] | null {
+    if (!snapOn || alt) return null;
+    return snapPoints(
+      [
+        ...clips.map((c) => ({ id: c.id, start: c.start_ms, end: c.end_ms })),
+        ...placements.map((p) => ({ id: p.id, start: p.start_ms, end: p.end_ms })),
+        ...audioClips.map((a) => ({ id: a.id, start: a.timeline_ms, end: a.end_ms })),
+        ...laneClips.map((v) => ({ id: v.id, start: v.timeline_ms, end: v.end_ms })),
+      ],
+      playheadMs,
+      exceptId,
+    );
+  }
   const motionRows = $derived(lanesOpen ? MOTION_LANES.length : 1);
   const HEIGHT = $derived(MOTION_Y + motionRows * (ROW_H + 2) + 8);
   /** Width given to a placed line that has no take yet, in ms. */
@@ -971,7 +1005,7 @@
       const rect = canvas.getBoundingClientRect();
       const x = Math.min(Math.max(e.clientX - rect.left, 0), viewWidth);
       const ms = Math.round(scrollMs + x / pxPerMs);
-      playheadMs = Math.min(Math.max(ms, 0), durationMs);
+      playheadMs = Math.min(Math.max(ms, 0), contentMs);
     }
     function pointerXY(e: PointerEvent): { x: number; y: number } {
       const rect = canvas?.getBoundingClientRect();
@@ -1051,9 +1085,9 @@
     function laneLocked(laneId: string): boolean {
       return videoLanes.find((lane) => lane.id === laneId)?.locked ?? false;
     }
-    function updateLaneMove(d: Extract<LaneDrag, { mode: "vmove" }>, x: number, y: number): void {
+    function updateLaneMove(d: Extract<LaneDrag, { mode: "vmove" }>, x: number, y: number, alt: boolean): void {
       const length = d.clip.end_ms - d.clip.timeline_ms;
-      d.startMs = Math.max(0, Math.round(scrollMs + (x - d.grabDx) / pxPerMs));
+      d.startMs = snappedStart(d.clip.id, Math.max(0, Math.round(scrollMs + (x - d.grabDx) / pxPerMs)), length, alt);
       d.laneIndex = dragVideoLaneIndex(y, VIDEO_TOP, videoLanes.length);
       const target = videoLanes[d.laneIndex];
       const laneId = target?.id ?? d.clip.lane_id;
@@ -1065,9 +1099,17 @@
         fits: !(target?.locked ?? false) && fitsOnLane(laneClips, laneId, d.startMs, d.startMs + length, d.clip.id),
       };
     }
-    function updateAudioMove(d: Extract<AudioDrag, { mode: "amove" }>, x: number, y: number): void {
+    function snappedStart(clipId: string, startMs: number, length: number, alt: boolean): number {
+      const points = snapTargets(clipId, alt);
+      return points === null ? startMs : Math.round(snapMove(startMs, length, points, SNAP_PX / pxPerMs));
+    }
+    function snappedEdge(clipId: string, ms: number, alt: boolean): number {
+      const points = snapTargets(clipId, alt);
+      return points === null ? ms : snapEdge(ms, points, SNAP_PX / pxPerMs);
+    }
+    function updateAudioMove(d: Extract<AudioDrag, { mode: "amove" }>, x: number, y: number, alt: boolean): void {
       const length = d.clip.end_ms - d.clip.timeline_ms;
-      d.startMs = Math.max(0, Math.round(scrollMs + (x - d.grabDx) / pxPerMs));
+      d.startMs = snappedStart(d.clip.id, Math.max(0, Math.round(scrollMs + (x - d.grabDx) / pxPerMs)), length, alt);
       d.laneIndex = dragLaneIndex(y, AUDIO_Y, audioLanes.length);
       const laneId = audioLanes[d.laneIndex]?.id ?? d.clip.lane_id;
       dragUi = {
@@ -1279,16 +1321,16 @@
             laneIndex: Math.max(0, index),
           };
           drag = next;
-          updateLaneMove(next, x, y);
+          updateLaneMove(next, x, y, e.altKey);
         }
         return;
       }
       if (d.mode === "vmove") {
-        updateLaneMove(d, x, y);
+        updateLaneMove(d, x, y, e.altKey);
         return;
       }
       if (d.mode === "vtrim") {
-        d.ms = laneTrimTarget(d.clip, d.edge, scrollMs + x / pxPerMs, laneClips);
+        d.ms = laneTrimTarget(d.clip, d.edge, snappedEdge(d.clip.id, scrollMs + x / pxPerMs, e.altKey), laneClips);
         dragUi = { kind: "vtrim", clip: withLaneTrim(d.clip, d.edge, d.ms) };
         return;
       }
@@ -1303,16 +1345,16 @@
             laneIndex: Math.max(0, index),
           };
           drag = next;
-          updateAudioMove(next, x, y);
+          updateAudioMove(next, x, y, e.altKey);
         }
         return;
       }
       if (d.mode === "amove") {
-        updateAudioMove(d, x, y);
+        updateAudioMove(d, x, y, e.altKey);
         return;
       }
       if (d.mode === "atrim") {
-        d.ms = audioTrimTarget(d.clip, d.edge, scrollMs + x / pxPerMs, audioClips);
+        d.ms = audioTrimTarget(d.clip, d.edge, snappedEdge(d.clip.id, scrollMs + x / pxPerMs, e.altKey), audioClips);
         dragUi = { kind: "atrim", clip: withAudioTrim(d.clip, d.edge, d.ms) };
         return;
       }
@@ -1569,6 +1611,14 @@
       pressed={lanesOpen}
       onclick={() => (lanesOpen = !lanesOpen)}
     />
+    <IconButton
+      icon={Magnet}
+      label={snapOn
+        ? "Snapping on: audio and lane clips snap to clip edges and the playhead (hold Alt to drag freely)"
+        : "Snapping off: click to snap audio and lane clips to clip edges and the playhead"}
+      pressed={snapOn}
+      onclick={toggleSnap}
+    />
     <span class="spacer"></span>
     <IconButton
       icon={CircleHelp}
@@ -1584,7 +1634,7 @@
       onto the timeline to place it. Drag a recording from the Footage tab, or images and videos
       from Explorer, onto a video lane (or "+ Video lane"); they show over the main footage. Drag music or sound effects from Explorer onto an audio lane
       (or onto "+ Audio lane" for a new lane); drag an audio clip to move it, also up or down to
-      another lane, and drag its edge to trim it. Avatar keys and reactions: click to select, drag sideways to
+      another lane, and drag its edge to trim it. With the magnet on, audio and lane clips snap to clip edges and the playhead (hold Alt to drag freely); S splits the selected audio or lane clip at the playhead. Avatar keys and reactions: click to select, drag sideways to
       move. Wheel scrolls, Ctrl+wheel zooms.
     </p>
   {/if}

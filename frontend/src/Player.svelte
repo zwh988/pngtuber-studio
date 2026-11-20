@@ -10,6 +10,7 @@
   let {
     clips,
     durationMs,
+    endMs,
     playheadMs = $bindable(0),
     playing = $bindable(false),
     graph = null,
@@ -17,7 +18,13 @@
     onstep,
   }: {
     clips: TimelineClip[];
+    /** The end of the main footage. */
     durationMs: number;
+    /**
+     * The end of the whole timeline (audio and video-lane clips may run past the footage).
+     * Past the footage the main picture is black and a clock moves the playhead (M8-2).
+     */
+    endMs?: number;
     playheadMs?: number;
     /** True while the video is playing; the editor reads it to start and stop the voice. */
     playing?: boolean;
@@ -43,6 +50,11 @@
   let lastSig = "";
 
   const url = $derived(activeSourceId === null ? undefined : sourceMediaUrl(activeSourceId));
+  const lastMs = $derived(Math.max(durationMs, endMs ?? 0));
+  /** Past the end of the footage: no main picture (black), only lanes and the avatar. */
+  const beyond = $derived(lastMs > durationMs && playheadMs >= durationMs);
+  /** Playback past the footage: the wall-clock time and playhead it started from. */
+  let tail: { wall: number; ms: number } | null = null;
 
   function setPlayhead(ms: number): void {
     const rounded = Math.round(ms);
@@ -53,6 +65,7 @@
   function stop(): void {
     cancelAnimationFrame(frame);
     pending = null;
+    tail = null;
     playing = false;
     video?.pause();
   }
@@ -108,9 +121,14 @@
     }
     const next = clips[curIdx + 1];
     if (next === undefined) {
-      stop();
+      video.pause();
       video.currentTime = (clip.out_ms - 1) / 1000;
       setPlayhead(durationMs);
+      if (lastMs > durationMs) {
+        tail = { wall: performance.now(), ms: durationMs }; // play on past the footage
+      } else {
+        stop();
+      }
       return;
     }
     curIdx += 1;
@@ -129,6 +147,16 @@
       return;
     }
     frame = requestAnimationFrame(tick);
+    if (tail !== null) {
+      const t = tail.ms + (performance.now() - tail.wall);
+      if (t >= lastMs) {
+        setPlayhead(lastMs);
+        stop();
+      } else {
+        setPlayhead(t);
+      }
+      return;
+    }
     if (pending !== null) {
       return; // waiting for a source swap or a seek to land
     }
@@ -169,7 +197,17 @@
     }
     error = null;
     routeAudio();
-    const t = playheadMs >= durationMs - 1 ? 0 : Math.max(0, playheadMs);
+    const t = playheadMs >= lastMs - 1 ? 0 : Math.max(0, playheadMs);
+    if (t >= durationMs) {
+      // Past the footage: only the clock runs.
+      video?.pause();
+      playing = true;
+      setPlayhead(t);
+      tail = { wall: performance.now(), ms: t };
+      cancelAnimationFrame(frame);
+      frame = requestAnimationFrame(tick);
+      return;
+    }
     const i = clipIndexAt(clips, t);
     const clip = clips[i];
     if (clip === undefined) {
@@ -228,11 +266,11 @@
       if (!changed && ms === selfPlayhead) {
         return;
       }
-      const t = Math.min(Math.max(0, ms), durationMs);
+      const t = Math.min(Math.max(0, ms), lastMs);
       if (t !== ms) {
         setPlayhead(t);
       }
-      cueTo(t);
+      cueTo(Math.min(t, durationMs));
     });
   });
 
@@ -240,12 +278,13 @@
 </script>
 
 <div class="player">
-  <div class="stage">
+  <div class="stage" class:beyond>
     <!-- svelte-ignore a11y_media_has_caption -->
     <video
       bind:this={video}
       src={url}
       preload="auto"
+      style:visibility={beyond ? "hidden" : "visible"}
       onloadedmetadata={apply}
       onerror={() => {
         error = video?.error?.message || "The video could not be loaded.";
@@ -281,14 +320,14 @@
       type="range"
       aria-label="Playhead"
       min="0"
-      max={durationMs}
+      max={lastMs}
       step="1"
       value={playheadMs}
       oninput={(e) => scrub(e.currentTarget.valueAsNumber)}
     />
-    <span class="time num"><strong>{clock(playheadMs)}</strong> / {clock(durationMs)}</span>
+    <span class="time num"><strong>{clock(playheadMs)}</strong> / {clock(lastMs)}</span>
     <span class="info num" title="The clip under the playhead and its speed">
-      Clip {Math.min(curIdx + 1, clips.length)} of {clips.length} · {clips[curIdx]?.speed ?? 1}x
+      {#if beyond}After the footage{:else}Clip {Math.min(curIdx + 1, clips.length)} of {clips.length} · {clips[curIdx]?.speed ?? 1}x{/if}
     </span>
   </div>
   {#if error !== null}
@@ -302,6 +341,11 @@
   }
   .stage {
     position: relative;
+  }
+  /* Past the end of the footage: the frame stays, black, under the lanes and the avatar. */
+  .stage.beyond {
+    border-radius: var(--r-md);
+    background: var(--video-bg);
   }
   video {
     display: block;

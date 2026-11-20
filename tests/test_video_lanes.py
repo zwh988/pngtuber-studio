@@ -27,6 +27,7 @@ from backend.project.video_lane_commands import (
     RemoveVideoLane,
     SetLaneClip,
     SetVideoLane,
+    SplitLaneClip,
     TrimLaneClip,
     free_video_lane_from,
     next_video_lane_name,
@@ -285,6 +286,46 @@ def test_trim_still_changes_its_length_only() -> None:
     assert (c.timeline_ms, c.in_ms, c.out_ms) == (500, 0, 5500)
     stack.execute(TrimLaneClip(C1, "end", 20_000))  # a still can be any length
     assert lane_clip(project, C1).end_ms == 20_000
+
+
+def test_split_recording_and_still() -> None:
+    project = make_project()
+    stack = CommandStack(project)
+    stack.execute(
+        AddLaneClip(V2, 10_000, source_id=B_ROLL, in_ms=5000, out_ms=15_000, clip_id=C1)
+    )
+    stack.execute(SetLaneClip(C1, x=0.7, scale=0.4, opacity=0.5, gain_db=-6))
+    stack.execute(SplitLaneClip(C1, 13_000, right_clip_id=C2))
+    left, right = lane_clip(project, C1), lane_clip(project, C2)
+    assert (left.timeline_ms, left.in_ms, left.out_ms) == (10_000, 5000, 8000)
+    assert (right.timeline_ms, right.in_ms, right.out_ms) == (13_000, 8000, 15_000)
+    assert (right.x, right.scale, right.opacity, right.gain_db) == (0.7, 0.4, 0.5, -6)
+    stack.undo()
+    assert [c.id for c in project.lane_clips] == [C1]
+    stack.execute(AddLaneClip(V3, 1000, image_id=IMG, clip_id=hid(42)))  # 1000-6000
+    stack.execute(SplitLaneClip(hid(42), 2500, right_clip_id=hid(43)))
+    a, b = lane_clip(project, hid(42)), lane_clip(project, hid(43))
+    assert (a.timeline_ms, a.in_ms, a.end_ms) == (1000, 0, 2500)
+    assert (b.timeline_ms, b.in_ms, b.end_ms) == (2500, 0, 6000)
+
+
+def test_split_refusals() -> None:
+    project = make_project()
+    stack = CommandStack(project)
+    stack.execute(AddLaneClip(V2, 1000, image_id=IMG, clip_id=C1))
+    with pytest.raises(CommandError, match="not inside"):
+        stack.execute(SplitLaneClip(C1, 1020))
+    stack.execute(SetVideoLane(V2, locked=True))
+    with pytest.raises(CommandError, match="locked"):
+        stack.execute(SplitLaneClip(C1, 3000))
+    assert build_command(
+        EditBatch.model_validate(
+            {
+                "label": "x",
+                "ops": [{"op": "split_lane_clip", "clip_id": C1, "timeline_ms": 9}],
+            }
+        ).ops[0]
+    ).label == "Split clip on a video lane"
 
 
 def test_set_placement_opacity_and_sound() -> None:

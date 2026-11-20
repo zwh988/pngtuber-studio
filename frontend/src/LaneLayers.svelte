@@ -9,6 +9,7 @@
   import { imageMediaUrl, sourceMediaUrl, type TimelineLaneClip, type VideoLane } from "./api";
   import type { AudioGraph } from "./audioGraph";
   import { dbToGain } from "./audioMix";
+  import type { LaneDraft } from "./LaneHandles.svelte";
   import { activeLaneClips, laneSourceMs, pipRect, upcomingLaneClips } from "./videoLanes";
 
   let {
@@ -17,12 +18,15 @@
     playheadMs,
     playing,
     graph = null,
+    draft = null,
   }: {
     clips: TimelineLaneClip[];
     lanes: VideoLane[];
     playheadMs: number;
     playing: boolean;
     graph?: AudioGraph | null;
+    /** The selected clip's position and size while it is dragged in the preview. */
+    draft?: LaneDraft | null;
   } = $props();
 
   /** How far ahead a recording is loaded and parked at its first frame. */
@@ -99,7 +103,7 @@
 
 <div class="lanes" bind:clientWidth={boxW} bind:clientHeight={boxH} aria-hidden="true">
   {#each shown as clip (clip.id)}
-    {@const r = pipRect(boxW, boxH, clip.media_width, clip.media_height, clip)}
+    {@const r = pipRect(boxW, boxH, clip.media_width, clip.media_height, draft !== null && draft.id === clip.id ? draft : clip)}
     {#if clip.image_id !== null}
       <img
         src={imageMediaUrl(clip.image_id)}
@@ -139,6 +143,9 @@
     overflow: hidden;
     border-radius: var(--r-md);
     pointer-events: none;
+    /* Keep the per-lane z-indexes inside this layer, so the avatar and the drag
+       handles drawn after it stay on top. */
+    isolation: isolate;
   }
   img,
   video {

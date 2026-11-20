@@ -13,6 +13,7 @@ from backend.project.audio_commands import (
     RemoveAudioLane,
     SetAudioClip,
     SetAudioLane,
+    SplitAudioClip,
     TrimAudioClip,
     free_lane_from,
     lane_is_free,
@@ -357,6 +358,36 @@ def test_trim_start_keeps_the_sound_in_place() -> None:
     assert clip(project, C1).in_ms == 5000
 
 
+def test_split_keeps_the_sound_in_place_and_shares_the_fades() -> None:
+    project = make_project()
+    stack = CommandStack(project)
+    stack.execute(
+        AddAudioClip(MUSIC, LANE1, 10_000, in_ms=5000, out_ms=20_000, clip_id=C1)
+    )
+    stack.execute(SetAudioClip(C1, fade_in_ms=1000, fade_out_ms=3000))
+    stack.execute(SplitAudioClip(C1, 12_000, right_clip_id=C2))  # 2 s into the clip
+    left, right = clip(project, C1), clip(project, C2)
+    assert (left.timeline_ms, left.in_ms, left.out_ms) == (10_000, 5000, 7000)
+    assert (left.fade_in_ms, left.fade_out_ms) == (1000, 0)
+    assert (right.timeline_ms, right.in_ms, right.out_ms) == (12_000, 7000, 20_000)
+    assert (right.fade_in_ms, right.fade_out_ms, right.lane_id) == (0, 3000, LANE1)
+    stack.undo()
+    assert [c.id for c in project.audio_clips] == [C1]
+    assert clip(project, C1).out_ms == 20_000
+
+
+def test_split_shrinks_a_fade_and_refuses_outside_the_clip() -> None:
+    project = make_project()
+    stack = CommandStack(project)
+    stack.execute(AddAudioClip(MUSIC, LANE1, 0, in_ms=0, out_ms=10_000, clip_id=C1))
+    stack.execute(SetAudioClip(C1, fade_in_ms=4000))
+    stack.execute(SplitAudioClip(C1, 1000, right_clip_id=C2))
+    assert clip(project, C1).fade_in_ms == 1000
+    for at in (0, 5, 10_000, 20_000):
+        with pytest.raises(CommandError, match="not inside"):
+            stack.execute(SplitAudioClip(C2, at))
+
+
 def test_trim_end() -> None:
     project = make_project()
     stack = CommandStack(project)
@@ -431,6 +462,18 @@ def test_video_edits_leave_audio_clips_alone(command) -> None:
 
 
 # ---- edit ops ----------------------------------------------------------------------
+
+
+def test_split_audio_op() -> None:
+    command = build_command(
+        EditBatch.model_validate(
+            {
+                "label": "x",
+                "ops": [{"op": "split_audio_clip", "clip_id": C1, "timeline_ms": 5}],
+            }
+        ).ops[0]
+    )
+    assert isinstance(command, SplitAudioClip)
 
 
 def test_edit_ops_build_the_audio_commands() -> None:

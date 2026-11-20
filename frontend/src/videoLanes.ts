@@ -152,3 +152,45 @@ export function pipRect(
     height,
   };
 }
+
+/** Limits a lane clip's centre and size are kept in (as in the schema). */
+export const LANE_POS_MIN = -1;
+export const LANE_POS_MAX = 2;
+export const LANE_SCALE_MIN = 0.05;
+export const LANE_SCALE_MAX = 4;
+
+function clamp(value: number, lo: number, hi: number): number {
+  return Math.min(Math.max(value, lo), hi);
+}
+
+/** The centre after dragging the picture by (dx, dy) pixels in a frame of the given size. */
+export function movedCentre(
+  start: { x: number; y: number },
+  dxPx: number,
+  dyPx: number,
+  frameW: number,
+  frameH: number,
+): { x: number; y: number } {
+  if (frameW <= 0 || frameH <= 0) return { x: start.x, y: start.y };
+  const round = (v: number): number => Math.round(v * 10000) / 10000;
+  return {
+    x: round(clamp(start.x + dxPx / frameW, LANE_POS_MIN, LANE_POS_MAX)),
+    y: round(clamp(start.y + dyPx / frameH, LANE_POS_MIN, LANE_POS_MAX)),
+  };
+}
+
+/**
+ * The size after dragging a corner from `from` to `to` (pixels), the centre staying put:
+ * the scale grows with the pointer's distance from the centre.
+ */
+export function resizedScale(
+  scale: number,
+  centre: { x: number; y: number },
+  from: { x: number; y: number },
+  to: { x: number; y: number },
+): number {
+  const before = Math.hypot(from.x - centre.x, from.y - centre.y);
+  if (before < 1) return scale;
+  const after = Math.hypot(to.x - centre.x, to.y - centre.y);
+  return Math.round(clamp((scale * after) / before, LANE_SCALE_MIN, LANE_SCALE_MAX) * 10000) / 10000;
+}

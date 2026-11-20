@@ -3,6 +3,8 @@ import type { TimelineLaneClip } from "./api";
 import {
   activeLaneClips,
   laneSourceMs,
+  movedCentre,
+  resizedScale,
   pipRect,
   upcomingLaneClips,
   VIDEO_ADD_H,
@@ -124,5 +126,21 @@ describe("preview", () => {
     expect(pipRect(1920, 1080, 1000, 1000, { x: 0.5, y: 0.5, scale: 1 })).toEqual({ left: 420, top: 0, width: 1080, height: 1080 });
     expect(pipRect(1920, 1080, 1920, 1080, { x: 0.75, y: 0.25, scale: 0.5 })).toEqual({ left: 960, top: 0, width: 960, height: 540 });
     expect(pipRect(0, 1080, 1920, 1080, { x: 0.5, y: 0.5, scale: 1 }).width).toBe(0);
+  });
+});
+
+describe("preview handles", () => {
+  it("a drag moves the centre by the frame fraction, kept in limits", () => {
+    expect(movedCentre({ x: 0.5, y: 0.5 }, 96, -54, 960, 540)).toEqual({ x: 0.6, y: 0.4 });
+    expect(movedCentre({ x: 1.9, y: -0.9 }, 960, -540, 960, 540)).toEqual({ x: 2, y: -1 });
+    expect(movedCentre({ x: 0.3, y: 0.3 }, 10, 10, 0, 0)).toEqual({ x: 0.3, y: 0.3 });
+  });
+  it("a corner drag scales with the distance from the centre", () => {
+    const c = { x: 100, y: 100 };
+    expect(resizedScale(0.5, c, { x: 150, y: 100 }, { x: 200, y: 100 })).toBe(1);
+    expect(resizedScale(0.5, c, { x: 150, y: 100 }, { x: 100, y: 125 })).toBe(0.25);
+    expect(resizedScale(1, c, { x: 150, y: 100 }, { x: 100, y: 100 })).toBe(0.05);
+    expect(resizedScale(3, c, { x: 110, y: 100 }, { x: 900, y: 100 })).toBe(4);
+    expect(resizedScale(0.7, c, c, { x: 300, y: 300 })).toBe(0.7);
   });
 });

@@ -480,6 +480,54 @@ def _fit_fades(fade_in: int, fade_out: int, length: int) -> tuple[int, int]:
     return new_in, min(fade_out, length - new_in)
 
 
+class SplitAudioClip(Command):
+    """Cut one audio clip in two at a timeline time (M8-2 addition, 2026-11-20).
+
+    The left part keeps the clip's id and fade-in, the right part gets a new id
+    (or ``right_clip_id``) and the fade-out; the sound itself does not move.
+    """
+
+    def __init__(
+        self, clip_id: str, timeline_ms: int, right_clip_id: str | None = None
+    ) -> None:
+        self.clip_id = clip_id
+        self.at_ms = timeline_ms
+        self.right_id = right_clip_id or new_id()
+        self._old: AudioClip | None = None
+
+    @property
+    def label(self) -> str:
+        return "Split audio clip"
+
+    def apply(self, project: Project) -> None:
+        index, clip = find_audio_clip(project, self.clip_id)
+        offset = self.at_ms - clip.timeline_ms
+        if offset < MIN_AUDIO_CLIP_MS or clip.end_ms - self.at_ms < MIN_AUDIO_CLIP_MS:
+            raise CommandError("the playhead is not inside the clip")
+        cut = clip.in_ms + offset
+        left_in, _ = _fit_fades(clip.fade_in_ms, 0, offset)
+        _, right_out = _fit_fades(0, clip.fade_out_ms, clip.out_ms - cut)
+        left = _build_clip(clip, out_ms=cut, fade_in_ms=left_in, fade_out_ms=0)
+        right = _build_clip(
+            clip,
+            id=self.right_id,
+            timeline_ms=self.at_ms,
+            in_ms=cut,
+            fade_in_ms=0,
+            fade_out_ms=right_out,
+        )
+        self._old = clip
+        project.audio_clips[index] = left
+        project.audio_clips.insert(index + 1, right)
+
+    def revert(self, project: Project) -> None:
+        if self._old is None:
+            raise CommandError("nothing to restore: command was not applied")
+        project.audio_clips = [c for c in project.audio_clips if c.id != self.right_id]
+        index, _ = find_audio_clip(project, self.clip_id)
+        project.audio_clips[index] = self._old
+
+
 class SetAudioClip(_ReplaceClip):
     """Change a clip's level or fades. ``None`` leaves a field as it is."""
 

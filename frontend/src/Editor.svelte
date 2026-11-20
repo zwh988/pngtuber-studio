@@ -39,11 +39,12 @@
     type TimelineState,
   } from "./api";
   import { AudioClipPlayback } from "./audioClipPlayback";
-  import { audioPeakBuckets } from "./audioLanes";
-  import { FOOTAGE_DRAG_TYPE } from "./videoLanes";
+  import { audioEndMs, audioPeakBuckets } from "./audioLanes";
+  import { FOOTAGE_DRAG_TYPE, laneEndMs } from "./videoLanes";
   import { clock } from "./format";
   import { lufsText } from "./loudness";
   import AvatarOverlay from "./AvatarOverlay.svelte";
+  import LaneHandles, { type LaneDraft } from "./LaneHandles.svelte";
   import LaneLayers from "./LaneLayers.svelte";
   import AvatarPanel from "./AvatarPanel.svelte";
   import LineBank from "./LineBank.svelte";
@@ -100,6 +101,8 @@
   let selectedAudioClipId = $state<string | null>(null);
   /** Selected clip on a video lane (M8-2). */
   let selectedLaneClipId = $state<string | null>(null);
+  /** The selected lane clip's position and size while it is dragged in the preview. */
+  let laneDraft = $state<LaneDraft | null>(null);
   let player = $state<ReturnType<typeof Player> | null>(null);
   /** True while the player plays (bound from `Player`). */
   let playing = $state(false);
@@ -578,10 +581,19 @@
     playheadMs = stepFrame(timeline.clips, playheadMs, direction);
   }
 
+  /** S: split the selected audio or video-lane clip at the playhead, else the main footage. */
   function splitAtPlayhead(): void {
     const at = playheadMs;
     player?.pause();
-    void edit(() => splitClip(at));
+    if (selectedAudioClip !== null) {
+      const op: EditOp = { op: "split_audio_clip", clip_id: selectedAudioClip.id, timeline_ms: at };
+      void audioEdit("Split audio clip", [op]);
+    } else if (selectedLaneClip !== null) {
+      const op: EditOp = { op: "split_lane_clip", clip_id: selectedLaneClip.id, timeline_ms: at };
+      void laneEdit("Split clip on a video lane", [op]);
+    } else {
+      void edit(() => splitClip(at));
+    }
   }
 
   /** Fetch the waveform of every placed take that has none yet. A failure leaves a plain block. */
@@ -991,6 +1003,7 @@
               bind:this={player}
               clips={timeline.clips}
               durationMs={timeline.duration_ms}
+              endMs={Math.max(audioEndMs(timeline.audio_clips), laneEndMs(timeline.lane_clips))}
               bind:playheadMs
               bind:playing
               {graph}
@@ -1003,12 +1016,23 @@
                   {playheadMs}
                   {playing}
                   {graph}
+                  draft={laneDraft}
                 />
                 <AvatarOverlay
                   track={avatarTrack}
                   {playheadMs}
                   editable={!playing && !busy}
                   oncommit={commitAvatar}
+                />
+                <LaneHandles
+                  clips={timeline?.lane_clips ?? []}
+                  lanes={timeline?.video_lanes ?? []}
+                  selectedId={selectedLaneClipId}
+                  {playheadMs}
+                  editable={!playing && !busy}
+                  bind:draft={laneDraft}
+                  oncommit={(clipId, change) =>
+                    laneEdit("Move or resize a clip on a video lane", [{ op: "set_lane_clip", clip_id: clipId, ...change }])}
                 />
               {/snippet}
             </Player>
@@ -1473,7 +1497,7 @@
           <details class="keys">
             <summary>Shortcuts</summary>
             <p>
-              Space play/pause, , and . step a frame, S split at playhead, N new voice line, G generate, Shift+G reroll, M place the selected line at the playhead, E add an expression key at the playhead (Avatar tab picks which), R drop a reaction at the playhead, Delete remove the selected clip, placed line, key or reaction,
+              Space play/pause, , and . step a frame, S split at playhead (the selected audio or lane clip, else the footage), N new voice line, G generate, Shift+G reroll, M place the selected line at the playhead, E add an expression key at the playhead (Avatar tab picks which), R drop a reaction at the playhead, Delete remove the selected clip, placed line, key or reaction,
               [ and ] cut the selected clip's in/out at the playhead, Ctrl+Z / Ctrl+Y undo / redo.
               Drag a clip's edge to trim it, drag a clip sideways to reorder, drag a voice block to move it, drag a line from the bank onto the timeline to place it; each drag is one undo step.
               Drag the thin bars between the panels to resize them (arrow keys work when a bar is focused).

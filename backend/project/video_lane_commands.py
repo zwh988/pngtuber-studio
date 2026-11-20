@@ -480,6 +480,55 @@ class TrimLaneClip(_ReplaceLaneClip):
         return _build(clip, out_ms=out_ms)
 
 
+class SplitLaneClip(Command):
+    """Cut one video-lane clip in two at a timeline time (M8-2 addition).
+
+    Both parts keep the position, size, opacity and sound settings; the right part
+    gets a new id (or ``right_clip_id``). A still is split into two stills.
+    """
+
+    def __init__(
+        self, clip_id: str, timeline_ms: int, right_clip_id: str | None = None
+    ) -> None:
+        self.clip_id = clip_id
+        self.at_ms = timeline_ms
+        self.right_id = right_clip_id or new_id()
+        self._old: LaneClip | None = None
+
+    @property
+    def label(self) -> str:
+        return "Split clip on a video lane"
+
+    def apply(self, project: Project) -> None:
+        index, clip = find_lane_clip(project, self.clip_id)
+        _check_unlocked(project, clip.lane_id)
+        offset = self.at_ms - clip.timeline_ms
+        if offset < MIN_LANE_CLIP_MS or clip.end_ms - self.at_ms < MIN_LANE_CLIP_MS:
+            raise CommandError("the playhead is not inside the clip")
+        if clip.image_id is not None:
+            left = _build(clip, out_ms=offset)
+            right = _build(
+                clip,
+                id=self.right_id,
+                timeline_ms=self.at_ms,
+                out_ms=clip.out_ms - offset,
+            )
+        else:
+            cut = clip.in_ms + offset
+            left = _build(clip, out_ms=cut)
+            right = _build(clip, id=self.right_id, timeline_ms=self.at_ms, in_ms=cut)
+        self._old = clip
+        project.lane_clips[index] = left
+        project.lane_clips.insert(index + 1, right)
+
+    def revert(self, project: Project) -> None:
+        if self._old is None:
+            raise CommandError("nothing to restore: command was not applied")
+        project.lane_clips = [c for c in project.lane_clips if c.id != self.right_id]
+        index, _ = find_lane_clip(project, self.clip_id)
+        project.lane_clips[index] = self._old
+
+
 class SetLaneClip(_ReplaceLaneClip):
     """Change a clip's placement (x, y, scale), opacity, sound level or mute.
     ``None`` leaves a field as it is."""

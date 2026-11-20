@@ -24,7 +24,7 @@ export const HOTKEY_GROUPS: HotkeyGroup[] = [
   {
     title: "Cutting",
     items: [
-      { keys: ["S"], action: "Split the clip at the playhead" },
+      { keys: ["S"], action: "Split at the playhead (the selected audio or lane clip, else the footage)" },
       { keys: ["["], alts: [["]"]], action: "Trim the selected clip's start / end to the playhead" },
       {
         keys: ["Delete"],

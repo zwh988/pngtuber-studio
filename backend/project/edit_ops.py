@@ -22,6 +22,7 @@ from backend.project.audio_commands import (
     RemoveAudioLane,
     SetAudioClip,
     SetAudioLane,
+    SplitAudioClip,
     TrimAudioClip,
 )
 from backend.project.avatar_commands import (
@@ -57,6 +58,7 @@ from backend.project.video_lane_commands import (
     RemoveVideoLane,
     SetLaneClip,
     SetVideoLane,
+    SplitLaneClip,
     TrimLaneClip,
 )
 
@@ -305,6 +307,13 @@ class TrimAudioClipOp(_Op):
     timeline_ms: int
 
 
+class SplitAudioClipOp(_Op):
+    op: Literal["split_audio_clip"] = "split_audio_clip"
+    clip_id: str
+    timeline_ms: int
+    right_clip_id: str | None = Field(default=None, pattern=r"^[0-9a-f]{12}$")
+
+
 class SetAudioClipOp(_Op):
     op: Literal["set_audio_clip"] = "set_audio_clip"
     clip_id: str
@@ -373,6 +382,13 @@ class TrimLaneClipOp(_Op):
     timeline_ms: int
 
 
+class SplitLaneClipOp(_Op):
+    op: Literal["split_lane_clip"] = "split_lane_clip"
+    clip_id: str
+    timeline_ms: int
+    right_clip_id: str | None = Field(default=None, pattern=r"^[0-9a-f]{12}$")
+
+
 class SetLaneClipOp(_Op):
     op: Literal["set_lane_clip"] = "set_lane_clip"
     clip_id: str
@@ -417,6 +433,7 @@ EditOp = Annotated[
     | RemoveAudioClipOp
     | MoveAudioClipOp
     | TrimAudioClipOp
+    | SplitAudioClipOp
     | SetAudioClipOp
     | AddVideoLaneOp
     | RemoveVideoLaneOp
@@ -426,6 +443,7 @@ EditOp = Annotated[
     | RemoveLaneClipOp
     | MoveLaneClipOp
     | TrimLaneClipOp
+    | SplitLaneClipOp
     | SetLaneClipOp,
     Field(discriminator="op"),
 ]
@@ -496,6 +514,8 @@ def _build_video_lane_command(op: EditOp) -> Command | None:
         return MoveLaneClip(op.clip_id, op.timeline_ms, op.lane_id)
     if isinstance(op, TrimLaneClipOp):
         return TrimLaneClip(op.clip_id, op.edge, op.timeline_ms)
+    if isinstance(op, SplitLaneClipOp):
+        return SplitLaneClip(op.clip_id, op.timeline_ms, op.right_clip_id)
     if isinstance(op, SetLaneClipOp):
         return SetLaneClip(
             op.clip_id,
@@ -535,6 +555,8 @@ def _build_audio_command(op: EditOp) -> Command | None:
         return MoveAudioClip(op.clip_id, op.timeline_ms, op.lane_id)
     if isinstance(op, TrimAudioClipOp):
         return TrimAudioClip(op.clip_id, op.edge, op.timeline_ms)
+    if isinstance(op, SplitAudioClipOp):
+        return SplitAudioClip(op.clip_id, op.timeline_ms, op.right_clip_id)
     if isinstance(op, SetAudioClipOp):
         return SetAudioClip(
             op.clip_id, gain_db=op.gain_db, fade_in_ms=op.fade_in_ms, fade_out_ms=op.fade_out_ms
