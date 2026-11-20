@@ -27,6 +27,7 @@ Settled by the user on 2026-11-19: several audio lanes, not one; extra video lan
 3. No ducking in M8.
 4. Upper video lanes do picture-in-picture in M8-2 (position, scale, opacity per clip, full frame by default). The upper clip's sound plays at a per-clip level (on by default); the main footage's sound continues. Upper-lane clips are independent of footage edits too (timeline time).
 5. M8-3 is (b), seen as a video source: the user picks a folder of PNGs and a frame rate, and it goes on a video lane like a video clip.
+6. (M8-2, 2026-11-20) Video-lane sources: recordings from the Footage tab (referenced, never copied); from Explorer, images are copied into `images/` and a video from outside `footage/` is copied into `footage/` first, with a message.
 
 The original options and recommendations follow for the record.
 
