@@ -848,7 +848,7 @@
       ctx.lineTo(x - KEY_R, cy);
       ctx.closePath();
       ctx.fillStyle =
-        key.lane_id === "expression" ? c.expression : key.interpolation === "smooth" ? c.motion : c.motionHold;
+        key.lane_id === "expression" ? c.expression : key.interpolation !== "hold" ? c.motion : c.motionHold;
       ctx.fill();
       if (picked) {
         ctx.strokeStyle = c.selectedRing;

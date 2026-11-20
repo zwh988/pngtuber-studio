@@ -4,6 +4,7 @@
     getAvatar,
     type AvatarSettings,
     type EditOp,
+    type Interpolation,
     type TimelineKeyframe,
     type TimelineReaction,
   } from "./api";
@@ -181,14 +182,33 @@
                 {
                   op: "set_keyframe_interpolation",
                   keyframe_id: key.id,
-                  interpolation: e.currentTarget.value as "hold" | "smooth",
+                  interpolation: e.currentTarget.value as Interpolation,
                 },
               ])}
           >
-            <option value="smooth">Smooth</option>
+            <option value="ease_in_out">Ease in and out</option>
+            <option value="ease_in">Ease in (starts slow)</option>
+            <option value="ease_out">Ease out (ends slow)</option>
+            <option value="linear">Linear</option>
             <option value="hold">Hold (jump at the next key)</option>
           </select>
         </label>
+        {#if key.interpolation !== "hold" && key.interpolation !== "linear"}
+          <FxSlider
+            label="Ease strength"
+            min={0}
+            max={2}
+            step={0.05}
+            value={key.ease_strength}
+            disabled={busy}
+            oncommit={async (v) => {
+              await oncommit("Change key easing", [
+                { op: "set_keyframe_interpolation", keyframe_id: key.id, ease_strength: v },
+              ]);
+            }}
+          />
+          <p class="hint">0 is linear, 1 normal, 2 strong.</p>
+        {/if}
       {/if}
       <div class="row">
         <Button

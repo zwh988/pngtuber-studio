@@ -171,7 +171,7 @@ def test_avatar_orphans_and_art_state() -> None:
         id="k",
         lane_id="x",
         value=0.5,
-        interpolation="smooth",
+        interpolation="ease_in_out",
         t_ms=None,
         anchor_clip_id=CLIP,
         anchor_source_ms=0,

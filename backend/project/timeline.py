@@ -106,6 +106,7 @@ class TimelineKeyframe(BaseModel):
     lane_id: str
     value: float | str
     interpolation: str
+    ease_strength: float = 1.0
     # Timeline time of the anchor; None when it cannot be mapped (orphaned, parked).
     t_ms: int | None
     anchor_clip_id: str
@@ -405,6 +406,7 @@ def _build_keyframes(project: Project, spans: list[ClipSpan]) -> list[TimelineKe
             lane_id=key.lane_id,
             value=key.value,
             interpolation=key.interpolation,
+            ease_strength=key.ease_strength,
             t_ms=_mapped(project, spans, key),
             anchor_clip_id=key.anchor.clip_id,
             anchor_source_ms=key.anchor.source_ms,

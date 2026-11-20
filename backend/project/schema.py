@@ -24,7 +24,7 @@ from pydantic import (
     model_validator,
 )
 
-SCHEMA_VERSION = 6
+SCHEMA_VERSION = 7
 
 # Picture-in-picture limits of a video-lane clip (schema v6, M8-2).
 LANE_SCALE_MIN = 0.05
@@ -237,7 +237,10 @@ class Keyframe(_Model):
     anchor: Anchor
     # Numeric lanes use float; the expression lane uses an expression name.
     value: float | str
-    interpolation: Literal["hold", "smooth"] = "hold"
+    # Easing to the next key (schema v7, keyframes decision 2); expression keys hold.
+    interpolation: Literal["hold", "linear", "ease_in", "ease_out", "ease_in_out"] = "hold"
+    # 0 linear, 1 normal, 2 strong (see ``backend.avatar.lanes.ease``).
+    ease_strength: float = Field(default=1.0, ge=0.0, le=2.0)
     orphaned: bool = False
 
 

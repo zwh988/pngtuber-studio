@@ -61,7 +61,7 @@ def test_add_keyframe_anchors_to_footage_and_undoes() -> None:
     stack.execute(AddKeyframe("x", 12_000, 0.5, keyframe_id=K1))
     key = project.keyframes[0]
     assert key.anchor == Anchor(clip_id=CLIP_B, source_ms=22_000)
-    assert key.interpolation == "smooth"  # transform keys ease by default
+    assert key.interpolation == "ease_in_out"  # transform keys ease by default
     stack.undo()
     assert project.keyframes == []
     stack.redo()
@@ -79,7 +79,7 @@ def test_keyframe_value_checks() -> None:
     with pytest.raises(CommandError):
         AddKeyframe("bounce", 0, "loud")
     with pytest.raises(CommandError):
-        AddKeyframe("expression", 0, "smile", "smooth")
+        AddKeyframe("expression", 0, "smile", "ease_in_out")
     with pytest.raises(CommandError):
         AddKeyframe("x", 25_000, 0.5).apply(project)  # past the footage
     key = AddKeyframe("expression", 0, " cheeky ")
@@ -95,8 +95,8 @@ def test_move_set_value_interpolation_remove() -> None:
     stack.execute(MoveKeyframe(K1, 15_000))
     assert project.keyframes[0].anchor == Anchor(clip_id=CLIP_B, source_ms=25_000)
     stack.execute(SetKeyframeValue(K1, 2.5))
-    stack.execute(SetKeyframeInterpolation(K1, "smooth"))
-    assert (project.keyframes[0].value, project.keyframes[0].interpolation) == (2.5, "smooth")
+    stack.execute(SetKeyframeInterpolation(K1, "ease_in_out"))
+    assert (project.keyframes[0].value, project.keyframes[0].interpolation) == (2.5, "ease_in_out")
     with pytest.raises(NoChange):
         SetKeyframeValue(K1, 2.5).apply(project)
     with pytest.raises(CommandError):

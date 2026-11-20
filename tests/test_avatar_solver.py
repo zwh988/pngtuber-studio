@@ -44,7 +44,7 @@ def busy_input(seed: int = 7) -> SolverInput:
         seed=seed,
         base=BaseTransform(0.8, 0.7, 1.2, 5.0),
         lanes={
-            "x": [LaneKey(2000, 0.5, "smooth"), LaneKey(6000, 0.2)],
+            "x": [LaneKey(2000, 0.5, "ease_in_out"), LaneKey(6000, 0.2)],
             "bounce": [LaneKey(0, 2.0)],
             "blink_rate": [LaneKey(10_000, 2.0)],
         },
@@ -72,7 +72,7 @@ def test_lane_table() -> None:
 
 
 def test_lane_hold_smooth_and_ends() -> None:
-    lane = Lane([LaneKey(1000, 1.0, "smooth"), LaneKey(2000, 3.0), LaneKey(3000, 0.0)], 9.0)
+    lane = Lane([LaneKey(1000, 1.0, "ease_in_out"), LaneKey(2000, 3.0), LaneKey(3000, 0.0)], 9.0)
     assert lane.value_at(0) == 1.0  # before the first key: the first value
     assert lane.value_at(1000) == 1.0
     assert lane.value_at(1500) == pytest.approx(2.0)  # smoothstep midpoint
@@ -229,7 +229,7 @@ def test_transform_lanes_use_the_base_and_keys() -> None:
         duration_ms=10_000,
         seed=1,
         base=BaseTransform(0.8, 0.7, 1.2, 5.0),
-        lanes={"float_amp": [LaneKey(0, 0.0)], "x": [LaneKey(2000, 0.5, "smooth"), LaneKey(6000, 0.2)]},
+        lanes={"float_amp": [LaneKey(0, 0.0)], "x": [LaneKey(2000, 0.5, "ease_in_out"), LaneKey(6000, 0.2)]},
     )
     solver = build_solver(quiet)
     frame = solver.query(1000)

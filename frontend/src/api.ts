@@ -299,11 +299,16 @@ export type AudioImportResult = {
   timeline: TimelineState;
 };
 
+/** A key's easing to the next key (schema v7, keyframes decision 2). */
+export type Interpolation = "hold" | "linear" | "ease_in" | "ease_out" | "ease_in_out";
+
 export type TimelineKeyframe = {
   id: string;
   lane_id: string;
   value: number | string;
-  interpolation: "hold" | "smooth";
+  interpolation: Interpolation;
+  /** 0 linear, 1 normal, 2 strong. */
+  ease_strength: number;
   t_ms: number | null;
   anchor_clip_id: string;
   anchor_source_ms: number;
@@ -382,14 +387,19 @@ export type EditOp =
       lane_id: string;
       timeline_ms: number;
       value: number | string;
-      interpolation?: "hold" | "smooth" | null;
+      interpolation?: Interpolation | null;
       keyframe_id?: string | null;
     }
   | { op: "key_lane"; lane_id: string; timeline_ms: number; value: number | string; keyframe_id?: string | null }
   | { op: "key_lane_by"; lane_id: string; timeline_ms: number; delta?: number; factor?: number }
   | { op: "move_keyframe"; keyframe_id: string; timeline_ms: number }
   | { op: "set_keyframe_value"; keyframe_id: string; value: number | string }
-  | { op: "set_keyframe_interpolation"; keyframe_id: string; interpolation: "hold" | "smooth" }
+  | {
+      op: "set_keyframe_interpolation";
+      keyframe_id: string;
+      interpolation?: Interpolation | null;
+      ease_strength?: number | null;
+    }
   | { op: "remove_keyframe"; keyframe_id: string }
   | {
       op: "add_reaction";

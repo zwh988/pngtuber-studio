@@ -27,7 +27,7 @@ Avatar keys are easy to change after they are set, keys can ease in or out, vide
 2. **Easing:** wider interpolation set in the lane maths (pure, tested), schema v7 with a migration, the inspector's easing menu.
 3. **Key editing fixes** (from the user's answer to decision 1): commands (undoable) plus timeline and inspector UI.
 4. **Keys past the footage:** a key or reaction past the last footage clip is stored with a timeline time; solver input, timeline payload, commands and orphan rules updated; tests.
-5. **Lane-clip keys, data and commands:** keys on `LaneClip`, timed from the clip start; add, move, change, remove; trim, split and freeze keep the keys on the picture; tests.
+5. **Image-clip keys, data and commands** (decision 5: image clips only): keys on an image `LaneClip`, timed from the clip start; add, move, change, remove; trim, split and freeze keep the keys on the picture; tests.
 6. **Lane-clip keys, evaluation:** one pure evaluation in Python and the same in TypeScript, checked against one shared table of cases by pytest and `npm test`.
 7. **Lane-clip keys, preview and timeline:** `LaneLayers.svelte` draws the keyed values at the playhead, `LaneHandles.svelte` drags write keys when the clip has keys, diamonds on the clip block, the clip bar edits the key at the playhead.
 8. **Lane-clip keys, export:** `lanes.py` animates position, size and opacity; a real-render test compares frames with the evaluation.
@@ -41,6 +41,7 @@ Avatar keys are easy to change after they are set, keys can ease in or out, vide
 | 2 | Easing set | Presets plus strength: Hold, Linear, Ease in, Ease out, Ease in-out, and a strength 0 to 2 (0 linear, 1 normal = default, 2 strong). Strength 1: quadratic in/out, smoothstep in-out (old `smooth`); 2: cubic, smootherstep; blended between. v7 migrates `smooth` to `ease_in_out`, strength 1 |
 | 3 | Lane-clip key timing and layout | Timed from the clip start (move with the clip; a start trim keeps keys on the same picture moment; a split shares them); one track per property (x, y, size, opacity), same easing and strength. With keys on a property, preview drags and the clip bar key it at the playhead; without keys, the single clip value as today. Diamonds inside the clip block |
 | 4 | Keys and reactions past the footage | Placed or moved past the footage end: a timeline time (no anchor), never moved by footage edits, stays so if the footage grows over it (pin mark). A user move decides again (onto footage: anchored). Never orphaned. Rule 4's exception in `CLAUDE.md` gains these |
+| 5 | Which lane clips get keys? | Images only (PNG, JPG: one image clip type) for now; keys on recordings and freeze frames go to the backlog as a future improvement (user) |
 
 ## Acceptance criteria
 

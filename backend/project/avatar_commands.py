@@ -12,9 +12,17 @@ is resolved against the art only when drawn (so a key survives a change of art).
 """
 
 import math
-from typing import Literal
 
-from backend.avatar.lanes import EXPRESSION, LANES_BY_ID, Lane, LaneKey
+from backend.avatar.lanes import (
+    EASE_STRENGTH_MAX,
+    EASE_STRENGTH_MIN,
+    EXPRESSION,
+    INTERPOLATIONS,
+    LANES_BY_ID,
+    Interpolation,
+    Lane,
+    LaneKey,
+)
 from backend.avatar.solver import REACTIONS
 from backend.edl.timemap import to_source, to_timeline
 from backend.project.commands import Command, CommandError
@@ -28,7 +36,6 @@ from backend.project.schema import (
     new_id,
 )
 
-Interpolation = Literal["hold", "smooth"]
 KeyValue = float | str
 
 # New transform keys ease (decision 14); expression keys always hold.
@@ -79,7 +86,7 @@ def _anchor_at(project: Project, timeline_ms: int) -> Anchor:
 
 
 def default_interpolation(lane_id: str) -> Interpolation:
-    return "smooth" if lane_id in SMOOTH_BY_DEFAULT else "hold"
+    return "ease_in_out" if lane_id in SMOOTH_BY_DEFAULT else "hold"
 
 
 def check_value(lane_id: str, value: KeyValue) -> KeyValue:
@@ -102,8 +109,8 @@ def check_value(lane_id: str, value: KeyValue) -> KeyValue:
 
 
 def _check_interpolation(lane_id: str, interpolation: Interpolation) -> Interpolation:
-    if interpolation not in ("hold", "smooth"):
-        raise CommandError("interpolation must be hold or smooth")
+    if interpolation not in INTERPOLATIONS:
+        raise CommandError(f"easing must be one of {', '.join(INTERPOLATIONS)}")
     if lane_id == EXPRESSION and interpolation != "hold":
         raise CommandError("expression keys always hold")
     return interpolation
@@ -268,11 +275,31 @@ class SetKeyframeValue(Command):
         _find_key(project, self.keyframe_id)[1].value = self._old
 
 
+def _check_strength(strength: float) -> float:
+    if not math.isfinite(strength) or not (
+        EASE_STRENGTH_MIN <= strength <= EASE_STRENGTH_MAX
+    ):
+        raise CommandError(
+            f"ease strength must be {EASE_STRENGTH_MIN:g} to {EASE_STRENGTH_MAX:g}"
+        )
+    return float(strength)
+
+
 class SetKeyframeInterpolation(Command):
-    def __init__(self, keyframe_id: str, interpolation: Interpolation) -> None:
+    """Set a key's easing and/or its ease strength (keyframes decision 2)."""
+
+    def __init__(
+        self,
+        keyframe_id: str,
+        interpolation: Interpolation | None = None,
+        strength: float | None = None,
+    ) -> None:
+        if interpolation is None and strength is None:
+            raise CommandError("give an easing or a strength")
         self.keyframe_id = keyframe_id
         self.interpolation = interpolation
-        self._old: Interpolation | None = None
+        self.strength = None if strength is None else _check_strength(strength)
+        self._old: tuple[Interpolation, float] | None = None
 
     @property
     def label(self) -> str:
@@ -280,16 +307,21 @@ class SetKeyframeInterpolation(Command):
 
     def apply(self, project: Project) -> None:
         _, key = _find_key(project, self.keyframe_id)
-        wanted = _check_interpolation(key.lane_id, self.interpolation)
-        if key.interpolation == wanted:
+        wanted = _check_interpolation(
+            key.lane_id, self.interpolation or key.interpolation
+        )
+        strength = key.ease_strength if self.strength is None else self.strength
+        if (key.interpolation, key.ease_strength) == (wanted, strength):
             raise NoChange("the key already has that easing")
-        self._old = key.interpolation
+        self._old = (key.interpolation, key.ease_strength)
         key.interpolation = wanted
+        key.ease_strength = strength
 
     def revert(self, project: Project) -> None:
         if self._old is None:
             raise CommandError("nothing to restore: command was not applied")
-        _find_key(project, self.keyframe_id)[1].interpolation = self._old
+        key = _find_key(project, self.keyframe_id)[1]
+        key.interpolation, key.ease_strength = self._old
 
 
 class KeyLane(Command):
@@ -356,7 +388,9 @@ def lane_value_at(project: Project, lane_id: str, timeline_ms: int) -> float:
             continue
         t = to_timeline(project.clips, key.anchor)
         if t is not None:
-            keys.append(LaneKey(t, float(key.value), key.interpolation))
+            keys.append(
+                LaneKey(t, float(key.value), key.interpolation, key.ease_strength)
+            )
     return Lane(keys, base).value_at(timeline_ms)
 
 

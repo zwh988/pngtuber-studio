@@ -149,6 +149,7 @@ Done when: the acceptance checks in the task file pass.
 - Per-emotion reference clips in voice profiles
 - Seamless edited-proxy playback (background-rendered low-res proxy cached by edit hash)
 - Keyframeable game audio level
+- Keys on video-lane recordings and freeze frames (x, y, size, opacity over time; images got them in the keyframes task, user 2026-11-20)
 
 ## Risks to watch
 

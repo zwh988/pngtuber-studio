@@ -13,6 +13,7 @@ from typing import Annotated, Literal
 
 from pydantic import BaseModel, ConfigDict, Field
 
+from backend.avatar.lanes import Interpolation
 from backend.project.audio_commands import (
     AddAudioClip,
     AddAudioLane,
@@ -157,7 +158,7 @@ class AddKeyframeOp(_Op):
     lane_id: str
     timeline_ms: int
     value: float | str
-    interpolation: Literal["hold", "smooth"] | None = None  # None: the lane's default
+    interpolation: Interpolation | None = None  # None: the lane's default
     keyframe_id: str | None = None
 
 
@@ -196,7 +197,8 @@ class SetKeyframeValueOp(_Op):
 class SetKeyframeInterpolationOp(_Op):
     op: Literal["set_keyframe_interpolation"] = "set_keyframe_interpolation"
     keyframe_id: str
-    interpolation: Literal["hold", "smooth"]
+    interpolation: Interpolation | None = None  # None: keep the key's easing
+    ease_strength: float | None = None  # None: keep the key's strength
 
 
 class RemoveKeyframeOp(_Op):
@@ -623,7 +625,9 @@ def _build_avatar_command(op: EditOp) -> Command:
     if isinstance(op, SetKeyframeValueOp):
         return SetKeyframeValue(op.keyframe_id, op.value)
     if isinstance(op, SetKeyframeInterpolationOp):
-        return SetKeyframeInterpolation(op.keyframe_id, op.interpolation)
+        return SetKeyframeInterpolation(
+            op.keyframe_id, op.interpolation, op.ease_strength
+        )
     if isinstance(op, RemoveKeyframeOp):
         return RemoveKeyframe(op.keyframe_id)
     if isinstance(op, AddReactionOp):

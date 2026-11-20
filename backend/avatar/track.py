@@ -27,7 +27,13 @@ from backend.avatar import tuning
 from backend.avatar.art import AvatarArt, resolve_expression, sprite_for, state_code
 from backend.avatar.autokey import auto_expression_keys
 from backend.avatar.envelope import Envelope
-from backend.avatar.lanes import EXPRESSION, NUMBER_LANES, ExpressionKey, LaneKey
+from backend.avatar.lanes import (
+    EXPRESSION,
+    INTERPOLATIONS,
+    NUMBER_LANES,
+    ExpressionKey,
+    LaneKey,
+)
 from backend.avatar.solver import (
     BaseTransform,
     PlacedVoice,
@@ -66,8 +72,10 @@ def build_input(
                     name = resolve_expression(art, key.value)[0] or key.value
                 manual.append(ExpressionKey(key.t_ms, name, manual=True))
         elif key.lane_id in lanes and not isinstance(key.value, str):
-            interpolation = "smooth" if key.interpolation == "smooth" else "hold"
-            lanes[key.lane_id].append(LaneKey(key.t_ms, float(key.value), interpolation))
+            interpolation = key.interpolation if key.interpolation in INTERPOLATIONS else "hold"
+            lanes[key.lane_id].append(
+                LaneKey(key.t_ms, float(key.value), interpolation, key.ease_strength)
+            )
     emotions = {line.id: line.emotion for line in project.lines}
     virtual = auto_expression_keys(
         timeline.placements,

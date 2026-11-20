@@ -68,6 +68,15 @@ def _v5_to_v6(data: dict[str, Any]) -> dict[str, Any]:
     return data
 
 
+def _v6_to_v7(data: dict[str, Any]) -> dict[str, Any]:
+    """v7 widens key easing (keyframes decision 2): ``smooth`` becomes ``ease_in_out``
+    at strength 1, the same curve (smoothstep). ``ease_strength`` defaults to 1."""
+    for key in data.get("keyframes") or []:
+        if isinstance(key, dict) and key.get("interpolation") == "smooth":
+            key["interpolation"] = "ease_in_out"
+    return data
+
+
 # Maps "from version" -> function upgrading that version to version + 1.
 MIGRATIONS: dict[int, Migration] = {
     1: _v1_to_v2,
@@ -75,6 +84,7 @@ MIGRATIONS: dict[int, Migration] = {
     3: _v3_to_v4,
     4: _v4_to_v5,
     5: _v5_to_v6,
+    6: _v6_to_v7,
 }
 
 

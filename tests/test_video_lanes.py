@@ -91,9 +91,9 @@ def lane_clip(project: Project, clip_id: str) -> LaneClip:
 
 
 def test_v5_projects_get_empty_video_lanes() -> None:
-    assert SCHEMA_VERSION == 6
+    assert SCHEMA_VERSION >= 6
     data = {"schema_version": 5, "name": "x"}
-    result = migrate(data)
+    result = migrate(data, target=6)
     assert result["schema_version"] == 6
     assert "video_lanes" not in data
     project = Project.model_validate(result)

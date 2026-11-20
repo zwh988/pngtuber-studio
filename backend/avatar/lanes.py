@@ -2,8 +2,9 @@
 
 A lane is a list of keys in **timeline** time (the caller maps anchors through the clip
 list first; orphaned keys are left out). A key's ``interpolation`` describes the segment
-from that key to the next one: ``hold`` keeps its value, ``smooth`` eases to the next
-value (smoothstep). Before the first key the first value holds, after the last the last
+from that key to the next one: ``hold`` keeps its value, the others move to the next
+value along an easing curve (``ease``) shaped by the key's ``strength`` (schema v7,
+keyframes decision 2). Before the first key the first value holds, after the last the last
 value holds; a lane without keys gives its base value (``AvatarSettings`` for the
 transform lanes, the lane default otherwise).
 
@@ -15,7 +16,14 @@ from collections.abc import Sequence
 from dataclasses import dataclass
 from typing import Literal
 
-Interpolation = Literal["hold", "smooth"]
+Interpolation = Literal["hold", "linear", "ease_in", "ease_out", "ease_in_out"]
+INTERPOLATIONS: tuple[str, ...] = ("hold", "linear", "ease_in", "ease_out", "ease_in_out")
+
+# Ease strength (keyframes decision 2): 0 is linear, 1 normal (quadratic in and out,
+# smoothstep in-out: the old ``smooth``), 2 strong (cubic, smootherstep).
+EASE_STRENGTH_MIN = 0.0
+EASE_STRENGTH_MAX = 2.0
+EASE_STRENGTH_DEFAULT = 1.0
 
 
 @dataclass(frozen=True)
@@ -51,6 +59,7 @@ class LaneKey:
     t_ms: int  # timeline time
     value: float
     interpolation: Interpolation = "hold"
+    strength: float = EASE_STRENGTH_DEFAULT
 
 
 def clamp_lane(lane_id: str, value: float) -> float:
@@ -61,6 +70,34 @@ def clamp_lane(lane_id: str, value: float) -> float:
 def smoothstep(u: float) -> float:
     u = min(1.0, max(0.0, u))
     return u * u * (3.0 - 2.0 * u)
+
+
+def _curve(kind: str, u: float, power: int) -> float:
+    """The full-strength curve of an easing kind: ``power`` 2 normal, 3 strong."""
+    if kind == "ease_in":
+        return u**power
+    if kind == "ease_out":
+        return 1.0 - (1.0 - u) ** power
+    if power == 2:
+        return smoothstep(u)
+    return u * u * u * (u * (6.0 * u - 15.0) + 10.0)  # smootherstep
+
+
+def ease(kind: str, u: float, strength: float = EASE_STRENGTH_DEFAULT) -> float:
+    """Progress (0 to 1) along a segment at fraction ``u``. ``hold`` stays at 0 until
+    the next key; ``linear`` is ``u``; the ease kinds blend linear (strength 0) into the
+    normal curve (1) and that into the strong curve (2). Blends of rising curves rise,
+    so every curve is monotonic and never overshoots."""
+    u = min(1.0, max(0.0, u))
+    if kind == "hold":
+        return 0.0
+    if kind == "linear":
+        return u
+    s = min(EASE_STRENGTH_MAX, max(EASE_STRENGTH_MIN, strength))
+    normal = _curve(kind, u, 2)
+    if s <= 1.0:
+        return u + (normal - u) * s
+    return normal + (_curve(kind, u, 3) - normal) * (s - 1.0)
 
 
 class Lane:
@@ -89,7 +126,8 @@ class Lane:
             return key.value
         nxt = self.keys[i + 1]
         u = (t_ms - key.t_ms) / (nxt.t_ms - key.t_ms)
-        return key.value + (nxt.value - key.value) * smoothstep(u)
+        progress = ease(key.interpolation, u, key.strength)
+        return key.value + (nxt.value - key.value) * progress
 
     def sample(self, start_ms: int, end_ms: int, step_ms: int) -> list[float]:
         """Values at ``start, start + step, ...`` below ``end`` (for drawing a curve)."""
