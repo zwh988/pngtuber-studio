@@ -30,6 +30,8 @@ from backend.project.schema import (
 # Shortest clip a trim can leave (ms), and the default length of a still.
 MIN_LANE_CLIP_MS = 40
 STILL_DEFAULT_MS = 5000
+# Length of a new freeze frame (ms); trimmed like a still afterwards.
+FREEZE_DEFAULT_MS = 2000
 
 # --------------------------------------------------------------------------
 # Pure helpers
@@ -125,7 +127,10 @@ def _check_fits(project: Project, clip: LaneClip) -> None:
     _check_unlocked(project, clip.lane_id)
     if clip.source_id is not None:
         source = find_source(project, clip.source_id)
-        if clip.out_ms > source.duration_ms:
+        if clip.freeze_ms is not None:
+            if clip.freeze_ms >= source.duration_ms:
+                raise CommandError("the frozen frame is past the end of its recording")
+        elif clip.out_ms > source.duration_ms:
             raise CommandError("the clip runs past the end of its recording")
     else:
         find_image(project, clip.image_id or "")
@@ -188,6 +193,7 @@ class RemoveVideoLane(Command):
         self.lane_id = lane_id
         self._removed: VideoLane | None = None
         self._index = 0
+        self._avatar_was_under = False
 
     @property
     def label(self) -> str:
@@ -202,11 +208,39 @@ class RemoveVideoLane(Command):
         self._removed = lane
         self._index = index
         del project.video_lanes[index]
+        # The avatar sat under this lane: it goes back on top.
+        self._avatar_was_under = project.avatar_below_lane_id == self.lane_id
+        if self._avatar_was_under:
+            project.avatar_below_lane_id = None
 
     def revert(self, project: Project) -> None:
         if self._removed is None:
             raise CommandError("nothing to restore: command was not applied")
         project.video_lanes.insert(self._index, self._removed)
+        if self._avatar_was_under:
+            project.avatar_below_lane_id = self.lane_id
+
+
+class SetAvatarLayer(Command):
+    """Draw the avatar just under a video lane (that lane and the ones above it cover
+    it), or over every lane with ``lane_id`` None (M8-2 addition)."""
+
+    def __init__(self, lane_id: str | None) -> None:
+        self.lane_id = lane_id
+        self._old: str | None = None
+
+    @property
+    def label(self) -> str:
+        return "Move the avatar between the video lanes"
+
+    def apply(self, project: Project) -> None:
+        if self.lane_id is not None:
+            find_video_lane(project, self.lane_id)
+        self._old = project.avatar_below_lane_id
+        project.avatar_below_lane_id = self.lane_id
+
+    def revert(self, project: Project) -> None:
+        project.avatar_below_lane_id = self._old
 
 
 class MoveVideoLane(Command):
@@ -458,7 +492,7 @@ class TrimLaneClip(_ReplaceLaneClip):
         return "Trim clip on a video lane"
 
     def changed(self, project: Project, clip: LaneClip) -> LaneClip:
-        still = clip.image_id is not None
+        still = clip.is_still
         if self.edge == "start":
             delta = self.edge_ms - clip.timeline_ms
             if self.edge_ms < 0:
@@ -505,7 +539,7 @@ class SplitLaneClip(Command):
         offset = self.at_ms - clip.timeline_ms
         if offset < MIN_LANE_CLIP_MS or clip.end_ms - self.at_ms < MIN_LANE_CLIP_MS:
             raise CommandError("the playhead is not inside the clip")
-        if clip.image_id is not None:
+        if clip.is_still:
             left = _build(clip, out_ms=offset)
             right = _build(
                 clip,
@@ -527,6 +561,91 @@ class SplitLaneClip(Command):
         project.lane_clips = [c for c in project.lane_clips if c.id != self.right_id]
         index, _ = find_lane_clip(project, self.clip_id)
         project.lane_clips[index] = self._old
+
+
+class FreezeLaneClip(Command):
+    """Hold one frame of a recording on a video lane (M8-2 addition, 2026-11-20).
+
+    The clip is split at ``timeline_ms`` and a freeze frame of the frame there
+    (``hold_ms`` long, silent, sized and placed like the clip) goes in between; the
+    rest of the clip and every later clip on that lane move later by ``hold_ms``.
+    Other lanes and the main footage do not move. The part before the playhead keeps
+    the clip's id; the freeze frame gets ``freeze_clip_id`` and the rest
+    ``right_clip_id`` (new ids when left out).
+    """
+
+    def __init__(
+        self,
+        clip_id: str,
+        timeline_ms: int,
+        hold_ms: int = FREEZE_DEFAULT_MS,
+        *,
+        freeze_clip_id: str | None = None,
+        right_clip_id: str | None = None,
+    ) -> None:
+        if hold_ms < MIN_LANE_CLIP_MS:
+            raise CommandError("the freeze frame would be too short")
+        self.clip_id = clip_id
+        self.at_ms = timeline_ms
+        self.hold_ms = hold_ms
+        self.freeze_id = freeze_clip_id or new_id()
+        self.right_id = right_clip_id or new_id()
+        self._before: list[LaneClip] | None = None
+
+    @property
+    def label(self) -> str:
+        return "Freeze frame"
+
+    def apply(self, project: Project) -> None:
+        _, clip = find_lane_clip(project, self.clip_id)
+        _check_unlocked(project, clip.lane_id)
+        if clip.is_still:
+            raise CommandError("only a playing recording can be frozen")
+        offset = self.at_ms - clip.timeline_ms
+        if offset < 0 or self.at_ms >= clip.end_ms:
+            raise CommandError("the playhead is not inside the clip")
+        frame = clip.in_ms + offset
+        pieces = []
+        has_left = offset >= MIN_LANE_CLIP_MS
+        if has_left:
+            pieces.append(_build(clip, out_ms=frame))
+        pieces.append(
+            _build(
+                clip,
+                id=self.freeze_id if has_left else clip.id,
+                timeline_ms=self.at_ms,
+                in_ms=0,
+                out_ms=self.hold_ms,
+                freeze_ms=frame,
+            )
+        )
+        if clip.end_ms - self.at_ms >= MIN_LANE_CLIP_MS:
+            pieces.append(
+                _build(
+                    clip,
+                    id=self.right_id,
+                    timeline_ms=self.at_ms + self.hold_ms,
+                    in_ms=frame,
+                )
+            )
+        result: list[LaneClip] = []
+        for other in project.lane_clips:
+            if other.id == clip.id:
+                result.extend(pieces)
+            elif other.lane_id == clip.lane_id and other.timeline_ms >= clip.end_ms:
+                result.append(
+                    _build(other, timeline_ms=other.timeline_ms + self.hold_ms)
+                )
+            else:
+                result.append(other)
+        self._before = list(project.lane_clips)
+        project.lane_clips = result
+        _check_fits(project, pieces[0])
+
+    def revert(self, project: Project) -> None:
+        if self._before is None:
+            raise CommandError("nothing to restore: command was not applied")
+        project.lane_clips = self._before
 
 
 class SetLaneClip(_ReplaceLaneClip):

@@ -21,10 +21,12 @@ from backend.project.video_lane_commands import (
     AddImageFile,
     AddLaneClip,
     AddVideoLane,
+    FreezeLaneClip,
     MoveLaneClip,
     MoveVideoLane,
     RemoveLaneClip,
     RemoveVideoLane,
+    SetAvatarLayer,
     SetLaneClip,
     SetVideoLane,
     SplitLaneClip,
@@ -145,7 +147,10 @@ def test_round_trip_and_timeline_state() -> None:
         ("title.png", 2000, 7000, False),
     ]
     assert state.lane_clips[1].source_duration_ms == 0
-    assert (state.lane_clips[0].media_width, state.lane_clips[1].media_height) == (1920, 200)
+    assert (state.lane_clips[0].media_width, state.lane_clips[1].media_height) == (
+        1920,
+        200,
+    )
     assert state.other_track_clips == 0
 
 
@@ -309,6 +314,76 @@ def test_split_recording_and_still() -> None:
     assert (b.timeline_ms, b.in_ms, b.end_ms) == (2500, 0, 6000)
 
 
+def test_freeze_inserts_a_hold_and_pushes_the_lane() -> None:
+    project = make_project()
+    stack = CommandStack(project)
+    stack.execute(
+        AddLaneClip(V2, 10_000, source_id=B_ROLL, in_ms=5000, out_ms=15_000, clip_id=C1)
+    )  # 10000 to 20000
+    stack.execute(AddLaneClip(V2, 22_000, image_id=IMG, clip_id=C2))  # later on V2
+    stack.execute(AddLaneClip(V3, 21_000, image_id=IMG, clip_id=hid(42)))  # other lane
+    stack.execute(SetLaneClip(C1, x=0.7, scale=0.4, gain_db=-6))
+    stack.execute(
+        FreezeLaneClip(C1, 13_000, 2000, freeze_clip_id=hid(50), right_clip_id=hid(51))
+    )
+    left, hold, rest = (lane_clip(project, i) for i in (C1, hid(50), hid(51)))
+    assert (left.timeline_ms, left.in_ms, left.out_ms) == (10_000, 5000, 8000)
+    assert (hold.timeline_ms, hold.end_ms, hold.freeze_ms) == (13_000, 15_000, 8000)
+    assert hold.is_still and (hold.x, hold.scale) == (0.7, 0.4)
+    assert (rest.timeline_ms, rest.in_ms, rest.out_ms) == (15_000, 8000, 15_000)
+    assert lane_clip(project, C2).timeline_ms == 24_000  # pushed by the hold
+    assert lane_clip(project, hid(42)).timeline_ms == 21_000  # other lane stays
+    assert build_timeline(project).lane_clips[1].freeze_ms == 8000
+    stack.undo()
+    assert [c.id for c in project.lane_clips if c.lane_id == V2] == [C1, C2]
+    assert lane_clip(project, C2).timeline_ms == 22_000
+
+
+def test_freeze_frame_trims_like_a_still_and_refusals() -> None:
+    project = make_project()
+    stack = CommandStack(project)
+    stack.execute(
+        AddLaneClip(V2, 0, source_id=B_ROLL, in_ms=0, out_ms=4000, clip_id=C1)
+    )
+    stack.execute(FreezeLaneClip(C1, 0, freeze_clip_id=hid(50), right_clip_id=C2))
+    hold = lane_clip(project, C1)  # at the very start: the hold keeps the clip's id
+    assert (hold.timeline_ms, hold.end_ms, hold.freeze_ms) == (0, 2000, 0)
+    assert lane_clip(project, C2).timeline_ms == 2000
+    stack.execute(TrimLaneClip(C1, "end", 1000))
+    assert lane_clip(project, C1).end_ms == 1000
+    with pytest.raises(CommandError, match="only a playing recording"):
+        stack.execute(FreezeLaneClip(C1, 500))
+    with pytest.raises(CommandError, match="not inside"):
+        stack.execute(FreezeLaneClip(C2, 9000))
+    with pytest.raises(ValidationError):
+        LaneClip(
+            id=hid(60), lane_id=V2, image_id=IMG, timeline_ms=0, out_ms=10, freeze_ms=5
+        )
+
+
+def test_avatar_layer_and_lane_removal() -> None:
+    project = make_project()
+    stack = CommandStack(project)
+    stack.execute(SetAvatarLayer(V3))
+    assert build_timeline(project).avatar_below_lane_id == V3
+    with pytest.raises(CommandError):
+        stack.execute(SetAvatarLayer(hid(99)))
+    stack.execute(RemoveVideoLane(V3))
+    assert project.avatar_below_lane_id is None
+    stack.undo()
+    assert project.avatar_below_lane_id == V3
+    stack.undo()
+    assert project.avatar_below_lane_id is None
+    with pytest.raises(ValidationError, match="does not exist"):
+        Project.model_validate(
+            {**project.model_dump(), "avatar_below_lane_id": hid(99)}
+        )
+    op = EditBatch.model_validate(
+        {"label": "x", "ops": [{"op": "set_avatar_layer", "lane_id": V2}]}
+    ).ops[0]
+    assert isinstance(build_command(op), SetAvatarLayer)
+
+
 def test_split_refusals() -> None:
     project = make_project()
     stack = CommandStack(project)
@@ -318,14 +393,17 @@ def test_split_refusals() -> None:
     stack.execute(SetVideoLane(V2, locked=True))
     with pytest.raises(CommandError, match="locked"):
         stack.execute(SplitLaneClip(C1, 3000))
-    assert build_command(
-        EditBatch.model_validate(
-            {
-                "label": "x",
-                "ops": [{"op": "split_lane_clip", "clip_id": C1, "timeline_ms": 9}],
-            }
-        ).ops[0]
-    ).label == "Split clip on a video lane"
+    assert (
+        build_command(
+            EditBatch.model_validate(
+                {
+                    "label": "x",
+                    "ops": [{"op": "split_lane_clip", "clip_id": C1, "timeline_ms": 9}],
+                }
+            ).ops[0]
+        ).label
+        == "Split clip on a video lane"
+    )
 
 
 def test_set_placement_opacity_and_sound() -> None:

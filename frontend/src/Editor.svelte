@@ -40,7 +40,7 @@
   } from "./api";
   import { AudioClipPlayback } from "./audioClipPlayback";
   import { audioEndMs, audioPeakBuckets } from "./audioLanes";
-  import { FOOTAGE_DRAG_TYPE, laneEndMs } from "./videoLanes";
+  import { FOOTAGE_DRAG_TYPE, avatarSlot, laneEndMs } from "./videoLanes";
   import { clock } from "./format";
   import { lufsText } from "./loudness";
   import AvatarOverlay from "./AvatarOverlay.svelte";
@@ -60,6 +60,7 @@
   import {
     ArrowLeft,
     Cpu,
+    Snowflake,
     Gauge,
     HardDrive,
     Keyboard,
@@ -159,6 +160,12 @@
   const selectedAudioClip = $derived(
     timeline?.audio_clips.find((a) => a.id === selectedAudioClipId) ?? null,
   );
+  /** Video lanes drawn under and over the avatar (its layer, M8-2), each bottom to top. */
+  const avatarLayer = $derived(
+    timeline === null ? 0 : avatarSlot(timeline.video_lanes, timeline.avatar_below_lane_id),
+  );
+  const lanesUnderAvatar = $derived(timeline?.video_lanes.slice(0, avatarLayer) ?? []);
+  const lanesOverAvatar = $derived(timeline?.video_lanes.slice(avatarLayer) ?? []);
   const selectedLaneClip = $derived(
     timeline?.lane_clips.find((v) => v.id === selectedLaneClipId) ?? null,
   );
@@ -581,6 +588,23 @@
     playheadMs = stepFrame(timeline.clips, playheadMs, direction);
   }
 
+  /** F: hold the frame at the playhead of the selected lane recording for 2 s, then select the hold. */
+  function freezeAtPlayhead(): void {
+    const shot = selectedLaneClip;
+    if (shot === null || shot.source_id === null || shot.freeze_ms !== null) {
+      notice = "Select a recording on a video lane, put the playhead on a frame, then press F.";
+      return;
+    }
+    const holdId = newLineId();
+    const atStart = playheadMs - shot.timeline_ms < 40;
+    void laneEdit("Freeze frame", [
+      { op: "freeze_lane_clip", clip_id: shot.id, timeline_ms: playheadMs, freeze_clip_id: holdId },
+    ]).then(() => {
+      // At the clip's very start the hold keeps the clip's id.
+      selectedLaneClipId = atStart ? shot.id : holdId;
+    });
+  }
+
   /** S: split the selected audio or video-lane clip at the playhead, else the main footage. */
   function splitAtPlayhead(): void {
     const at = playheadMs;
@@ -842,6 +866,13 @@
           splitAtPlayhead();
         }
         break;
+      case "f":
+      case "F":
+        e.preventDefault();
+        if (canEdit && !e.ctrlKey) {
+          freezeAtPlayhead();
+        }
+        break;
       case "e":
       case "E":
         e.preventDefault();
@@ -1012,7 +1043,7 @@
               {#snippet overlay()}
                 <LaneLayers
                   clips={timeline?.lane_clips ?? []}
-                  lanes={timeline?.video_lanes ?? []}
+                  lanes={lanesUnderAvatar}
                   {playheadMs}
                   {playing}
                   {graph}
@@ -1023,6 +1054,14 @@
                   {playheadMs}
                   editable={!playing && !busy}
                   oncommit={commitAvatar}
+                />
+                <LaneLayers
+                  clips={timeline?.lane_clips ?? []}
+                  lanes={lanesOverAvatar}
+                  {playheadMs}
+                  {playing}
+                  {graph}
+                  draft={laneDraft}
                 />
                 <LaneHandles
                   clips={timeline?.lane_clips ?? []}
@@ -1240,6 +1279,8 @@
             onaddvideolane={() => laneEdit("Add video lane", [{ op: "add_video_lane" }])}
             onremovevideolane={(laneId) => laneEdit("Remove video lane", [{ op: "remove_video_lane", lane_id: laneId }])}
             onplacefootage={placeFootage}
+            avatarBelowLaneId={timeline.avatar_below_lane_id}
+            onavatarlayer={(laneId) => laneEdit("Move the avatar between the video lanes", [{ op: "set_avatar_layer", lane_id: laneId }])}
             onmoveaudio={(id, ms, laneId) =>
               audioEdit("Move audio clip", [{ op: "move_audio_clip", clip_id: id, timeline_ms: ms, lane_id: laneId }])}
             ontrimaudio={(id, edge, ms) =>
@@ -1282,7 +1323,7 @@
               {@const pct = (value: number) => Math.round(value * 1000) / 10}
               {@const setShot = (label: string, change: Partial<Record<"x" | "y" | "scale" | "opacity" | "gain_db", number>> & { mute?: boolean }) =>
                 void laneEdit(label, [{ op: "set_lane_clip", clip_id: shot.id, ...change }])}
-              <strong>{shot.image_id !== null ? "Still" : "Clip"}: {shot.name}</strong>
+              <strong>{shot.image_id !== null ? "Still" : shot.freeze_ms !== null ? "Freeze frame" : "Clip"}: {shot.name}</strong>
               <span class="hint num">{clock(shot.timeline_ms)} to {clock(shot.end_ms)}</span>
               {#if shot.missing}
                 <span class="error">The file is missing.</span>
@@ -1322,7 +1363,16 @@
               >
                 Full frame
               </Button>
-              {#if shot.source_id !== null}
+              {#if shot.source_id !== null && shot.freeze_ms === null}
+                <Button
+                  size="sm"
+                  icon={Snowflake}
+                  disabled={busy || playheadMs < shot.timeline_ms || playheadMs >= shot.end_ms}
+                  title="Hold the frame at the playhead for 2 s; the rest of the clip and later clips on this lane move later (F)"
+                  onclick={freezeAtPlayhead}
+                >
+                  Freeze frame
+                </Button>
                 <label class="inline">
                   Sound
                   <input
@@ -1497,7 +1547,7 @@
           <details class="keys">
             <summary>Shortcuts</summary>
             <p>
-              Space play/pause, , and . step a frame, S split at playhead (the selected audio or lane clip, else the footage), N new voice line, G generate, Shift+G reroll, M place the selected line at the playhead, E add an expression key at the playhead (Avatar tab picks which), R drop a reaction at the playhead, Delete remove the selected clip, placed line, key or reaction,
+              Space play/pause, , and . step a frame, S split at playhead (the selected audio or lane clip, else the footage), F freeze frame (the selected lane recording, at the playhead), N new voice line, G generate, Shift+G reroll, M place the selected line at the playhead, E add an expression key at the playhead (Avatar tab picks which), R drop a reaction at the playhead, Delete remove the selected clip, placed line, key or reaction,
               [ and ] cut the selected clip's in/out at the playhead, Ctrl+Z / Ctrl+Y undo / redo.
               Drag a clip's edge to trim it, drag a clip sideways to reorder, drag a voice block to move it, drag a line from the bank onto the timeline to place it; each drag is one undo step.
               Drag the thin bars between the panels to resize them (arrow keys work when a bar is focused).

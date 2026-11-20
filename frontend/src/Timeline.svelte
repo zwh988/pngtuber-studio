@@ -33,6 +33,9 @@
     laneEndMs,
     laneTrimTarget,
     videoLaneAt,
+    AVATAR_ROW_H,
+    avatarSlot,
+    movedAvatarLane,
     videoLayout,
     withLaneTrim,
   } from "./videoLanes";
@@ -41,6 +44,8 @@
   import { FALLBACK, readTimelineColors, type TimelineColors } from "./timelineTheme";
   import { SNAP_PX, snapEdge, snapMove, snapPoints } from "./snap";
   import {
+    ArrowDown,
+    ArrowUp,
     ChevronDown,
     ChevronRight,
     CircleHelp,
@@ -96,6 +101,8 @@
     onaddvideolane,
     onremovevideolane,
     onplacefootage,
+    avatarBelowLaneId = null,
+    onavatarlayer,
   }: {
     clips: TimelineClip[];
     durationMs: number;
@@ -154,6 +161,10 @@
     onremovevideolane?: (laneId: string) => Promise<void>;
     /** A recording was dragged from the Footage tab onto a video lane (or the add row: newLane). */
     onplacefootage?: (sourceId: string, timelineMs: number, laneId: string | null, newLane: boolean) => Promise<void>;
+    /** The video lane the avatar draws just under; null: over every lane. */
+    avatarBelowLaneId?: string | null;
+    /** Move the avatar's layer: just under `laneId`, or on top with null. */
+    onavatarlayer?: (laneId: string | null) => Promise<void>;
   } = $props();
 
   /** Width of the grab zone at each clip edge, in pixels. */
@@ -161,7 +172,8 @@
   const RULER_H = 26;
   /** Video lanes (M8-2) under the ruler: the "+ Video lane" row, then the lanes, highest first. */
   const VIDEO_TOP = RULER_H + 4;
-  const video = $derived(videoLayout(VIDEO_TOP, videoLanes.length));
+  const avatarAt = $derived(avatarSlot(videoLanes, avatarBelowLaneId));
+  const video = $derived(videoLayout(VIDEO_TOP, videoLanes.length, avatarAt));
   /** The main footage lane under the video lanes. */
   const LANE_Y = $derived(video.bottom + 4);
   const LANE_H = 60;
@@ -316,7 +328,7 @@
       return null;
     }
     const lane = laneAt(clientY - box.top, AUDIO_Y, audioLanes.length);
-    const vlane = videoLaneAt(clientY - box.top, VIDEO_TOP, videoLanes.length);
+    const vlane = videoLaneAt(clientY - box.top, VIDEO_TOP, videoLanes.length, avatarAt);
     return {
       timelineMs: Math.max(0, Math.round(scrollMs + (clientX - box.left) / pxPerMs)),
       laneId: typeof lane === "number" ? (audioLanes[lane]?.id ?? null) : null,
@@ -442,6 +454,18 @@
     ctx.globalAlpha = addHot ? 0.3 : 0.5;
     ctx.fillRect(0, video.addY, viewWidth, VIDEO_ADD_H);
     ctx.globalAlpha = 1;
+    if (video.avatarY !== null) {
+      // The avatar's layer among the video lanes: lanes above this row cover the avatar.
+      ctx.fillStyle = c.expression;
+      ctx.globalAlpha = 0.14;
+      ctx.fillRect(0, video.avatarY, viewWidth, AVATAR_ROW_H);
+      ctx.globalAlpha = 1;
+      ctx.font = font(10);
+      ctx.fillStyle = c.hint;
+      ctx.textBaseline = "middle";
+      ctx.fillText("Avatar layer: lanes above this row draw over the avatar", 8, video.avatarY + AVATAR_ROW_H / 2);
+      ctx.textBaseline = "top";
+    }
     videoLanes.forEach((lane, index) => {
       const y = video.laneY(index);
       ctx.fillStyle = c.row;
@@ -481,7 +505,7 @@
       const moving = uiV !== null && uiV.kind === "vmove" && uiV.clipId === clip.id;
       ctx.globalAlpha = moving ? 0.35 : lane.hidden ? 0.35 : 1;
       const picked = clip.id === selectedLaneClipId;
-      ctx.fillStyle = clip.image_id !== null ? c.clipAlt : c.clip;
+      ctx.fillStyle = clip.image_id !== null ? c.clipAlt : clip.freeze_ms !== null ? c.freeze : c.clip;
       if (picked) ctx.filter = "brightness(1.2)";
       ctx.fillRect(x0, y, Math.max(1, w - 1), h);
       ctx.filter = "none";
@@ -500,7 +524,8 @@
         ctx.font = font(10, 600);
         const pip = clip.scale !== 1 || clip.x !== 0.5 || clip.y !== 0.5 ? "  PiP" : "";
         const fade = clip.opacity < 1 ? `  ${Math.round(clip.opacity * 100)}%` : "";
-        ctx.fillText(`${clip.missing ? `${clip.name} (missing)` : clip.name}${pip}${fade}`, x0 + 4, y + 3);
+        const label = clip.freeze_ms !== null ? `Freeze ${clock(clip.freeze_ms)} · ${clip.name}` : clip.name;
+        ctx.fillText(`${clip.missing ? `${label} (missing)` : label}${pip}${fade}`, x0 + 4, y + 3);
         ctx.font = font(10);
         ctx.fillStyle = c.clipTextMuted;
         ctx.fillText(clock(clip.end_ms - clip.timeline_ms), x0 + 4, y + 16);
@@ -1067,7 +1092,7 @@
     }
     /** A clip on a video lane under the pointer: an edge (trim) or the body (move). */
     function hitLaneClip(x: number, y: number): { clip: TimelineLaneClip; part: "start" | "end" | "body" } | null {
-      const lane = videoLaneAt(y, VIDEO_TOP, videoLanes.length);
+      const lane = videoLaneAt(y, VIDEO_TOP, videoLanes.length, avatarAt);
       if (typeof lane !== "number") {
         return null;
       }
@@ -1088,7 +1113,7 @@
     function updateLaneMove(d: Extract<LaneDrag, { mode: "vmove" }>, x: number, y: number, alt: boolean): void {
       const length = d.clip.end_ms - d.clip.timeline_ms;
       d.startMs = snappedStart(d.clip.id, Math.max(0, Math.round(scrollMs + (x - d.grabDx) / pxPerMs)), length, alt);
-      d.laneIndex = dragVideoLaneIndex(y, VIDEO_TOP, videoLanes.length);
+      d.laneIndex = dragVideoLaneIndex(y, VIDEO_TOP, videoLanes.length, avatarAt);
       const target = videoLanes[d.laneIndex];
       const laneId = target?.id ?? d.clip.lane_id;
       dragUi = {
@@ -1198,7 +1223,7 @@
         }
         return;
       }
-      if (videoLaneAt(y, VIDEO_TOP, videoLanes.length) !== null) {
+      if (videoLaneAt(y, VIDEO_TOP, videoLanes.length, avatarAt) !== null) {
         selectedLaneClipId = null; // empty space in a video lane
       }
       const sound = hitAudio(x, y);
@@ -1503,14 +1528,14 @@
           kind: "drop",
           x: dropX(e),
           lane: laneAt(e.clientY - top, AUDIO_Y, audioLanes.length),
-          vlane: videoLaneAt(e.clientY - top, VIDEO_TOP, videoLanes.length),
+          vlane: videoLaneAt(e.clientY - top, VIDEO_TOP, videoLanes.length, avatarAt),
         };
         return;
       }
       if (e.dataTransfer !== null && e.dataTransfer.types.includes(FOOTAGE_DRAG_TYPE)) {
         // A recording from the Footage tab (M8-2): only the video lanes and their add row take it.
         const top = canvas?.getBoundingClientRect().top ?? 0;
-        const vlane = videoLaneAt(e.clientY - top, VIDEO_TOP, videoLanes.length);
+        const vlane = videoLaneAt(e.clientY - top, VIDEO_TOP, videoLanes.length, avatarAt);
         if (locked || vlane === null) {
           if (dragUi !== null && dragUi.kind === "drop") dragUi = null;
           return;
@@ -1541,7 +1566,7 @@
       const sourceId = e.dataTransfer?.getData(FOOTAGE_DRAG_TYPE) ?? "";
       if (sourceId !== "") {
         const top = canvas?.getBoundingClientRect().top ?? 0;
-        const vlane = videoLaneAt(e.clientY - top, VIDEO_TOP, videoLanes.length);
+        const vlane = videoLaneAt(e.clientY - top, VIDEO_TOP, videoLanes.length, avatarAt);
         if (locked || vlane === null || onplacefootage === undefined) {
           dragUi = null;
           return;
@@ -1723,6 +1748,32 @@
           {/if}
         </div>
       {/each}
+      {#if video.avatarY !== null}
+        <div class="head vlane avatarrow" style:top="{video.avatarY}px" style:height="{AVATAR_ROW_H}px">
+          <span class="sw" style:background="var(--lane-expression)"></span>
+          <span class="aname">Avatar</span>
+          <button
+            type="button"
+            class="toggle"
+            title="Move the avatar up a layer (over the next lane)"
+            aria-label="Move the avatar up a layer"
+            disabled={locked || avatarAt >= videoLanes.length}
+            onclick={() => void onavatarlayer?.(movedAvatarLane(videoLanes, avatarAt, 1))}
+          >
+            <ArrowUp size={12} strokeWidth={2} aria-hidden="true" />
+          </button>
+          <button
+            type="button"
+            class="toggle"
+            title="Move the avatar down a layer (under the next lane)"
+            aria-label="Move the avatar down a layer"
+            disabled={locked || avatarAt <= 0}
+            onclick={() => void onavatarlayer?.(movedAvatarLane(videoLanes, avatarAt, -1))}
+          >
+            <ArrowDown size={12} strokeWidth={2} aria-hidden="true" />
+          </button>
+        </div>
+      {/if}
       <div class="head big" style:top="{LANE_Y}px" style:height="{LANE_H}px">
         <span class="sw" style:background="var(--lane-clip)"></span>Video
       </div>
@@ -1974,6 +2025,11 @@
   }
   .head.dim {
     opacity: 0.55;
+  }
+  .avatarrow .aname {
+    flex: 1;
+    font-size: 11px;
+    color: var(--text-2);
   }
   .toggle.on {
     color: var(--warning);

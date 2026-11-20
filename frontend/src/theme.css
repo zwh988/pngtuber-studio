@@ -36,6 +36,7 @@
   /* timeline lanes (Timeline.svelte reads these through timelineTheme.ts in S6) */
   --lane-clip: #3a67a8;
   --lane-clip-alt: #2f5285;
+  --lane-freeze: #5a7fa8;
   --lane-motion-hold: #9fcbe0;
   --lane-voice: #2c8f72;
   --lane-expression: #d9ad3c;

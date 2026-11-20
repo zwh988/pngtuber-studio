@@ -194,6 +194,8 @@ class TimelineLaneClip(BaseModel):
     mute: bool
     # The recording or image file is missing on disk (the session marks it).
     missing: bool = False
+    # A freeze frame: the recording frame it holds (ms into the recording), else None.
+    freeze_ms: int | None = None
 
 
 def _build_lane_clips(
@@ -240,6 +242,7 @@ def _build_lane_clips(
                 opacity=clip.opacity,
                 gain_db=clip.gain_db,
                 mute=clip.mute,
+                freeze_ms=clip.freeze_ms,
                 missing=(source is None and image is None)
                 or (clip.source_id is not None and clip.source_id in missing_source_ids),
             )
@@ -280,6 +283,8 @@ class TimelineState(BaseModel):
     # and their clips by lane, then start time.
     video_lanes: list[VideoLane] = Field(default_factory=list)
     lane_clips: list[TimelineLaneClip] = Field(default_factory=list)
+    # The avatar draws just under this video lane; None: over every lane.
+    avatar_below_lane_id: str | None = None
 
 
 class EditResult(BaseModel):
@@ -367,6 +372,7 @@ def build_timeline(
         audio_clips=_build_audio_clips(project),
         video_lanes=[lane.model_copy() for lane in project.video_lanes],
         lane_clips=_build_lane_clips(project, missing),
+        avatar_below_lane_id=project.avatar_below_lane_id,
     )
 
 

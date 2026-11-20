@@ -1,6 +1,10 @@
 import { describe, expect, it } from "vitest";
 import type { TimelineLaneClip } from "./api";
 import {
+  AVATAR_ROW_H,
+  avatarSlot,
+  isStill,
+  movedAvatarLane,
   activeLaneClips,
   laneSourceMs,
   movedCentre,
@@ -39,35 +43,74 @@ function clip(id: string, lane: string, start: number, inMs: number, outMs: numb
     gain_db: 0,
     mute: false,
     missing: false,
+    freeze_ms: null,
     ...over,
   };
 }
 
 const ROW = VIDEO_LANE_H + VIDEO_GAP;
 const FIRST = 100 + VIDEO_ADD_H + VIDEO_GAP;
+const AV = AVATAR_ROW_H + VIDEO_GAP;
 
 describe("layout", () => {
-  it("draws the highest lane first, under the add row", () => {
+  it("draws the highest lane first, the avatar row on top by default", () => {
     const layout = videoLayout(100, 3);
     expect(layout.addY).toBe(100);
-    expect(layout.laneY(2)).toBe(FIRST);
-    expect(layout.laneY(0)).toBe(FIRST + 2 * ROW);
-    expect(layout.bottom).toBe(FIRST + 3 * ROW);
+    expect(layout.avatarY).toBe(FIRST);
+    expect(layout.laneY(2)).toBe(FIRST + AV);
+    expect(layout.laneY(0)).toBe(FIRST + AV + 2 * ROW);
+    expect(layout.bottom).toBe(FIRST + AV + 3 * ROW);
     expect(videoLayout(100, 0).bottom).toBe(FIRST);
+    expect(videoLayout(100, 0).avatarY).toBeNull();
+  });
+
+  it("puts the avatar row between the lanes", () => {
+    const layout = videoLayout(100, 3, 1); // lane 0 under the avatar
+    expect(layout.laneY(2)).toBe(FIRST);
+    expect(layout.laneY(1)).toBe(FIRST + ROW);
+    expect(layout.avatarY).toBe(FIRST + 2 * ROW);
+    expect(layout.laneY(0)).toBe(FIRST + 2 * ROW + AV);
+    expect(videoLayout(100, 3, 0).avatarY).toBe(FIRST + 3 * ROW);
   });
 
   it("finds the lane under a point", () => {
     expect(videoLaneAt(99, 100, 3)).toBeNull();
     expect(videoLaneAt(101, 100, 3)).toBe("add");
-    expect(videoLaneAt(FIRST + 1, 100, 3)).toBe(2);
-    expect(videoLaneAt(FIRST + 2 * ROW + 1, 100, 3)).toBe(0);
-    expect(videoLaneAt(FIRST + 3 * ROW, 100, 3)).toBeNull();
+    expect(videoLaneAt(FIRST + 1, 100, 3)).toBeNull(); // the avatar row
+    expect(videoLaneAt(FIRST + AV + 1, 100, 3)).toBe(2);
+    expect(videoLaneAt(FIRST + AV + 2 * ROW + 1, 100, 3)).toBe(0);
+    expect(videoLaneAt(FIRST + AV + 3 * ROW, 100, 3)).toBeNull();
+    expect(videoLaneAt(FIRST + 1, 100, 3, 1)).toBe(2);
+    expect(videoLaneAt(FIRST + 2 * ROW + 1, 100, 3, 1)).toBeNull();
     expect(videoLaneAt(101, 100, 0)).toBe("add");
   });
 
   it("clamps a vertical drag", () => {
     expect(dragVideoLaneIndex(0, 100, 3)).toBe(2);
     expect(dragVideoLaneIndex(9999, 100, 3)).toBe(0);
+    expect(dragVideoLaneIndex(FIRST + 2 * ROW + 2, 100, 3, 1)).toBe(1); // top of the avatar row: lane above
+    expect(dragVideoLaneIndex(FIRST + 2 * ROW + 18, 100, 3, 1)).toBe(0); // bottom: lane below
+  });
+
+  it("avatar slot and moves", () => {
+    const lanes = [{ id: "a" }, { id: "b" }, { id: "c" }];
+    expect(avatarSlot(lanes, null)).toBe(3);
+    expect(avatarSlot(lanes, "b")).toBe(1);
+    expect(avatarSlot(lanes, "gone")).toBe(3);
+    expect(movedAvatarLane(lanes, 3, -1)).toBe("c");
+    expect(movedAvatarLane(lanes, 1, 1)).toBe("c");
+    expect(movedAvatarLane(lanes, 2, 1)).toBeNull();
+    expect(movedAvatarLane(lanes, 0, -1)).toBe("a");
+  });
+});
+
+describe("freeze frames", () => {
+  it("hold one frame and trim like a still", () => {
+    const hold = clip("f", "L", 1000, 0, 2000, { freeze_ms: 4321 });
+    expect(isStill(hold)).toBe(true);
+    expect(laneSourceMs(hold, 2500)).toBe(4321);
+    expect(withLaneTrim(hold, "start", 1500)).toMatchObject({ timeline_ms: 1500, in_ms: 0, out_ms: 1500 });
+    expect(laneTrimTarget(hold, "end", 50_000, [hold])).toBe(50_000);
   });
 });
 

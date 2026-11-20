@@ -201,6 +201,8 @@ export type TimelineState = {
   video_lanes: VideoLane[];
   /** Recordings and stills on the video lanes, by lane then start time. Not anchored to footage. */
   lane_clips: TimelineLaneClip[];
+  /** The avatar draws just under this video lane; null: over every lane. */
+  avatar_below_lane_id: string | null;
 };
 
 export type VideoLane = {
@@ -236,6 +238,8 @@ export type TimelineLaneClip = {
   gain_db: number;
   mute: boolean;
   missing: boolean;
+  /** A freeze frame: the recording frame it holds (ms into the recording); null otherwise. */
+  freeze_ms: number | null;
 };
 
 export type ImportedLaneMedia = {
@@ -425,6 +429,15 @@ export type EditOp =
   | { op: "move_lane_clip"; clip_id: string; timeline_ms: number; lane_id?: string | null }
   | { op: "trim_lane_clip"; clip_id: string; edge: "start" | "end"; timeline_ms: number }
   | { op: "split_lane_clip"; clip_id: string; timeline_ms: number; right_clip_id?: string | null }
+  | {
+      op: "freeze_lane_clip";
+      clip_id: string;
+      timeline_ms: number;
+      hold_ms?: number;
+      freeze_clip_id?: string | null;
+      right_clip_id?: string | null;
+    }
+  | { op: "set_avatar_layer"; lane_id: string | null }
   | {
       op: "set_lane_clip";
       clip_id: string;

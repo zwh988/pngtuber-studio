@@ -52,10 +52,12 @@ from backend.project.placement_commands import (
 from backend.project.video_lane_commands import (
     AddLaneClip,
     AddVideoLane,
+    FreezeLaneClip,
     MoveLaneClip,
     MoveVideoLane,
     RemoveLaneClip,
     RemoveVideoLane,
+    SetAvatarLayer,
     SetLaneClip,
     SetVideoLane,
     SplitLaneClip,
@@ -389,6 +391,21 @@ class SplitLaneClipOp(_Op):
     right_clip_id: str | None = Field(default=None, pattern=r"^[0-9a-f]{12}$")
 
 
+class FreezeLaneClipOp(_Op):
+    op: Literal["freeze_lane_clip"] = "freeze_lane_clip"
+    clip_id: str
+    timeline_ms: int
+    hold_ms: int = Field(default=2000, ge=40, le=600_000)
+    freeze_clip_id: str | None = Field(default=None, pattern=r"^[0-9a-f]{12}$")
+    right_clip_id: str | None = Field(default=None, pattern=r"^[0-9a-f]{12}$")
+
+
+class SetAvatarLayerOp(_Op):
+    op: Literal["set_avatar_layer"] = "set_avatar_layer"
+    # The video lane the avatar draws just under; None: over every lane.
+    lane_id: str | None = None
+
+
 class SetLaneClipOp(_Op):
     op: Literal["set_lane_clip"] = "set_lane_clip"
     clip_id: str
@@ -444,6 +461,8 @@ EditOp = Annotated[
     | MoveLaneClipOp
     | TrimLaneClipOp
     | SplitLaneClipOp
+    | FreezeLaneClipOp
+    | SetAvatarLayerOp
     | SetLaneClipOp,
     Field(discriminator="op"),
 ]
@@ -516,6 +535,16 @@ def _build_video_lane_command(op: EditOp) -> Command | None:
         return TrimLaneClip(op.clip_id, op.edge, op.timeline_ms)
     if isinstance(op, SplitLaneClipOp):
         return SplitLaneClip(op.clip_id, op.timeline_ms, op.right_clip_id)
+    if isinstance(op, FreezeLaneClipOp):
+        return FreezeLaneClip(
+            op.clip_id,
+            op.timeline_ms,
+            op.hold_ms,
+            freeze_clip_id=op.freeze_clip_id,
+            right_clip_id=op.right_clip_id,
+        )
+    if isinstance(op, SetAvatarLayerOp):
+        return SetAvatarLayer(op.lane_id)
     if isinstance(op, SetLaneClipOp):
         return SetLaneClip(
             op.clip_id,

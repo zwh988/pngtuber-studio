@@ -74,7 +74,9 @@
       for (const clip of list) {
         const el = videos[clip.id];
         if (el === null || el === undefined || clip.source_id === null) continue;
-        const level = clip.mute ? 0 : dbToGain(clip.gain_db);
+        // A freeze frame holds one frame, silently.
+        const frozen = clip.freeze_ms !== null;
+        const level = clip.mute || frozen ? 0 : dbToGain(clip.gain_db);
         const gain = gainFor(el);
         if (gain !== null) {
           gain.gain.value = level;
@@ -83,8 +85,8 @@
         }
         if (el.readyState < 1) continue;
         const now = clip.timeline_ms <= t && t < clip.end_ms;
-        const target = (now ? laneSourceMs(clip, t) : clip.in_ms) / 1000;
-        if (now && isPlaying) {
+        const target = (now || frozen ? laneSourceMs(clip, t) : clip.in_ms) / 1000;
+        if (now && isPlaying && !frozen) {
           if (el.paused) {
             el.currentTime = target;
             graph?.resume();

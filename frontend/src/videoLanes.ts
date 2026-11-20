@@ -16,39 +16,87 @@ export const MIN_LANE_CLIP_MS = 40;
 /** Drag type of a recording dragged from the Footage tab (its source id). */
 export const FOOTAGE_DRAG_TYPE = "application/x-pngtuber-footage";
 
+/** The "Avatar" row among the video lanes (shown when there is at least one lane). */
+export const AVATAR_ROW_H = 18;
+
 export type VideoLayout = {
   addY: number;
   /** Top of lane `index` (0 = the lowest lane, drawn last). */
   laneY: (index: number) => number;
+  /** Top of the Avatar row, or null when it is not shown (no video lanes). */
+  avatarY: number | null;
   /** First y under the video block. */
   bottom: number;
 };
 
-export function videoLayout(top: number, laneCount: number): VideoLayout {
+/**
+ * Rows from the top: "+ Video lane", then the lanes from the highest down, with the Avatar
+ * row between lane `avatarSlot` (above it) and lane `avatarSlot - 1` (below it).
+ * `avatarSlot` is how many lanes draw under the avatar (`avatarSlot()`), laneCount = on top.
+ */
+export function videoLayout(top: number, laneCount: number, slot: number = laneCount): VideoLayout {
   const first = top + VIDEO_ADD_H + VIDEO_GAP;
-  const laneY = (index: number): number => first + (laneCount - 1 - index) * (VIDEO_LANE_H + VIDEO_GAP);
-  return { addY: top, laneY, bottom: first + laneCount * (VIDEO_LANE_H + VIDEO_GAP) };
+  const row = VIDEO_LANE_H + VIDEO_GAP;
+  const avatarH = laneCount > 0 ? AVATAR_ROW_H + VIDEO_GAP : 0;
+  const s = Math.min(Math.max(slot, 0), laneCount);
+  const laneY = (index: number): number => {
+    const above = laneCount - 1 - index; // lanes drawn before this one
+    return first + above * row + (index < s ? avatarH : 0);
+  };
+  return {
+    addY: top,
+    laneY,
+    avatarY: laneCount > 0 ? first + (laneCount - s) * row : null,
+    bottom: first + laneCount * row + avatarH,
+  };
 }
 
-/** The lane index under `y`, "add" for the add row, or null outside the video block. */
-export function videoLaneAt(y: number, top: number, laneCount: number): number | "add" | null {
-  const { bottom } = videoLayout(top, laneCount);
-  if (y < top || y >= bottom) {
+/** The lane index under `y`, "add" for the add row, or null elsewhere (Avatar row included). */
+export function videoLaneAt(y: number, top: number, laneCount: number, slot: number = laneCount): number | "add" | null {
+  const layout = videoLayout(top, laneCount, slot);
+  if (y < top || y >= layout.bottom) {
     return null;
   }
-  const first = top + VIDEO_ADD_H + VIDEO_GAP;
-  if (y < first) {
+  if (y < top + VIDEO_ADD_H + VIDEO_GAP) {
     return "add";
   }
-  const row = Math.min(laneCount - 1, Math.floor((y - first) / (VIDEO_LANE_H + VIDEO_GAP)));
-  return laneCount - 1 - row;
+  for (let index = 0; index < laneCount; index += 1) {
+    const y0 = layout.laneY(index);
+    if (y >= y0 && y < y0 + VIDEO_LANE_H + VIDEO_GAP) return index;
+  }
+  return null;
 }
 
-/** Lane index for a vertical drag: the lane under `y`, clamped to the lanes there are. */
-export function dragVideoLaneIndex(y: number, top: number, laneCount: number): number {
-  const first = top + VIDEO_ADD_H + VIDEO_GAP;
-  const row = Math.min(Math.max(Math.floor((y - first) / (VIDEO_LANE_H + VIDEO_GAP)), 0), Math.max(0, laneCount - 1));
-  return laneCount - 1 - row;
+/** Lane index for a vertical drag: the lane nearest `y`, clamped to the lanes there are. */
+export function dragVideoLaneIndex(y: number, top: number, laneCount: number, slot: number = laneCount): number {
+  const layout = videoLayout(top, laneCount, slot);
+  let best = 0;
+  let gap = Infinity;
+  for (let index = 0; index < laneCount; index += 1) {
+    const d = Math.abs(y - (layout.laneY(index) + VIDEO_LANE_H / 2));
+    if (d < gap) {
+      gap = d;
+      best = index;
+    }
+  }
+  return best;
+}
+
+/** How many lanes draw under the avatar: the index of the lane it sits under, else all. */
+export function avatarSlot(lanes: { id: string }[], belowLaneId: string | null): number {
+  const index = belowLaneId === null ? -1 : lanes.findIndex((lane) => lane.id === belowLaneId);
+  return index < 0 ? lanes.length : index;
+}
+
+/** The lane the avatar sits under after moving it one row up (+1) or down (-1); null = top. */
+export function movedAvatarLane(lanes: { id: string }[], slot: number, direction: 1 | -1): string | null {
+  const next = Math.min(Math.max(slot + direction, 0), lanes.length);
+  return next >= lanes.length ? null : (lanes[next]?.id ?? null);
+}
+
+/** An image or a freeze frame: any length, timed from in_ms 0, no sound. */
+export function isStill(clip: { image_id: string | null; freeze_ms: number | null }): boolean {
+  return clip.image_id !== null || clip.freeze_ms !== null;
 }
 
 /**
@@ -62,7 +110,7 @@ export function laneTrimTarget(
   ms: number,
   clips: TimelineLaneClip[],
 ): number {
-  const still = clip.image_id !== null;
+  const still = isStill(clip);
   const neighbours = clips.filter((c) => c.lane_id === clip.lane_id && c.id !== clip.id);
   if (edge === "start") {
     const prevEnd = Math.max(0, ...neighbours.filter((c) => c.end_ms <= clip.timeline_ms).map((c) => c.end_ms));
@@ -83,7 +131,7 @@ export function withLaneTrim(clip: TimelineLaneClip, edge: "start" | "end", ms: 
     return { ...clip, end_ms: ms, out_ms: clip.in_ms + (ms - clip.timeline_ms) };
   }
   const delta = ms - clip.timeline_ms;
-  if (clip.image_id !== null) {
+  if (isStill(clip)) {
     return { ...clip, timeline_ms: ms, out_ms: clip.out_ms - delta };
   }
   return { ...clip, timeline_ms: ms, in_ms: clip.in_ms + delta };
@@ -122,6 +170,7 @@ export function upcomingLaneClips(
 
 /** Time in the recording (ms) a lane clip shows at timeline time `t`. */
 export function laneSourceMs(clip: TimelineLaneClip, t: number): number {
+  if (clip.freeze_ms !== null) return clip.freeze_ms;
   return clip.in_ms + (t - clip.timeline_ms);
 }
 

@@ -346,6 +346,10 @@ class LaneClip(_Model):
     (``scale`` 1 = full frame), scaled by ``scale`` around its centre, which sits at
     (``x``, ``y``) as fractions of the frame width and height, at ``opacity``.
     A recording's own sound plays at ``gain_db`` unless ``mute``.
+
+    A freeze frame (M8-2 addition) is a recording clip with ``freeze_ms`` set: it
+    holds that one frame of the recording, silently, and is timed like a still
+    (``in_ms`` 0, ``out_ms`` its length).
     """
 
     id: EntityId
@@ -361,6 +365,8 @@ class LaneClip(_Model):
     opacity: float = Field(default=1.0, ge=0.0, le=1.0)
     gain_db: AudioGain = 0.0
     mute: bool = False
+    # The recording frame a freeze frame holds (ms into the recording); None otherwise.
+    freeze_ms: Ms | None = None
 
     @model_validator(mode="after")
     def _check(self) -> "LaneClip":
@@ -368,9 +374,16 @@ class LaneClip(_Model):
             raise ValueError("a lane clip shows exactly one recording or image")
         if self.out_ms <= self.in_ms:
             raise ValueError("out_ms must be greater than in_ms")
-        if self.image_id is not None and self.in_ms != 0:
-            raise ValueError("a still starts at in_ms 0")
+        if self.freeze_ms is not None and self.source_id is None:
+            raise ValueError("only a recording can be frozen")
+        if self.is_still and self.in_ms != 0:
+            raise ValueError("a still or freeze frame starts at in_ms 0")
         return self
+
+    @property
+    def is_still(self) -> bool:
+        """An image or a freeze frame: any length, no sound, timed from in_ms 0."""
+        return self.image_id is not None or self.freeze_ms is not None
 
     @property
     def length_ms(self) -> int:
@@ -488,6 +501,9 @@ class Project(_Model):
     image_files: list[ImageFile] = Field(default_factory=list)
     video_lanes: list[VideoLane] = Field(default_factory=list)
     lane_clips: list[LaneClip] = Field(default_factory=list)
+    # The avatar's layer (M8-2 addition): it draws just under this video lane, so the
+    # lanes from this one up cover it; None draws it over every lane.
+    avatar_below_lane_id: EntityId | None = None
 
     fx_chain: FxChain = Field(default_factory=FxChain)
     game_audio_db: float = 0.0
@@ -516,4 +532,10 @@ class Project(_Model):
             ids = [item.id for item in items]
             if len(ids) != len(set(ids)):
                 raise ValueError(f"duplicate ids in {name}")
+        if self.avatar_below_lane_id is not None and all(
+            lane.id != self.avatar_below_lane_id for lane in self.video_lanes
+        ):
+            raise ValueError(
+                "the avatar is placed under a video lane that does not exist"
+            )
         return self

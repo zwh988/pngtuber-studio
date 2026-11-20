@@ -15,6 +15,8 @@ export type TimelineColors = {
   hint: string;
   clip: string;
   clipAlt: string;
+  /** A freeze frame on a video lane (M8-2). */
+  freeze: string;
   clipText: string;
   clipTextMuted: string;
   speedBadge: string;
@@ -51,6 +53,7 @@ const TOKENS: Record<Exclude<keyof TimelineColors, "font">, string> = {
   hint: "--text-3",
   clip: "--lane-clip",
   clipAlt: "--lane-clip-alt",
+  freeze: "--lane-freeze",
   clipText: "--text-1",
   clipTextMuted: "--text-2",
   speedBadge: "--warning",
@@ -85,6 +88,7 @@ export const FALLBACK: TimelineColors = {
   hint: "#6d7482",
   clip: "#3a67a8",
   clipAlt: "#2f5285",
+  freeze: "#5a7fa8",
   clipText: "#e7e9ee",
   clipTextMuted: "#a6adba",
   speedBadge: "#e8a93a",
