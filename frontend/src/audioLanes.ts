@@ -48,7 +48,7 @@ export function dragLaneIndex(y: number, top: number, laneCount: number): number
 
 /** True when `[startMs, endMs)` is free on the lane (ignoring clip `exceptId`). */
 export function fitsOnLane(
-  clips: TimelineAudioClip[],
+  clips: { id: string; lane_id: string; timeline_ms: number; end_ms: number }[],
   laneId: string,
   startMs: number,
   endMs: number,

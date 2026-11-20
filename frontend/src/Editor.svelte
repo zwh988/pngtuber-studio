@@ -17,6 +17,7 @@
     getTakePeaks,
     getTimeline,
     importAudio,
+    importLaneMedia,
     movePlacement,
     placeLine,
     redoEdit,
@@ -39,6 +40,7 @@
   } from "./api";
   import { AudioClipPlayback } from "./audioClipPlayback";
   import { audioPeakBuckets } from "./audioLanes";
+  import { FOOTAGE_DRAG_TYPE } from "./videoLanes";
   import { clock } from "./format";
   import { lufsText } from "./loudness";
   import AvatarOverlay from "./AvatarOverlay.svelte";
@@ -95,6 +97,8 @@
   let audioPeaks = $state<Record<string, PeaksReport>>({});
   const audioPeaksRequested = new Set<string>();
   let selectedAudioClipId = $state<string | null>(null);
+  /** Selected clip on a video lane (M8-2). */
+  let selectedLaneClipId = $state<string | null>(null);
   let player = $state<ReturnType<typeof Player> | null>(null);
   /** True while the player plays (bound from `Player`). */
   let playing = $state(false);
@@ -151,6 +155,9 @@
   const selectedAudioClip = $derived(
     timeline?.audio_clips.find((a) => a.id === selectedAudioClipId) ?? null,
   );
+  const selectedLaneClip = $derived(
+    timeline?.lane_clips.find((v) => v.id === selectedLaneClipId) ?? null,
+  );
 
   /** Index of the clip under the playhead (highlighted in the table). */
   const activeIndex = $derived(timeline === null ? -1 : clipIndexAt(timeline.clips, playheadMs));
@@ -179,6 +186,15 @@
     }
   }
 
+  /** Reload the Footage tab (a video dropped from Explorer was copied into footage/, M8-2). */
+  async function refreshFootage(): Promise<void> {
+    try {
+      sources = (await getFootage()).items;
+    } catch {
+      // the list stays as it was
+    }
+  }
+
   /** Run an edit that returns the new timeline; the screen always redraws from it. */
   async function edit(action: () => Promise<TimelineState>): Promise<void> {
     busy = true;
@@ -203,31 +219,84 @@
     if (target === null || busy) {
       return;
     }
+    // Audio files go to the audio lanes; images and videos (anything else) to the video
+    // lanes (M8-2). Each uses the lane under the drop point when it is the right kind.
+    const isAudio = (path: string): boolean => /\.(wav|mp3|flac|ogg|m4a)$/i.test(path);
+    const sounds = info.paths.filter(isAudio);
+    const pictures = info.paths.filter((path) => !isAudio(path));
     busy = true;
     error = null;
     notice = null;
+    const placed: string[] = [];
+    const errors: string[] = [];
     try {
-      const result = await importAudio(info.paths, target.laneId, target.timelineMs, target.newLane);
-      timeline = result.timeline;
-      const last = result.imported[result.imported.length - 1];
-      if (last !== undefined) {
-        selectedAudioClipId = last.clip_id;
-        selectedId = null;
-        selectedPlacementId = null;
+      if (sounds.length > 0) {
+        const result = await importAudio(sounds, target.laneId, target.timelineMs, target.newLane);
+        timeline = result.timeline;
+        const last = result.imported[result.imported.length - 1];
+        if (last !== undefined) {
+          selectedAudioClipId = last.clip_id;
+          selectedLaneClipId = null;
+          selectedId = null;
+          selectedPlacementId = null;
+        }
+        for (const item of result.imported) {
+          placed.push(
+            `${item.name} on ${item.lane_name} at ${clock(item.timeline_ms)}${item.reused ? " (already in the project)" : ""}`,
+          );
+        }
+        errors.push(...result.errors);
       }
-      const placed = result.imported.map(
-        (item) => `${item.name} on ${item.lane_name} at ${clock(item.timeline_ms)}${item.reused ? " (already in the project)" : ""}`,
-      );
+      if (pictures.length > 0) {
+        const result = await importLaneMedia(pictures, target.videoLaneId, target.timelineMs, target.videoNewLane);
+        timeline = result.timeline;
+        const last = result.imported[result.imported.length - 1];
+        if (last !== undefined) {
+          selectedLaneClipId = last.clip_id;
+          selectedAudioClipId = null;
+          selectedId = null;
+          selectedPlacementId = null;
+        }
+        for (const item of result.imported) {
+          placed.push(
+            `${item.name} on ${item.lane_name} at ${clock(item.timeline_ms)}` +
+              (item.copied_to_footage ? " (copied into the footage folder)" : ""),
+          );
+        }
+        errors.push(...result.errors);
+        if (result.imported.some((item) => item.copied_to_footage)) {
+          void refreshFootage();
+        }
+      }
       if (placed.length > 0) {
         notice = `Placed ${placed.join("; ")}`;
       }
-      if (result.errors.length > 0) {
-        error = result.errors.join(" ");
+      if (errors.length > 0) {
+        error = errors.join(" ");
       }
     } catch (err) {
       error = message(err);
     } finally {
       busy = false;
+    }
+  }
+
+  /** A recording dragged from the Footage tab onto a video lane (or the add row: a new lane). */
+  async function placeFootage(sourceId: string, timelineMs: number, laneId: string | null, newLane: boolean): Promise<void> {
+    const ops: EditOp[] = [];
+    let lane = laneId;
+    if (newLane || lane === null) {
+      lane = newLineId();
+      ops.push({ op: "add_video_lane", lane_id: lane });
+    }
+    const clipId = newLineId();
+    ops.push({ op: "add_lane_clip", lane_id: lane, timeline_ms: Math.round(timelineMs), source_id: sourceId, clip_id: clipId });
+    await laneEdit("Add recording to a video lane", ops);
+    if (error === null) {
+      selectedLaneClipId = clipId;
+      selectedAudioClipId = null;
+      selectedId = null;
+      selectedPlacementId = null;
     }
   }
 
@@ -546,6 +615,12 @@
     }
   });
 
+  /** One video lane or lane clip edit, as one undo step (M8-2). */
+  async function laneEdit(label: string, ops: EditOp[]): Promise<void> {
+    player?.pause();
+    await edit(() => editBatch(label, ops));
+  }
+
   /** One audio lane or clip edit, as one undo step (M8-1). */
   async function audioEdit(label: string, ops: EditOp[]): Promise<void> {
     player?.pause();
@@ -616,6 +691,15 @@
 
   /** Delete: remove the selected placed line, or else the selected clip. */
   function removeSelected(): void {
+    const shot = selectedLaneClip;
+    if (shot !== null) {
+      void laneEdit("Remove clip from a video lane", [{ op: "remove_lane_clip", clip_id: shot.id }]).then(() => {
+        if (error === null) {
+          selectedLaneClipId = null;
+        }
+      });
+      return;
+    }
     const sound = selectedAudioClip;
     if (sound !== null) {
       void audioEdit("Remove audio clip", [{ op: "remove_audio_clip", clip_id: sound.id }]).then(() => {
@@ -994,7 +1078,17 @@
               {:else}
                 <ul class="sources">
                   {#each sources as item (item.id)}
-                    <li class:missing={!item.exists}>
+                    <li
+                      class:missing={!item.exists}
+                      draggable={item.exists}
+                      title={item.exists ? "Drag onto a video lane to show it over the main footage" : undefined}
+                      ondragstart={(e) => {
+                        if (e.dataTransfer !== null) {
+                          e.dataTransfer.setData(FOOTAGE_DRAG_TYPE, item.id);
+                          e.dataTransfer.effectAllowed = "copy";
+                        }
+                      }}
+                    >
                       <span class="name">{fileName(item.path)}</span>
                       <span class="meta num">{clock(item.duration_ms)}</span>
                       <Button
@@ -1100,6 +1194,20 @@
             audioClips={timeline.audio_clips}
             {audioPeaks}
             bind:selectedAudioClipId
+            videoLanes={timeline.video_lanes}
+            laneClips={timeline.lane_clips}
+            bind:selectedLaneClipId
+            onmovelane={(id, ms, laneId) =>
+              laneEdit("Move clip on a video lane", [{ op: "move_lane_clip", clip_id: id, timeline_ms: ms, lane_id: laneId }])}
+            ontrimlane={(id, edge, ms) =>
+              laneEdit("Trim clip on a video lane", [{ op: "trim_lane_clip", clip_id: id, edge, timeline_ms: ms }])}
+            onvideolane={(laneId, change) =>
+              laneEdit(change.name !== undefined ? "Rename video lane" : "Change video lane", [
+                { op: "set_video_lane", lane_id: laneId, ...change },
+              ])}
+            onaddvideolane={() => laneEdit("Add video lane", [{ op: "add_video_lane" }])}
+            onremovevideolane={(laneId) => laneEdit("Remove video lane", [{ op: "remove_video_lane", lane_id: laneId }])}
+            onplacefootage={placeFootage}
             onmoveaudio={(id, ms, laneId) =>
               audioEdit("Move audio clip", [{ op: "move_audio_clip", clip_id: id, timeline_ms: ms, lane_id: laneId }])}
             ontrimaudio={(id, edge, ms) =>
@@ -1134,8 +1242,85 @@
               <Button size="sm" variant="danger" icon={Trash2} disabled={busy} onclick={removeSelected}>
                 Remove clip
               </Button>
-            {:else if selectedPlacement === null && selectedAudioClip === null}
+            {:else if selectedPlacement === null && selectedAudioClip === null && selectedLaneClip === null}
               <span class="hint">No clip selected. Click a clip on the timeline.</span>
+            {/if}
+            {#if selectedLaneClip !== null}
+              {@const shot = selectedLaneClip}
+              {@const pct = (value: number) => Math.round(value * 1000) / 10}
+              {@const setShot = (label: string, change: Partial<Record<"x" | "y" | "scale" | "opacity" | "gain_db", number>> & { mute?: boolean }) =>
+                void laneEdit(label, [{ op: "set_lane_clip", clip_id: shot.id, ...change }])}
+              <strong>{shot.image_id !== null ? "Still" : "Clip"}: {shot.name}</strong>
+              <span class="hint num">{clock(shot.timeline_ms)} to {clock(shot.end_ms)}</span>
+              {#if shot.missing}
+                <span class="error">The file is missing.</span>
+              {/if}
+              {#each [["X", "x", -100, 200], ["Y", "y", -100, 200], ["Size", "scale", 5, 400], ["Opacity", "opacity", 0, 100]] as const as [title, key, lo, hi] (key)}
+                <label class="inline">
+                  {title}
+                  <input
+                    class="num small"
+                    type="number"
+                    min={lo}
+                    max={hi}
+                    step="1"
+                    value={pct(shot[key])}
+                    disabled={busy}
+                    onkeydown={(e) => e.stopPropagation()}
+                    onchange={(e) => {
+                      const raw = e.currentTarget.valueAsNumber;
+                      if (!Number.isFinite(raw)) {
+                        e.currentTarget.value = String(pct(shot[key]));
+                        return;
+                      }
+                      const value = Math.min(hi, Math.max(lo, raw)) / 100;
+                      if (Math.abs(value - shot[key]) > 0.0005) {
+                        setShot(key === "opacity" ? "Change clip opacity" : "Place clip on a video lane", { [key]: value });
+                      }
+                    }}
+                  />
+                  %
+                </label>
+              {/each}
+              <Button
+                size="sm"
+                disabled={busy || (shot.x === 0.5 && shot.y === 0.5 && shot.scale === 1)}
+                title="Back to full frame, centred"
+                onclick={() => setShot("Place clip on a video lane", { x: 0.5, y: 0.5, scale: 1 })}
+              >
+                Full frame
+              </Button>
+              {#if shot.source_id !== null}
+                <label class="inline">
+                  Sound
+                  <input
+                    class="num small"
+                    type="number"
+                    min="-60"
+                    max="12"
+                    step="0.5"
+                    value={shot.gain_db}
+                    disabled={busy || shot.mute}
+                    onkeydown={(e) => e.stopPropagation()}
+                    onchange={(e) => {
+                      const value = Math.min(12, Math.max(-60, e.currentTarget.valueAsNumber));
+                      if (Number.isFinite(value) && value !== shot.gain_db) {
+                        setShot("Change clip sound level", { gain_db: value });
+                      } else {
+                        e.currentTarget.value = String(shot.gain_db);
+                      }
+                    }}
+                  />
+                  dB
+                </label>
+                <label class="inline">
+                  <input type="checkbox" checked={shot.mute} disabled={busy} onchange={(e) => setShot("Mute clip sound", { mute: e.currentTarget.checked })} />
+                  Mute
+                </label>
+              {/if}
+              <Button size="sm" variant="danger" icon={Trash2} disabled={busy} onclick={removeSelected}>
+                Remove from lane
+              </Button>
             {/if}
             {#if selectedAudioClip !== null}
               {@const sound = selectedAudioClip}

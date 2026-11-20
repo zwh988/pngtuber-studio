@@ -197,6 +197,58 @@ export type TimelineState = {
   audio_lanes: AudioLane[];
   /** Music and sound-effect clips, by lane then start time. Not anchored to footage. */
   audio_clips: TimelineAudioClip[];
+  /** Video lanes above the main footage, bottom to top (M8-2). */
+  video_lanes: VideoLane[];
+  /** Recordings and stills on the video lanes, by lane then start time. Not anchored to footage. */
+  lane_clips: TimelineLaneClip[];
+};
+
+export type VideoLane = {
+  id: string;
+  name: string;
+  hidden: boolean;
+  locked: boolean;
+};
+
+/**
+ * TIMELINE ms, except in_ms / out_ms / source_duration_ms (times in the recording; 0 for a
+ * still). Picture-in-picture: x, y = centre as fractions of the frame, scale 1 = fitted to
+ * the full frame, opacity 0..1. A recording's sound plays at gain_db unless mute.
+ */
+export type TimelineLaneClip = {
+  id: string;
+  lane_id: string;
+  source_id: string | null;
+  image_id: string | null;
+  name: string;
+  timeline_ms: number;
+  end_ms: number;
+  in_ms: number;
+  out_ms: number;
+  source_duration_ms: number;
+  x: number;
+  y: number;
+  scale: number;
+  opacity: number;
+  gain_db: number;
+  mute: boolean;
+  missing: boolean;
+};
+
+export type ImportedLaneMedia = {
+  name: string;
+  kind: "image" | "video";
+  clip_id: string;
+  lane_id: string;
+  lane_name: string;
+  timeline_ms: number;
+  copied_to_footage: boolean;
+};
+
+export type LaneImportResult = {
+  imported: ImportedLaneMedia[];
+  errors: string[];
+  timeline: TimelineState;
 };
 
 export type AudioLane = {
@@ -349,6 +401,35 @@ export type EditOp =
   | { op: "trim_audio_clip"; clip_id: string; edge: "start" | "end"; timeline_ms: number }
   | { op: "set_audio_clip"; clip_id: string; gain_db?: number; fade_in_ms?: number; fade_out_ms?: number }
   | { op: "remove_audio_clip"; clip_id: string }
+  // Video lanes and lane clips (M8-2). Times are TIMELINE ms; clips are not anchored to footage.
+  | { op: "add_video_lane"; name?: string | null; position?: number | null; lane_id?: string | null }
+  | { op: "remove_video_lane"; lane_id: string }
+  | { op: "move_video_lane"; lane_id: string; new_position: number }
+  | { op: "set_video_lane"; lane_id: string; name?: string; hidden?: boolean; locked?: boolean }
+  | {
+      op: "add_lane_clip";
+      lane_id: string;
+      timeline_ms: number;
+      source_id?: string | null;
+      image_id?: string | null;
+      in_ms?: number;
+      out_ms?: number | null;
+      length_ms?: number;
+      clip_id?: string | null;
+    }
+  | { op: "remove_lane_clip"; clip_id: string }
+  | { op: "move_lane_clip"; clip_id: string; timeline_ms: number; lane_id?: string | null }
+  | { op: "trim_lane_clip"; clip_id: string; edge: "start" | "end"; timeline_ms: number }
+  | {
+      op: "set_lane_clip";
+      clip_id: string;
+      x?: number;
+      y?: number;
+      scale?: number;
+      opacity?: number;
+      gain_db?: number;
+      mute?: boolean;
+    }
   | {
       op: "set_avatar_settings";
       x?: number;
@@ -506,6 +587,26 @@ export function importAudio(
     timeline_ms: Math.max(0, Math.round(timelineMs)),
     new_lane: newLane,
   });
+}
+
+/** Copy dropped images and videos into the project and place them on the video lanes (M8-2). */
+export function importLaneMedia(
+  paths: string[],
+  laneId: string | null,
+  timelineMs: number,
+  newLane = false,
+): Promise<LaneImportResult> {
+  return post<LaneImportResult>("/api/lanes/import", {
+    paths,
+    lane_id: laneId,
+    timeline_ms: Math.max(0, Math.round(timelineMs)),
+    new_lane: newLane,
+  });
+}
+
+/** An imported still (M8-2). */
+export function imageMediaUrl(imageId: string): string {
+  return `/media/image/${encodeURIComponent(imageId)}`;
 }
 
 /** Waveform peaks of an imported audio file (the whole file). */

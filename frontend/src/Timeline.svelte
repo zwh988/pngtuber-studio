@@ -4,6 +4,8 @@
     AudioLane,
     PeaksReport,
     TimelineAudioClip,
+    TimelineLaneClip,
+    VideoLane,
     TimelineClip,
     TimelineKeyframe,
     TimelinePlacement,
@@ -23,6 +25,17 @@
     withAudioTrim,
   } from "./audioLanes";
   import { MOTION_LANES, laneLabel } from "./avatarLanes";
+  import {
+    FOOTAGE_DRAG_TYPE,
+    VIDEO_ADD_H,
+    VIDEO_LANE_H,
+    dragVideoLaneIndex,
+    laneEndMs,
+    laneTrimTarget,
+    videoLaneAt,
+    videoLayout,
+    withLaneTrim,
+  } from "./videoLanes";
   import { clock } from "./format";
   import { LINE_DRAG_TYPE, dropSlot, peakSpan, trimTarget, withTrim } from "./timeline";
   import { FALLBACK, readTimelineColors, type TimelineColors } from "./timelineTheme";
@@ -30,6 +43,10 @@
     ChevronDown,
     ChevronRight,
     CircleHelp,
+    Eye,
+    EyeOff,
+    Lock,
+    LockOpen,
     Plus,
     X,
     Maximize2,
@@ -68,6 +85,15 @@
     onaudiolane,
     onaddaudiolane,
     onremoveaudiolane,
+    videoLanes = [],
+    laneClips = [],
+    selectedLaneClipId = $bindable(null),
+    onmovelane,
+    ontrimlane,
+    onvideolane,
+    onaddvideolane,
+    onremovevideolane,
+    onplacefootage,
   }: {
     clips: TimelineClip[];
     durationMs: number;
@@ -114,18 +140,34 @@
     ) => Promise<void>;
     onaddaudiolane?: () => Promise<void>;
     onremoveaudiolane?: (laneId: string) => Promise<void>;
+    /** Video lanes above the main footage, bottom to top, and their clips (M8-2). */
+    videoLanes?: VideoLane[];
+    laneClips?: TimelineLaneClip[];
+    selectedLaneClipId?: string | null;
+    /** A lane clip was dragged: where its start goes and the lane it lands on. */
+    onmovelane?: (clipId: string, timelineMs: number, laneId: string) => Promise<void>;
+    ontrimlane?: (clipId: string, edge: "start" | "end", timelineMs: number) => Promise<void>;
+    onvideolane?: (laneId: string, change: { name?: string; hidden?: boolean; locked?: boolean }) => Promise<void>;
+    onaddvideolane?: () => Promise<void>;
+    onremovevideolane?: (laneId: string) => Promise<void>;
+    /** A recording was dragged from the Footage tab onto a video lane (or the add row: newLane). */
+    onplacefootage?: (sourceId: string, timelineMs: number, laneId: string | null, newLane: boolean) => Promise<void>;
   } = $props();
 
   /** Width of the grab zone at each clip edge, in pixels. */
   const EDGE_PX = 6;
   const RULER_H = 26;
-  const LANE_Y = 32;
+  /** Video lanes (M8-2) under the ruler: the "+ Video lane" row, then the lanes, highest first. */
+  const VIDEO_TOP = RULER_H + 4;
+  const video = $derived(videoLayout(VIDEO_TOP, videoLanes.length));
+  /** The main footage lane under the video lanes. */
+  const LANE_Y = $derived(video.bottom + 4);
   const LANE_H = 60;
   /** The voice lane sits under the video lane. */
-  const VOICE_Y = LANE_Y + LANE_H + 8;
+  const VOICE_Y = $derived(LANE_Y + LANE_H + 8);
   const VOICE_H = 46;
   /** Audio lanes under the voice lane (M8-1), then the "+ Audio lane" row. */
-  const AUDIO_Y = VOICE_Y + VOICE_H + 6;
+  const AUDIO_Y = $derived(VOICE_Y + VOICE_H + 6);
   const audio = $derived(audioLayout(AUDIO_Y, audioLanes.length));
   /** Avatar rows under the audio lanes: expression, reactions, then the motion lanes. */
   const EXPR_Y = $derived(audio.bottom + 6);
@@ -181,7 +223,12 @@
     | { mode: "apress"; clip: TimelineAudioClip; startX: number }
     | { mode: "amove"; clip: TimelineAudioClip; grabDx: number; startMs: number; laneIndex: number }
     | { mode: "atrim"; clip: TimelineAudioClip; edge: "start" | "end"; ms: number };
+  type LaneDrag =
+    | { mode: "vpress"; clip: TimelineLaneClip; startX: number }
+    | { mode: "vmove"; clip: TimelineLaneClip; grabDx: number; startMs: number; laneIndex: number }
+    | { mode: "vtrim"; clip: TimelineLaneClip; edge: "start" | "end"; ms: number };
   type Drag =
+    | LaneDrag
     | AudioDrag
     | ItemDrag
     | { mode: "scrub" }
@@ -194,7 +241,9 @@
     | { kind: "trim"; x: number }
     | { kind: "move"; clipId: string; ghostX: number; slotMs: number }
     | { kind: "pmove"; ghostX: number; width: number }
-    | { kind: "drop"; x: number; lane: number | "add" | null }
+    | { kind: "drop"; x: number; lane: number | "add" | null; vlane?: number | "add" | null }
+    | { kind: "vmove"; clipId: string; startMs: number; laneIndex: number; fits: boolean }
+    | { kind: "vtrim"; clip: TimelineLaneClip }
     | { kind: "amove"; clipId: string; startMs: number; laneIndex: number; fits: boolean }
     | { kind: "atrim"; clip: TimelineAudioClip }
     | { kind: "imove"; id: string; ms: number };
@@ -207,7 +256,7 @@
 
   const viewMs = $derived(viewWidth / pxPerMs);
   /** Audio clips may run past the footage; the view scrolls to their end too. */
-  const contentMs = $derived(Math.max(durationMs, audioEndMs(audioClips)));
+  const contentMs = $derived(Math.max(durationMs, audioEndMs(audioClips), laneEndMs(laneClips)));
   const maxScrollMs = $derived(Math.max(0, contentMs - (viewWidth - GUTTER) / pxPerMs));
 
   /**
@@ -218,7 +267,13 @@
   export function dropTarget(
     clientX: number,
     clientY: number,
-  ): { timelineMs: number; laneId: string | null; newLane: boolean } | null {
+  ): {
+    timelineMs: number;
+    laneId: string | null;
+    newLane: boolean;
+    videoLaneId: string | null;
+    videoNewLane: boolean;
+  } | null {
     if (canvasEl === null) {
       return null;
     }
@@ -227,10 +282,13 @@
       return null;
     }
     const lane = laneAt(clientY - box.top, AUDIO_Y, audioLanes.length);
+    const vlane = videoLaneAt(clientY - box.top, VIDEO_TOP, videoLanes.length);
     return {
       timelineMs: Math.max(0, Math.round(scrollMs + (clientX - box.left) / pxPerMs)),
       laneId: typeof lane === "number" ? (audioLanes[lane]?.id ?? null) : null,
       newLane: lane === "add",
+      videoLaneId: typeof vlane === "number" ? (videoLanes[vlane]?.id ?? null) : null,
+      videoNewLane: vlane === "add",
     };
   }
 
@@ -340,6 +398,83 @@
       if (major && t >= 0) {
         ctx.fillStyle = c.rulerText;
         ctx.fillText(rulerLabel(t, step), x + 3, 4);
+      }
+    }
+
+    // Video lanes (M8-2): the "+ Video lane" row, then the lanes, highest first.
+    const uiV = dragUi;
+    const addHot = uiV !== null && uiV.kind === "drop" && uiV.vlane === "add";
+    ctx.fillStyle = addHot ? c.ghost : c.row;
+    ctx.globalAlpha = addHot ? 0.3 : 0.5;
+    ctx.fillRect(0, video.addY, viewWidth, VIDEO_ADD_H);
+    ctx.globalAlpha = 1;
+    videoLanes.forEach((lane, index) => {
+      const y = video.laneY(index);
+      ctx.fillStyle = c.row;
+      ctx.fillRect(0, y, viewWidth, VIDEO_LANE_H);
+      const hot =
+        (uiV !== null && uiV.kind === "drop" && uiV.vlane === index) ||
+        (uiV !== null && uiV.kind === "vmove" && uiV.laneIndex === index);
+      if (hot) {
+        ctx.fillStyle = c.ghost;
+        ctx.globalAlpha = 0.12;
+        ctx.fillRect(0, y, viewWidth, VIDEO_LANE_H);
+        ctx.globalAlpha = 1;
+      }
+    });
+    if (videoLanes.length === 0) {
+      ctx.font = font(10);
+      ctx.fillStyle = c.hint;
+      ctx.textBaseline = "middle";
+      ctx.fillText(
+        "Video lanes: drag a recording from the Footage tab, or images and videos from Explorer, onto this row",
+        8,
+        video.addY + VIDEO_ADD_H / 2,
+      );
+      ctx.textBaseline = "top";
+    }
+    const vIndexOf = new Map(videoLanes.map((lane, index) => [lane.id, index]));
+    for (const original of laneClips) {
+      const clip = uiV !== null && uiV.kind === "vtrim" && uiV.clip.id === original.id ? uiV.clip : original;
+      const index = vIndexOf.get(clip.lane_id);
+      const lane = index === undefined ? undefined : videoLanes[index];
+      if (index === undefined || lane === undefined) continue;
+      const x0 = xOf(clip.timeline_ms);
+      const w = Math.max(2, (clip.end_ms - clip.timeline_ms) * pxPerMs);
+      if (x0 + w < 0 || x0 > viewWidth) continue;
+      const y = video.laneY(index) + 2;
+      const h = VIDEO_LANE_H - 4;
+      const moving = uiV !== null && uiV.kind === "vmove" && uiV.clipId === clip.id;
+      ctx.globalAlpha = moving ? 0.35 : lane.hidden ? 0.35 : 1;
+      const picked = clip.id === selectedLaneClipId;
+      ctx.fillStyle = clip.image_id !== null ? c.clipAlt : c.clip;
+      if (picked) ctx.filter = "brightness(1.2)";
+      ctx.fillRect(x0, y, Math.max(1, w - 1), h);
+      ctx.filter = "none";
+      if (clip.missing) {
+        ctx.strokeStyle = c.missing;
+        ctx.lineWidth = 2;
+        ctx.strokeRect(x0 + 1, y + 1, Math.max(1, w - 3), h - 2);
+      }
+      if (w > 30) {
+        ctx.save();
+        ctx.beginPath();
+        ctx.rect(x0, y, Math.max(1, w - 1), h);
+        ctx.clip();
+        ctx.fillStyle = c.clipText;
+        ctx.textBaseline = "top";
+        ctx.font = font(10, 600);
+        const pip = clip.scale !== 1 || clip.x !== 0.5 || clip.y !== 0.5 ? "  PiP" : "";
+        const fade = clip.opacity < 1 ? `  ${Math.round(clip.opacity * 100)}%` : "";
+        ctx.fillText(`${clip.missing ? `${clip.name} (missing)` : clip.name}${pip}${fade}`, x0 + 4, y + 3);
+        ctx.font = font(10);
+        ctx.fillStyle = c.clipTextMuted;
+        ctx.fillText(clock(clip.end_ms - clip.timeline_ms), x0 + 4, y + 16);
+        ctx.restore();
+      }
+      ctx.globalAlpha = 1;
+      if (picked) {
+        selectRect(x0, y, Math.max(1, w - 1), h);
       }
     }
 
@@ -719,12 +854,29 @@
       ctx.stroke();
     } else if (ui !== null && ui.kind === "drop") {
       const onAudio = ui.lane !== null;
+      const onVideo = ui.vlane !== undefined && ui.vlane !== null;
+      const top = onVideo ? video.addY : onAudio ? AUDIO_Y - 4 : VOICE_Y - 4;
+      const bottom = onVideo ? video.bottom : onAudio ? audio.bottom + 4 : VOICE_Y + VOICE_H + 4;
       ctx.strokeStyle = c.selected;
       ctx.lineWidth = 2;
       ctx.beginPath();
-      ctx.moveTo(Math.round(ui.x), onAudio ? AUDIO_Y - 4 : VOICE_Y - 4);
-      ctx.lineTo(Math.round(ui.x), onAudio ? audio.bottom + 4 : VOICE_Y + VOICE_H + 4);
+      ctx.moveTo(Math.round(ui.x), top);
+      ctx.lineTo(Math.round(ui.x), bottom);
       ctx.stroke();
+    } else if (ui !== null && ui.kind === "vmove") {
+      const dragged = laneClips.find((v) => v.id === ui.clipId);
+      if (dragged !== undefined) {
+        const gx = xOf(ui.startMs);
+        const gy = video.laneY(ui.laneIndex) + 2;
+        const gw = Math.max(4, (dragged.end_ms - dragged.timeline_ms) * pxPerMs - 1);
+        ctx.globalAlpha = 0.7;
+        ctx.fillStyle = ui.fits ? c.clip : c.missing;
+        ctx.fillRect(gx, gy, gw, VIDEO_LANE_H - 4);
+        ctx.globalAlpha = 1;
+        ctx.strokeStyle = ui.fits ? c.selected : c.missing;
+        ctx.lineWidth = 2;
+        ctx.strokeRect(gx, gy, gw, VIDEO_LANE_H - 4);
+      }
     } else if (ui !== null && ui.kind === "amove") {
       const dragged = audioClips.find((a) => a.id === ui.clipId);
       if (dragged !== undefined) {
@@ -879,6 +1031,40 @@
       }
       return null;
     }
+    /** A clip on a video lane under the pointer: an edge (trim) or the body (move). */
+    function hitLaneClip(x: number, y: number): { clip: TimelineLaneClip; part: "start" | "end" | "body" } | null {
+      const lane = videoLaneAt(y, VIDEO_TOP, videoLanes.length);
+      if (typeof lane !== "number") {
+        return null;
+      }
+      const laneId = videoLanes[lane]?.id;
+      for (const clip of laneClips) {
+        if (clip.lane_id !== laneId) continue;
+        const x0 = xPos(clip.timeline_ms);
+        const x1 = xPos(clip.end_ms);
+        if (x < x0 || x > x1) continue;
+        const grip = Math.min(EDGE_PX, (x1 - x0) / 3);
+        return { clip, part: x <= x0 + grip ? "start" : x >= x1 - grip ? "end" : "body" };
+      }
+      return null;
+    }
+    function laneLocked(laneId: string): boolean {
+      return videoLanes.find((lane) => lane.id === laneId)?.locked ?? false;
+    }
+    function updateLaneMove(d: Extract<LaneDrag, { mode: "vmove" }>, x: number, y: number): void {
+      const length = d.clip.end_ms - d.clip.timeline_ms;
+      d.startMs = Math.max(0, Math.round(scrollMs + (x - d.grabDx) / pxPerMs));
+      d.laneIndex = dragVideoLaneIndex(y, VIDEO_TOP, videoLanes.length);
+      const target = videoLanes[d.laneIndex];
+      const laneId = target?.id ?? d.clip.lane_id;
+      dragUi = {
+        kind: "vmove",
+        clipId: d.clip.id,
+        startMs: d.startMs,
+        laneIndex: d.laneIndex,
+        fits: !(target?.locked ?? false) && fitsOnLane(laneClips, laneId, d.startMs, d.startMs + length, d.clip.id),
+      };
+    }
     function updateAudioMove(d: Extract<AudioDrag, { mode: "amove" }>, x: number, y: number): void {
       const length = d.clip.end_ms - d.clip.timeline_ms;
       d.startMs = Math.max(0, Math.round(scrollMs + (x - d.grabDx) / pxPerMs));
@@ -949,11 +1135,36 @@
         // not a live pointer (synthetic event): the drag still works inside the canvas
       }
       const { x, y } = pointerXY(e);
+      const shot = hitLaneClip(x, y);
+      if (shot !== null) {
+        // A clip on a video lane: select it (and nothing else); drag the body to move it
+        // (also to another lane), drag an edge to trim it. Locked lanes only select.
+        selectedLaneClipId = shot.clip.id;
+        selectedAudioClipId = null;
+        selectedId = null;
+        selectedPlacementId = null;
+        selectedKeyId = null;
+        selectedReactionId = null;
+        if (locked || laneLocked(shot.clip.lane_id)) {
+          drag = null;
+        } else if (shot.part === "body") {
+          drag = { mode: "vpress", clip: shot.clip, startX: x };
+        } else {
+          const ms = shot.part === "start" ? shot.clip.timeline_ms : shot.clip.end_ms;
+          drag = { mode: "vtrim", clip: shot.clip, edge: shot.part, ms };
+          dragUi = { kind: "vtrim", clip: shot.clip };
+        }
+        return;
+      }
+      if (videoLaneAt(y, VIDEO_TOP, videoLanes.length) !== null) {
+        selectedLaneClipId = null; // empty space in a video lane
+      }
       const sound = hitAudio(x, y);
       if (sound !== null) {
         // An audio clip: select it (and nothing else); drag the body to move it (also to
         // another lane), drag an edge to trim it. The playhead stays where it is.
         selectedAudioClipId = sound.clip.id;
+        selectedLaneClipId = null;
         selectedId = null;
         selectedPlacementId = null;
         selectedKeyId = null;
@@ -979,6 +1190,7 @@
         selectedReactionId = item.kind === "reaction" ? item.id : null;
         selectedPlacementId = null;
         selectedAudioClipId = null;
+        selectedLaneClipId = null;
         selectedId = null;
         drag = locked
           ? null
@@ -994,6 +1206,7 @@
         // A voice block: select it (and nothing else); the playhead stays where it is.
         selectedPlacementId = placed.id;
         selectedAudioClipId = null;
+        selectedLaneClipId = null;
         selectedId = null;
         selectedKeyId = null;
         selectedReactionId = null;
@@ -1008,6 +1221,7 @@
         // Grab a clip edge: trim.
         selectedId = target.clip.id;
         selectedAudioClipId = null;
+        selectedLaneClipId = null;
         const edge = target.part;
         drag = {
           mode: "trim",
@@ -1022,6 +1236,7 @@
       if (target !== null) {
         selectedId = target.clip.id;
         selectedAudioClipId = null;
+        selectedLaneClipId = null;
         drag = locked ? { mode: "scrub" } : { mode: "press", clip: target.clip, startX: x };
       } else {
         if (y >= LANE_Y && y <= LANE_Y + LANE_H) {
@@ -1038,7 +1253,7 @@
       const d = drag;
       if (d === null) {
         const over = hit(x, y);
-        const sound = hitAudio(x, y);
+        const sound = hitAudio(x, y) ?? hitLaneClip(x, y);
         canvas.style.cursor =
           sound !== null && !locked
             ? sound.part === "body"
@@ -1051,6 +1266,30 @@
               : over.part === "body"
                 ? "grab"
                 : "ew-resize";
+        return;
+      }
+      if (d.mode === "vpress") {
+        if (Math.abs(x - d.startX) > 4) {
+          const index = videoLanes.findIndex((lane) => lane.id === d.clip.lane_id);
+          const next: LaneDrag = {
+            mode: "vmove",
+            clip: d.clip,
+            grabDx: d.startX - xPos(d.clip.timeline_ms),
+            startMs: d.clip.timeline_ms,
+            laneIndex: Math.max(0, index),
+          };
+          drag = next;
+          updateLaneMove(next, x, y);
+        }
+        return;
+      }
+      if (d.mode === "vmove") {
+        updateLaneMove(d, x, y);
+        return;
+      }
+      if (d.mode === "vtrim") {
+        d.ms = laneTrimTarget(d.clip, d.edge, scrollMs + x / pxPerMs, laneClips);
+        dragUi = { kind: "vtrim", clip: withLaneTrim(d.clip, d.edge, d.ms) };
         return;
       }
       if (d.mode === "apress") {
@@ -1126,6 +1365,30 @@
       if (d === null) {
         return;
       }
+      if (d.mode === "vmove") {
+        const lane = videoLanes[d.laneIndex];
+        const ui = dragUi;
+        const fits = ui !== null && ui.kind === "vmove" && ui.fits;
+        const changed = d.startMs !== d.clip.timeline_ms || lane?.id !== d.clip.lane_id;
+        if (fits && changed && lane !== undefined && onmovelane !== undefined) {
+          void finish(onmovelane(d.clip.id, d.startMs, lane.id));
+        } else {
+          dragUi = null;
+        }
+        return;
+      }
+      if (d.mode === "vtrim") {
+        const current = d.edge === "start" ? d.clip.timeline_ms : d.clip.end_ms;
+        if (d.ms !== current && ontrimlane !== undefined) {
+          void finish(ontrimlane(d.clip.id, d.edge, d.ms));
+        } else {
+          dragUi = null;
+        }
+        return;
+      }
+      if (d.mode === "vpress") {
+        return;
+      }
       if (d.mode === "amove") {
         const lane = audioLanes[d.laneIndex];
         const ui = dragUi;
@@ -1194,7 +1457,25 @@
         e.preventDefault();
         e.dataTransfer.dropEffect = "copy";
         const top = canvas?.getBoundingClientRect().top ?? 0;
-        dragUi = { kind: "drop", x: dropX(e), lane: laneAt(e.clientY - top, AUDIO_Y, audioLanes.length) };
+        dragUi = {
+          kind: "drop",
+          x: dropX(e),
+          lane: laneAt(e.clientY - top, AUDIO_Y, audioLanes.length),
+          vlane: videoLaneAt(e.clientY - top, VIDEO_TOP, videoLanes.length),
+        };
+        return;
+      }
+      if (e.dataTransfer !== null && e.dataTransfer.types.includes(FOOTAGE_DRAG_TYPE)) {
+        // A recording from the Footage tab (M8-2): only the video lanes and their add row take it.
+        const top = canvas?.getBoundingClientRect().top ?? 0;
+        const vlane = videoLaneAt(e.clientY - top, VIDEO_TOP, videoLanes.length);
+        if (locked || vlane === null) {
+          if (dragUi !== null && dragUi.kind === "drop") dragUi = null;
+          return;
+        }
+        e.preventDefault();
+        e.dataTransfer.dropEffect = "copy";
+        dragUi = { kind: "drop", x: dropX(e), lane: null, vlane };
         return;
       }
       if (locked || e.dataTransfer === null || !e.dataTransfer.types.includes(LINE_DRAG_TYPE)) {
@@ -1213,6 +1494,20 @@
       if (e.dataTransfer !== null && e.dataTransfer.types.includes("Files")) {
         e.preventDefault();
         dragUi = null;
+        return;
+      }
+      const sourceId = e.dataTransfer?.getData(FOOTAGE_DRAG_TYPE) ?? "";
+      if (sourceId !== "") {
+        const top = canvas?.getBoundingClientRect().top ?? 0;
+        const vlane = videoLaneAt(e.clientY - top, VIDEO_TOP, videoLanes.length);
+        if (locked || vlane === null || onplacefootage === undefined) {
+          dragUi = null;
+          return;
+        }
+        e.preventDefault();
+        const ms = Math.max(0, Math.round(scrollMs + dropX(e) / pxPerMs));
+        const laneId = typeof vlane === "number" ? (videoLanes[vlane]?.id ?? null) : null;
+        void finish(onplacefootage(sourceId, ms, laneId, vlane === "add"));
         return;
       }
       const lineId = e.dataTransfer?.getData(LINE_DRAG_TYPE) ?? "";
@@ -1286,7 +1581,8 @@
     <p class="help">
       Click the ruler to seek, click a clip to select it, drag its edge to trim, drag it sideways to
       reorder. Click a voice block to select it and drag it to move it; drag a line from the bank
-      onto the timeline to place it. Drag music or sound effects from Explorer onto an audio lane
+      onto the timeline to place it. Drag a recording from the Footage tab, or images and videos
+      from Explorer, onto a video lane (or "+ Video lane"); they show over the main footage. Drag music or sound effects from Explorer onto an audio lane
       (or onto "+ Audio lane" for a new lane); drag an audio clip to move it, also up or down to
       another lane, and drag its edge to trim it. Avatar keys and reactions: click to select, drag sideways to
       move. Wheel scrolls, Ctrl+wheel zooms.
@@ -1295,6 +1591,88 @@
   <div class="body">
     <div class="heads" style:height="{HEIGHT}px">
       <div class="head ruler num" style:top="0px" style:height="{RULER_H}px">{clock(playheadMs)}</div>
+      <div class="head add" style:top="{video.addY}px" style:height="{VIDEO_ADD_H}px">
+        <button
+          type="button"
+          class="addlane"
+          title="Add a video lane on top (or drop files or a recording on this row)"
+          disabled={locked}
+          onclick={() => void onaddvideolane?.()}
+        >
+          <Plus size={12} strokeWidth={2} aria-hidden="true" /> Video lane
+        </button>
+      </div>
+      {#each videoLanes as lane, i (lane.id)}
+        {@const empty = !laneClips.some((v) => v.lane_id === lane.id)}
+        <div class="head vlane" class:dim={lane.hidden} style:top="{video.laneY(i)}px" style:height="{VIDEO_LANE_H}px">
+          <span class="sw" style:background="var(--lane-clip)"></span>
+          <input
+            class="lname"
+            value={lane.name}
+            aria-label="Video lane name"
+            title="Rename the lane"
+            disabled={locked}
+            onkeydown={(e) => {
+              if (e.key === "Enter" || e.key === "Escape") {
+                if (e.key === "Escape") e.currentTarget.value = lane.name;
+                e.currentTarget.blur();
+              }
+              e.stopPropagation();
+            }}
+            onchange={(e) => {
+              const name = e.currentTarget.value.trim();
+              if (name === "" || name === lane.name) {
+                e.currentTarget.value = lane.name;
+              } else {
+                void onvideolane?.(lane.id, { name });
+              }
+            }}
+          />
+          <button
+            type="button"
+            class="toggle"
+            title={lane.hidden ? "Show this lane (it is hidden in the preview and the export)" : "Hide this lane"}
+            aria-label={lane.hidden ? `Show ${lane.name}` : `Hide ${lane.name}`}
+            aria-pressed={lane.hidden}
+            disabled={locked}
+            onclick={() => void onvideolane?.(lane.id, { hidden: !lane.hidden })}
+          >
+            {#if lane.hidden}
+              <EyeOff size={12} strokeWidth={2} aria-hidden="true" />
+            {:else}
+              <Eye size={12} strokeWidth={2} aria-hidden="true" />
+            {/if}
+          </button>
+          <button
+            type="button"
+            class="toggle"
+            class:on={lane.locked}
+            title={lane.locked ? "Unlock this lane" : "Lock this lane (its clips cannot be edited)"}
+            aria-label={lane.locked ? `Unlock ${lane.name}` : `Lock ${lane.name}`}
+            aria-pressed={lane.locked}
+            disabled={locked}
+            onclick={() => void onvideolane?.(lane.id, { locked: !lane.locked })}
+          >
+            {#if lane.locked}
+              <Lock size={12} strokeWidth={2} aria-hidden="true" />
+            {:else}
+              <LockOpen size={12} strokeWidth={2} aria-hidden="true" />
+            {/if}
+          </button>
+          {#if empty}
+            <button
+              type="button"
+              class="toggle"
+              title="Remove this empty lane"
+              aria-label="Remove {lane.name}"
+              disabled={locked}
+              onclick={() => void onremovevideolane?.(lane.id)}
+            >
+              <X size={12} strokeWidth={2} aria-hidden="true" />
+            </button>
+          {/if}
+        </div>
+      {/each}
       <div class="head big" style:top="{LANE_Y}px" style:height="{LANE_H}px">
         <span class="sw" style:background="var(--lane-clip)"></span>Video
       </div>
@@ -1539,6 +1917,16 @@
     align-items: center;
     gap: 4px;
     min-width: 0;
+  }
+  .head.vlane {
+    gap: 3px;
+    padding: 0 4px 0 8px;
+  }
+  .head.dim {
+    opacity: 0.55;
+  }
+  .toggle.on {
+    color: var(--warning);
   }
   .lname {
     flex: 1;
