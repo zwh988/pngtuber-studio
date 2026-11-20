@@ -131,6 +131,8 @@
   let tab = $state<"footage" | "lines" | "fx" | "avatar">("footage");
   /** Selected avatar key or reaction (click in the timeline's avatar rows). */
   let selectedKeyId = $state<string | null>(null);
+  /** Several selected keys (keyframes decision 1); counts while it holds `selectedKeyId`. */
+  let selectedKeyIds = $state<string[]>([]);
   let selectedReactionId = $state<string | null>(null);
   let avatarPanel = $state<ReturnType<typeof AvatarPanel> | null>(null);
   /** Bumped after an undo or redo so the line bank reloads. */
@@ -1232,6 +1234,7 @@
                   {playheadMs}
                   {busy}
                   bind:selectedKeyId
+                  bind:selectedKeyIds
                   bind:selectedReactionId
                   oncommit={commitAvatar}
                 />
@@ -1286,9 +1289,13 @@
             keyframes={timeline.keyframes}
             reactions={timeline.reactions}
             bind:selectedKeyId
+            bind:selectedKeyIds
             bind:selectedReactionId
-            onmovekey={async (id, ms) => {
-              await commitAvatar("Move key", [{ op: "move_keyframe", keyframe_id: id, timeline_ms: ms }]);
+            onmovekeys={async (moves) => {
+              await commitAvatar(
+                moves.length === 1 ? "Move key" : `Move ${moves.length} keys`,
+                moves.map((m) => ({ op: "move_keyframe", keyframe_id: m.id, timeline_ms: m.ms })),
+              );
             }}
             onmovereaction={async (id, ms) => {
               await commitAvatar("Move reaction", [{ op: "move_reaction", reaction_id: id, timeline_ms: ms }]);

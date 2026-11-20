@@ -43,7 +43,7 @@
   import { LINE_DRAG_TYPE, dropSlot, peakSpan, trimTarget, withTrim } from "./timeline";
   import { FALLBACK, readTimelineColors, type TimelineColors } from "./timelineTheme";
   import { SNAP_PX, snapEdge, snapMove, snapPoints } from "./snap";
-  import { stepKey } from "./keyNav";
+  import { clampShift, keyGroup, keySelection, stepKey, toggleGroup } from "./keyNav";
   import {
     ArrowDown,
     ArrowUp,
@@ -83,8 +83,9 @@
     keyframes = [],
     reactions = [],
     selectedKeyId = $bindable(null),
+    selectedKeyIds = $bindable([]),
     selectedReactionId = $bindable(null),
-    onmovekey,
+    onmovekeys,
     onmovereaction,
     audioLanes = [],
     audioClips = [],
@@ -131,9 +132,11 @@
     keyframes?: TimelineKeyframe[];
     reactions?: TimelineReaction[];
     selectedKeyId?: string | null;
+    /** Several selected keys (Shift-click, box select); counts while it holds `selectedKeyId`. */
+    selectedKeyIds?: string[];
     selectedReactionId?: string | null;
-    /** A key or reaction was dragged sideways: its new TIMELINE time. One call per drag. */
-    onmovekey?: (keyframeId: string, timelineMs: number) => Promise<void>;
+    /** Keys or a reaction were dragged sideways: their new TIMELINE times. One call per drag. */
+    onmovekeys?: (moves: { id: string; ms: number }[]) => Promise<void>;
     onmovereaction?: (reactionId: string, timelineMs: number) => Promise<void>;
     /** Audio lanes and clips (M8-1). Clips are at TIMELINE times, never anchored to footage. */
     audioLanes?: AudioLane[];
@@ -260,14 +263,19 @@
     grabDx: number;
     startMs: number;
   };
+  /** A key (with the rest of the selection) or a reaction dragged in time; `toMs` is
+   * where the grabbed one goes, every other selected key shifts by the same amount. */
   type ItemDrag = {
     mode: "ipress" | "imove";
     kind: "key" | "reaction";
     id: string;
+    ids: string[];
     fromMs: number;
     startX: number;
     toMs: number;
   };
+  /** A rectangle dragged over empty avatar rows selects the keys inside it. */
+  type BoxDrag = { mode: "box"; x0: number; y0: number; x1: number; y1: number; moved: boolean; add: boolean };
   type AudioDrag =
     | { mode: "apress"; clip: TimelineAudioClip; startX: number }
     | { mode: "amove"; clip: TimelineAudioClip; grabDx: number; startMs: number; laneIndex: number }
@@ -280,6 +288,7 @@
     | LaneDrag
     | AudioDrag
     | ItemDrag
+    | BoxDrag
     | { mode: "scrub" }
     | { mode: "press"; clip: TimelineClip; startX: number }
     | { mode: "ppress"; placement: TimelinePlacement; startX: number }
@@ -295,7 +304,8 @@
     | { kind: "vtrim"; clip: TimelineLaneClip }
     | { kind: "amove"; clipId: string; startMs: number; laneIndex: number; fits: boolean }
     | { kind: "atrim"; clip: TimelineAudioClip }
-    | { kind: "imove"; id: string; ms: number };
+    | { kind: "imove"; ids: string[]; deltaMs: number }
+    | { kind: "box"; x0: number; y0: number; x1: number; y1: number };
 
   /** Pointer interaction in progress (not reactive: only the handlers use it). */
   let drag: Drag | null = null;
@@ -326,6 +336,7 @@
   /** Select a key or reaction alone and put the playhead on it. */
   function selectItem(kind: "key" | "reaction", id: string, t: number): void {
     selectedKeyId = kind === "key" ? id : null;
+    selectedKeyIds = kind === "key" ? [id] : [];
     selectedReactionId = kind === "reaction" ? id : null;
     selectedPlacementId = null;
     selectedAudioClipId = null;
@@ -379,7 +390,7 @@
   /** Time an item is drawn at (its drag position while it is being dragged). */
   function shownMs(id: string, t: number | null): number | null {
     const ui = dragUi;
-    return ui !== null && ui.kind === "imove" && ui.id === id ? ui.ms : t;
+    return ui !== null && ui.kind === "imove" && t !== null && ui.ids.includes(id) ? t + ui.deltaMs : t;
   }
 
   function placementWidth(p: TimelinePlacement): number {
@@ -864,7 +875,7 @@
       const x = xOf(t);
       if (x < -60 || x > viewWidth + KEY_R) continue;
       const cy = keyRowY(key) + ROW_H / 2;
-      const picked = key.id === selectedKeyId;
+      const picked = keySelection(selectedKeyId, selectedKeyIds).includes(key.id);
       ctx.beginPath();
       ctx.moveTo(x, cy - KEY_R);
       ctx.lineTo(x + KEY_R, cy);
@@ -901,6 +912,20 @@
     // Drag feedback: a dashed line at the pointer while trimming; a ghost and a drop marker
     // while reordering.
     const ui = dragUi;
+    if (ui !== null && ui.kind === "box") {
+      // Selection box over the avatar rows.
+      const bx = Math.min(ui.x0, ui.x1);
+      const by = Math.min(ui.y0, ui.y1);
+      ctx.fillStyle = c.selectedRing;
+      ctx.globalAlpha = 0.25;
+      ctx.fillRect(bx, by, Math.abs(ui.x1 - ui.x0), Math.abs(ui.y1 - ui.y0));
+      ctx.globalAlpha = 1;
+      ctx.strokeStyle = c.selected;
+      ctx.lineWidth = 1;
+      ctx.setLineDash([4, 3]);
+      ctx.strokeRect(bx + 0.5, by + 0.5, Math.abs(ui.x1 - ui.x0), Math.abs(ui.y1 - ui.y0));
+      ctx.setLineDash([]);
+    }
     if (ui !== null && ui.kind === "trim") {
       ctx.strokeStyle = c.selected;
       ctx.lineWidth = 1;
@@ -1170,6 +1195,21 @@
         fits: fitsOnLane(audioClips, laneId, d.startMs, d.startMs + length, d.clip.id),
       };
     }
+    /** Timeline time of a key or reaction (null when it does not map). */
+    function itemTime(kind: "key" | "reaction", id: string): number | null {
+      const list: { id: string; t_ms: number | null }[] = kind === "key" ? keyframes : reactions;
+      return list.find((item) => item.id === id)?.t_ms ?? null;
+    }
+    /** Where dragged keys snap (magnet on, no Alt): clip and line edges, the playhead, and
+     * the other keys and reactions (keyframes decision 1). */
+    function itemSnapPoints(ids: string[], alt: boolean): number[] | null {
+      const base = snapTargets("", alt);
+      if (base === null) return null;
+      const others = [...keyframes, ...reactions]
+        .filter((item) => !ids.includes(item.id) && item.t_ms !== null)
+        .map((item) => item.t_ms as number);
+      return [...new Set([...base, ...others])].sort((a, b) => a - b);
+    }
     /** A key diamond or a reaction bar under the pointer (keys win: they are small). */
     function hitItem(x: number, y: number): { kind: "key" | "reaction"; id: string; t: number } | null {
       for (let i = keyframes.length - 1; i >= 0; i -= 1) {
@@ -1279,15 +1319,41 @@
       if (item !== null) {
         // A key or a reaction: select it (and nothing else) and put the playhead on it, so
         // a preview drag or the inspector edits it (keyframes decision 1); drag sideways to move it.
-        selectItem(item.kind, item.id, item.t);
+        // On the collapsed Motion row the keys at that time are one group; Shift-click adds or
+        // removes a group; dragging a selected key moves the whole selection.
+        let ids = [item.id];
+        if (item.kind === "key") {
+          const key = keyframes.find((k) => k.id === item.id);
+          const group = key === undefined ? [item.id] : keyGroup(keyframes, key, !lanesOpen).map((k) => k.id);
+          const current = keySelection(selectedKeyId, selectedKeyIds);
+          if (e.shiftKey) {
+            const next = toggleGroup(current, group);
+            selectItem("key", item.id, playheadMs);
+            selectedKeyIds = next;
+            selectedKeyId = next.includes(item.id) ? item.id : (next[0] ?? null);
+            drag = null;
+            return;
+          }
+          ids = current.includes(item.id) ? current : group;
+          selectItem("key", item.id, item.t);
+          selectedKeyIds = ids;
+        } else {
+          selectItem(item.kind, item.id, item.t);
+        }
         drag = locked
           ? null
-          : { mode: "ipress", kind: item.kind, id: item.id, fromMs: item.t, startX: x, toMs: item.t };
+          : { mode: "ipress", kind: item.kind, id: item.id, ids, fromMs: item.t, startX: x, toMs: item.t };
         return;
       }
       if (y >= EXPR_Y) {
-        selectedKeyId = null;
+        // Empty avatar rows: a click seeks (on release), a drag draws a selection box.
+        if (!e.shiftKey) {
+          selectedKeyId = null;
+          selectedKeyIds = [];
+        }
         selectedReactionId = null;
+        drag = { mode: "box", x0: x, y0: y, x1: x, y1: y, moved: false, add: e.shiftKey };
+        return;
       }
       const placed = hitPlacement(x, y);
       if (placed !== null) {
@@ -1407,9 +1473,21 @@
       if (d.mode === "ipress" || d.mode === "imove") {
         if (d.mode === "ipress" && Math.abs(x - d.startX) <= 4) return;
         d.mode = "imove";
-        const ms = Math.round(d.fromMs + (x - d.startX) / pxPerMs);
-        d.toMs = Math.min(Math.max(ms, 0), Math.max(0, durationMs - 1));
-        dragUi = { kind: "imove", id: d.id, ms: d.toMs };
+        const raw = Math.round(d.fromMs + (x - d.startX) / pxPerMs);
+        const points = itemSnapPoints(d.ids, e.altKey);
+        const target = points === null ? raw : Math.round(snapEdge(raw, points, SNAP_PX / pxPerMs));
+        const times = d.ids.map((id) => itemTime(d.kind, id)).filter((t): t is number => t !== null);
+        const delta = clampShift(times, target - d.fromMs, 0, Math.max(0, durationMs - 1));
+        d.toMs = d.fromMs + delta;
+        dragUi = { kind: "imove", ids: d.ids, deltaMs: delta };
+        return;
+      }
+      if (d.mode === "box") {
+        if (!d.moved && Math.hypot(x - d.x0, y - d.y0) <= 4) return;
+        d.moved = true;
+        d.x1 = x;
+        d.y1 = y;
+        dragUi = { kind: "box", x0: d.x0, y0: d.y0, x1: x, y1: y };
         return;
       }
       if (d.mode === "scrub") {
@@ -1447,10 +1525,33 @@
         updateMove(d, x);
       }
     }
-    function up(): void {
+    function up(e: PointerEvent): void {
       const d = drag;
       drag = null;
       if (d === null) {
+        return;
+      }
+      if (d.mode === "box") {
+        dragUi = null;
+        if (!d.moved) {
+          seek(e);
+          return;
+        }
+        const [x0, x1] = [Math.min(d.x0, d.x1), Math.max(d.x0, d.x1)];
+        const [y0, y1] = [Math.min(d.y0, d.y1), Math.max(d.y0, d.y1)];
+        const inside = keyframes
+          .filter((k) => {
+            if (k.t_ms === null || k.orphaned) return false;
+            const kx = xPos(k.t_ms);
+            const ky = keyRowY(k) + ROW_H / 2;
+            return kx >= x0 && kx <= x1 && ky >= y0 - KEY_R && ky <= y1 + KEY_R;
+          })
+          .sort((a, b) => (a.t_ms ?? 0) - (b.t_ms ?? 0))
+          .map((k) => k.id);
+        const current = d.add ? keySelection(selectedKeyId, selectedKeyIds) : [];
+        const next = [...current, ...inside.filter((id) => !current.includes(id))];
+        selectedKeyIds = next;
+        selectedKeyId = next.includes(selectedKeyId ?? "") ? selectedKeyId : (next[0] ?? null);
         return;
       }
       if (d.mode === "vmove") {
@@ -1502,10 +1603,17 @@
         return;
       }
       if (d.mode === "imove") {
-        const handler = d.kind === "key" ? onmovekey : onmovereaction;
-        if (d.toMs !== d.fromMs && handler !== undefined) {
-          playheadMs = d.toMs; // the playhead follows the moved key
-          void finish(handler(d.id, d.toMs));
+        const delta = d.toMs - d.fromMs;
+        if (delta !== 0 && d.kind === "key" && onmovekeys !== undefined) {
+          playheadMs = d.toMs; // the playhead follows the grabbed key
+          const moves = d.ids.flatMap((id) => {
+            const t = itemTime("key", id);
+            return t === null ? [] : [{ id, ms: t + delta }];
+          });
+          void finish(onmovekeys(moves));
+        } else if (delta !== 0 && d.kind === "reaction" && onmovereaction !== undefined) {
+          playheadMs = d.toMs;
+          void finish(onmovereaction(d.id, d.toMs));
         } else {
           dragUi = null;
         }
@@ -1684,8 +1792,8 @@
       onto the timeline to place it. Drag a recording from the Footage tab, or images and videos
       from Explorer, onto a video lane (or "+ Video lane"); they show over the main footage. Drag music or sound effects from Explorer onto an audio lane
       (or onto "+ Audio lane" for a new lane); drag an audio clip to move it, also up or down to
-      another lane, and drag its edge to trim it. With the magnet on, audio and lane clips snap to clip edges and the playhead (hold Alt to drag freely); S splits the selected audio or lane clip at the playhead. Avatar keys and reactions: click to select, drag sideways to
-      move. Wheel scrolls, Ctrl+wheel zooms.
+      another lane, and drag its edge to trim it. With the magnet on, audio and lane clips snap to clip edges and the playhead (hold Alt to drag freely); S splits the selected audio or lane clip at the playhead. Avatar keys and reactions: click to select (the playhead goes there; on the collapsed Motion row the keys at one time are one group), Shift-click to add or remove, drag over empty avatar rows to box-select, drag sideways to
+      move (the whole selection, snapping with the magnet); &lt; and &gt; step between keys. Wheel scrolls, Ctrl+wheel zooms.
     </p>
   {/if}
   <div class="body">

@@ -39,3 +39,37 @@ export function keyNear<K extends NavKey>(keys: readonly K[], laneId: string, ms
   }
   return best;
 }
+
+/**
+ * Several selected keys (keyframes decision 1). `primary` is the key the inspector shows;
+ * `ids` the whole selection, which counts only while it holds `primary` (anything that
+ * sets `primary` alone, such as the Avatar tab, collapses the selection to that key).
+ */
+export function keySelection(primary: string | null, ids: readonly string[]): string[] {
+  if (primary === null) return [];
+  return ids.includes(primary) ? [...ids] : [primary];
+}
+
+/**
+ * The keys a click on `key` picks: on the collapsed Motion row every motion key at that
+ * time (x, y and scale from one drag sit on one spot), else the key alone.
+ */
+export function keyGroup<K extends NavKey>(keys: readonly K[], key: K, collapsed: boolean): K[] {
+  if (!collapsed || key.lane_id === "expression" || key.t_ms === null) return [key];
+  return keys.filter((k) => k.t_ms === key.t_ms && k.lane_id !== "expression" && !k.orphaned);
+}
+
+/** Shift-click: add the group to the selection, or take it out when all of it is in. */
+export function toggleGroup(selection: readonly string[], group: readonly string[]): string[] {
+  const all = group.every((id) => selection.includes(id));
+  if (all) return selection.filter((id) => !group.includes(id));
+  return [...selection, ...group.filter((id) => !selection.includes(id))];
+}
+
+/** A shift of several keys, cut down so none goes below `minMs` or above `maxMs`. */
+export function clampShift(times: readonly number[], deltaMs: number, minMs: number, maxMs: number): number {
+  if (times.length === 0) return deltaMs;
+  const lo = Math.min(...times);
+  const hi = Math.max(...times);
+  return Math.min(Math.max(deltaMs, minMs - lo), maxMs - hi);
+}

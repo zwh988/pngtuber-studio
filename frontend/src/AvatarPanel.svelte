@@ -10,7 +10,7 @@
   } from "./api";
   import { LANE_INFO, REACTION_TYPES, laneInfo, laneLabel, reactionLabel } from "./avatarLanes";
   import { clock } from "./format";
-  import { keyNear } from "./keyNav";
+  import { keyNear, keySelection } from "./keyNav";
   import FxSlider from "./FxSlider.svelte";
   import { Diamond, LocateFixed, Trash2, Zap } from "@lucide/svelte";
   import Banner from "./ui/Banner.svelte";
@@ -30,6 +30,7 @@
     playheadMs,
     busy,
     selectedKeyId = $bindable(null),
+    selectedKeyIds = $bindable([]),
     selectedReactionId = $bindable(null),
     oncommit,
   }: {
@@ -39,6 +40,8 @@
     playheadMs: number;
     busy: boolean;
     selectedKeyId?: string | null;
+    /** Several selected keys (timeline Shift-click, box select); counts while it holds the key. */
+    selectedKeyIds?: string[];
     selectedReactionId?: string | null;
     oncommit: (label: string, ops: EditOp[]) => Promise<boolean>;
   } = $props();
@@ -54,6 +57,7 @@
   const selectedKey = $derived(keyframes.find((k) => k.id === selectedKeyId) ?? null);
   const selectedReaction = $derived(reactions.find((r) => r.id === selectedReactionId) ?? null);
   const at = $derived(Math.round(playheadMs));
+  const selectedCount = $derived(selectedKey === null ? 0 : keySelection(selectedKey.id, selectedKeyIds).length);
 
   onMount(() => {
     void (async () => {
@@ -98,8 +102,12 @@
   /** Delete: remove the selected key or reaction; false when neither is selected. */
   export async function deleteSelected(): Promise<boolean> {
     if (selectedKey !== null) {
-      const id = selectedKey.id;
-      if (await oncommit("Remove key", [{ op: "remove_keyframe", keyframe_id: id }])) selectedKeyId = null;
+      const ids = keySelection(selectedKey.id, selectedKeyIds);
+      const label = ids.length === 1 ? "Remove key" : `Remove ${ids.length} keys`;
+      if (await oncommit(label, ids.map((id) => ({ op: "remove_keyframe", keyframe_id: id }) as EditOp))) {
+        selectedKeyId = null;
+        selectedKeyIds = [];
+      }
       return true;
     }
     if (selectedReaction !== null) {
@@ -140,6 +148,9 @@
     {#if selectedKey !== null}
       {@const key = selectedKey}
       <p class="what"><strong>{laneLabel(key.lane_id)} key</strong> at <span class="num">{when(key.t_ms, key.orphaned)}</span></p>
+      {#if selectedCount > 1}
+        <p class="hint">{selectedCount} keys selected: Delete removes them all; drag one on the timeline to move them together. The settings below are this key's.</p>
+      {/if}
       {#if key.lane_id === "expression"}
         <label>
           Expression
