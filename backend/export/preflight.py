@@ -59,13 +59,15 @@ def preflight(
     art_problem: str | None = None,
     art_warnings: Sequence[str] = (),
     tools_problem: str | None = None,
+    missing_audio_file_ids: Collection[str] = (),
 ) -> PreflightReport:
     """Check a project before export.
 
     ``timeline`` is ``build_timeline`` of this project (with the sources missing on
     disk marked); ``missing_take_ids`` are takes whose raw file is missing;
     ``art_status`` / ``art_problem`` / ``art_warnings`` come from the avatar state;
-    ``tools_problem`` says why ffmpeg or NVENC cannot be used (None when they can).
+    ``tools_problem`` says why ffmpeg or NVENC cannot be used (None when they can);
+    ``missing_audio_file_ids`` are imported audio files no longer in ``audio/`` (M8-1).
     """
     issues: list[PreflightIssue] = []
 
@@ -175,6 +177,22 @@ def preflight(
                 f"{label} runs {placement.overflow_ms} ms into the next line; both will play mixed.",
                 placement.id,
                 placement.start_ms,
+            )
+
+    # --- audio lanes (M8-1) -----------------------------------------------------------
+    missing_audio = set(missing_audio_file_ids)
+    names = {f.id: f.name for f in project.audio_files}
+    reported_audio: set[str] = set()
+    for sound in sorted(project.audio_clips, key=lambda c: (c.timeline_ms, c.id)):
+        if sound.file_id in missing_audio and sound.file_id not in reported_audio:
+            reported_audio.add(sound.file_id)
+            add(
+                "error",
+                "audio_file_missing",
+                f"The audio file {names.get(sound.file_id, '?')} is missing from the "
+                "project's audio folder; remove its clips or drop the file again.",
+                sound.id,
+                sound.timeline_ms,
             )
 
     # --- avatar ---------------------------------------------------------------------

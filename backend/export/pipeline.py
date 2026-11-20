@@ -4,7 +4,7 @@ callables, so the steps can be tested without a project folder."""
 
 import time
 from collections.abc import Callable, Mapping
-from dataclasses import dataclass
+from dataclasses import dataclass, field
 from datetime import datetime
 from pathlib import Path
 
@@ -13,6 +13,11 @@ import numpy as np
 from backend.avatar.art import AvatarArt
 from backend.avatar.track import FrameTrack, track_frame_at
 from backend.edl.timemap import clip_spans, timeline_duration
+from backend.export.audioclips import (
+    AUDIO_CLIPS_NAME,
+    AudioClipTrackReport,
+    write_audio_clip_track,
+)
 from backend.export.bundle import (
     RawLinks,
     ensure_new_folder,
@@ -62,6 +67,8 @@ class ExportInputs:
     track: FrameTrack | None
     art: AvatarArt | None
     art_root: Path | None
+    # M8-1: the decoded 48 kHz WAV of each imported audio file, by file id.
+    audio_paths: dict[str, Path] = field(default_factory=dict)
 
 
 @dataclass(frozen=True)
@@ -84,6 +91,7 @@ class ExportResult:
     fmt: OutputFormat
     voice: VoiceTrackReport
     render: RenderReport
+    audio_clips: AudioClipTrackReport | None
     with_avatar: bool
     overlay_frames: int
     raw: RawLinks
@@ -164,6 +172,9 @@ def run_export(
         should_stop=should_stop,
         progress=lambda f: report("voice", f * VOICE_SHARE),
     )
+    music = write_audio_clip_track(
+        project, total_ms, out_dir, inputs.audio_paths, should_stop=should_stop
+    )
     mark = timed("voice", mark)
     report("render", VOICE_SHARE)
     if compositor is not None:
@@ -177,6 +188,7 @@ def run_export(
         avatar=compositor,
         out_dir=out_dir,
         overlay_frames=overlay_count,
+        music_wav=None if music is None else out_dir / AUDIO_CLIPS_NAME,
     )
     render = run_render(
         plan,
@@ -225,6 +237,17 @@ def run_export(
                 "peak": round(voice.peak, 4),
                 "cut_ms": voice.cut_ms,
             },
+            "audio_clips": (
+                {"clips": 0, "files": []}
+                if music is None
+                else {
+                    "clips": music.clips,
+                    "sample_rate": music.sample_rate,
+                    "peak": round(music.peak, 4),
+                    "cut_ms": music.cut_ms,
+                    "files": music.files,
+                }
+            ),
             "avatar": {
                 "drawn": compositor is not None,
                 "frames_fed": render.avatar_frames,
@@ -239,6 +262,7 @@ def run_export(
         fmt=fmt,
         voice=voice,
         render=render,
+        audio_clips=music,
         with_avatar=compositor is not None,
         overlay_frames=overlay_frames,
         raw=raw,

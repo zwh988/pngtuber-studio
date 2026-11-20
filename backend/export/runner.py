@@ -56,6 +56,8 @@ class RenderPlan:
     avatar: Compositor | None
     out_dir: Path
     overlay_frames: int = 0  # avatar frames to write as PNGs (0: no PNG sequence)
+    # M8-1: the audio-lane clips (``audio_clips.wav``), None when no clip is heard.
+    music_wav: Path | None = None
 
     @property
     def overlay_dir(self) -> Path:
@@ -86,9 +88,10 @@ class RenderReport:
     overlay_frames: int = 0  # PNG files written
 
 
-def first_clip_input(with_avatar: bool) -> int:
-    """ffmpeg input index of the first clip: [avatar pipe], voice, then the clips."""
-    return 2 if with_avatar else 1
+def first_clip_input(with_avatar: bool, with_music: bool = False) -> int:
+    """ffmpeg input index of the first clip: [avatar pipe], voice, [audio clips], then
+    the clips."""
+    return (2 if with_avatar else 1) + (1 if with_music else 0)
 
 
 def make_plan(
@@ -101,9 +104,13 @@ def make_plan(
     avatar: Compositor | None,
     out_dir: Path,
     overlay_frames: int = 0,
+    music_wav: Path | None = None,
 ) -> RenderPlan:
     graph = build_edit_graph(
-        project, source_paths, fmt, first_input=first_clip_input(avatar is not None)
+        project,
+        source_paths,
+        fmt,
+        first_input=first_clip_input(avatar is not None, music_wav is not None),
     )
     return RenderPlan(
         ffmpeg=ffmpeg,
@@ -114,6 +121,7 @@ def make_plan(
         avatar=avatar,
         out_dir=out_dir,
         overlay_frames=overlay_frames if avatar is not None else 0,
+        music_wav=music_wav,
     )
 
 
@@ -124,6 +132,7 @@ def final_filters(
     with_avatar: bool,
     game_db: float,
     overlay_frames: int = 0,
+    with_music: bool = False,
 ) -> list[str]:
     voice = 1 if with_avatar else 0
     limit = db_to_linear(CEILING_DB)
@@ -150,12 +159,22 @@ def final_filters(
         "aformat=sample_fmts=fltp:channel_layouts=stereo,"
         f"apad,atrim=end_sample={graph.samples}[voice]"
     )
+    # M8-1: the audio-lane clips join the sum before the limiter, as in the preview.
+    music_chain = (
+        f"[{voice + 1}:a:0]aresample={fmt.sample_rate},"
+        "aformat=sample_fmts=fltp:channel_layouts=stereo,"
+        f"apad,atrim=end_sample={graph.samples}[music]"
+    )
+    sources = "[game][voice][music]" if with_music else "[game][voice]"
     mix = (
-        "[game][voice]amix=inputs=2:normalize=0:duration=first,"
+        f"{sources}amix=inputs={3 if with_music else 2}:normalize=0:duration=first,"
         f"alimiter=limit={limit:.6f}:level=disabled:latency=1,"
         f"atrim=end_sample={graph.samples}[afinal]"
     )
-    filters += [f"[agame]volume={game_db:.2f}dB[game]", voice_chain, mix]
+    filters += [f"[agame]volume={game_db:.2f}dB[game]", voice_chain]
+    if with_music:
+        filters.append(music_chain)
+    filters.append(mix)
     return filters
 
 
@@ -169,6 +188,8 @@ def final_args(plan: RenderPlan) -> list[str]:
             "-r", str(plan.avatar.track.fps), "-i", "pipe:0",
         ]  # fmt: skip
     inputs += ["-i", str(plan.voice_wav)]
+    if plan.music_wav is not None:
+        inputs += ["-i", str(plan.music_wav)]
     out = [
         "-map", "[vfinal]", "-map", "[afinal]", "-r", fmt.fps_text,
         *VIDEO_ENCODE_ARGS, *AUDIO_ENCODE_ARGS, "-movflags", "+faststart", str(plan.final_path),
@@ -225,6 +246,7 @@ def run_render(
             with_avatar=with_avatar,
             game_db=plan.game_db,
             overlay_frames=overlay,
+            with_music=plan.music_wav is not None,
         )
     )
     plan.script_path.write_text(script + "\n", encoding="utf-8")

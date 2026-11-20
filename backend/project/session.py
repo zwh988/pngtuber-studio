@@ -837,6 +837,16 @@ class Session:
             if path is not None:
                 paths[clip.source_id] = path
         track = self.avatar_track() if art is not None else None
+        # M8-1: decoded WAVs of the imported audio (made again when missing; a file that
+        # cannot be decoded is left out and the export reports it).
+        audio_paths: dict[str, Path] = {}
+        for audio_file in project.audio_files:
+            try:
+                decoded = self.audio_decoded_path(audio_file.id)
+            except SessionError:
+                continue
+            if decoded is not None:
+                audio_paths[audio_file.id] = decoded
         return ExportInputs(
             project=project,
             timeline=timeline,
@@ -844,6 +854,7 @@ class Session:
             track=track,
             art=art,
             art_root=art_root,
+            audio_paths=audio_paths,
         )
 
     def export_defaults(self) -> ExportDefaults:
@@ -880,6 +891,12 @@ class Session:
                 except TakeError:
                     missing.add(take.id)
             art = self._avatar_state(folder, stack)
+            used_files = {c.file_id for c in project.audio_clips}
+            missing_audio = {
+                f.id
+                for f in project.audio_files
+                if f.id in used_files and not (folder / f.path).is_file()
+            }
         return preflight(
             project,
             timeline,
@@ -888,6 +905,7 @@ class Session:
             art_problem=art.problem,
             art_warnings=art.warnings,
             tools_problem=tools_problem,
+            missing_audio_file_ids=missing_audio,
         )
 
     def envelope(self, take_id: str, stretch: float = 1.0) -> EnvelopeReport | None:
