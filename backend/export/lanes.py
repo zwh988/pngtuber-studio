@@ -13,6 +13,15 @@ frame) is delayed to its start at the clip's level and joins the final mix.
 
 Times follow the edit graph: a clip covers the output frames ``frame_count(start)`` to
 ``frame_count(end)``, so lane clips line up with the footage frame for frame.
+
+Keyed image clips (keyframes step 8): Python works out the clip's x, y, scale and opacity
+for every output frame with ``clip_values_at`` (the evaluation the preview uses, checked
+against one shared table) and ``pip_rect``, and hands the results to ffmpeg as per-frame
+commands (``sendcmd``) for ``scale``, ``colorchannelmixer`` and ``crop``, all in the
+clip's own chain. The picture is padded with a transparent border and a frame-sized
+window is cropped out of it, so it lands at its position and is overlaid at 0, 0.
+Commands to ``overlay`` itself were tried and arrive out of step with its frames (it
+reads ahead), so the position is never sent there.
 """
 
 from collections.abc import Mapping
@@ -21,6 +30,7 @@ from fractions import Fraction
 from pathlib import Path
 
 from backend.edl.timemap import round_half_up, timeline_duration
+from backend.export.clip_keys import clip_values_at
 from backend.export.editgraph import OutputFormat, frame_count, sample_count, seconds
 from backend.export.errors import ExportError
 from backend.project.schema import LaneClip, Project
@@ -100,6 +110,80 @@ def pip_rect(
         width=width,
         height=height,
     )
+
+
+@dataclass(frozen=True)
+class KeyedFrame:
+    """A keyed clip's picture in one output frame: where it goes and how opaque."""
+
+    rect: PipRect
+    opacity: float
+
+
+def keyed_frames(
+    clip: LaneClip,
+    media_w: int,
+    media_h: int,
+    fmt: OutputFormat,
+    start_frame: int,
+    frames: int,
+) -> list[KeyedFrame]:
+    """The clip's rect and opacity in each of its output frames: the values at each
+    frame's timeline time (frame n starts at n / fps), as the preview shows them there."""
+    result = []
+    for n in range(start_frame, start_frame + frames):
+        ms = float(Fraction(n * 1000) / fmt.fps)
+        v = clip_values_at(clip, ms)
+        rect = pip_rect(fmt.width, fmt.height, media_w, media_h, v.x, v.y, v.scale)
+        result.append(KeyedFrame(rect, min(1.0, max(0.0, v.opacity))))
+    return result
+
+
+def _crop_xy(rect: PipRect, fmt: OutputFormat) -> tuple[int, int]:
+    """The crop window's corner in the padded picture (a border of one frame on each
+    side), clamped so a picture far off-screen stays just off-screen."""
+    left = min(max(rect.left, -rect.width), fmt.width)
+    top = min(max(rect.top, -rect.height), fmt.height)
+    return fmt.width - left, fmt.height - top
+
+
+def keyed_chain(frames: list[KeyedFrame], fmt: OutputFormat, tag: str) -> list[str]:
+    """Filters that size, fade and place a keyed picture frame by frame (see the module
+    docstring). Each command fires half a frame before its frame, so a frame never
+    misses its own values; only values that change are sent."""
+    first = frames[0]
+    x0, y0 = _crop_xy(first.rect, fmt)
+    commands: list[str] = []
+    previous: KeyedFrame | None = None
+    for n, frame in enumerate(frames):
+        parts: list[str] = []
+        if previous is None or frame.rect.width != previous.rect.width:
+            parts.append(f"scale@s{tag} w {frame.rect.width}")
+        if previous is None or frame.rect.height != previous.rect.height:
+            parts.append(f"scale@s{tag} h {frame.rect.height}")
+        if previous is None or frame.opacity != previous.opacity:
+            parts.append(f"colorchannelmixer@m{tag} aa {frame.opacity:.4f}")
+        x, y = _crop_xy(frame.rect, fmt)
+        if previous is None or (x, y) != _crop_xy(previous.rect, fmt):
+            parts += [f"crop@c{tag} x {x}", f"crop@c{tag} y {y}"]
+        previous = frame
+        if n == 0 or not parts:
+            continue  # frame 0 uses the filters' own start values
+        at = float((Fraction(2 * n - 1, 2)) / fmt.fps)
+        commands.append(f"{at:.6f} " + "\\, ".join(parts))
+    steps = [
+        "format=rgba",
+        *([f"sendcmd=c='{';'.join(commands)}'"] if commands else []),
+        f"scale@s{tag}=w={first.rect.width}:h={first.rect.height}:eval=frame",
+        "setsar=1",
+        f"colorchannelmixer@m{tag}=aa={first.opacity:.4f}",
+        (
+            f"pad=w=iw+{2 * fmt.width}:h=ih+{2 * fmt.height}:x={fmt.width}:y={fmt.height}"
+            ":color=black@0:eval=frame"
+        ),
+        f"crop@c{tag}=w={fmt.width}:h={fmt.height}:x={x0}:y={y0}:exact=1",
+    ]
+    return steps
 
 
 def _setpts_from(start_frame: int, fmt: OutputFormat) -> str:
@@ -190,17 +274,27 @@ def build_lane_graph(
         k = len(graph.inputs)
         index = first_input + k
         graph.inputs.append(LaneInput(clip.id, args))
-        rect = pip_rect(
-            fmt.width, fmt.height, media[0], media[1], clip.x, clip.y, clip.scale
-        )
+        keyed = clip.image_id is not None and bool(clip.keys)
+        if keyed:
+            look = keyed_chain(
+                keyed_frames(clip, media[0], media[1], fmt, start_frame, frames), fmt, str(k)
+            )
+            rect = PipRect(0, 0, fmt.width, fmt.height)  # placed inside the chain
+        else:
+            rect = pip_rect(
+                fmt.width, fmt.height, media[0], media[1], clip.x, clip.y, clip.scale
+            )
+            look = [
+                f"scale={rect.width}:{rect.height}",
+                "setsar=1",
+                "format=rgba",
+                *([f"colorchannelmixer=aa={clip.opacity:.4f}"] if clip.opacity < 1 else []),
+            ]
         chain = [
             *(["trim=end_frame=1"] if clip.freeze_ms is not None else []),
             "setpts=PTS-STARTPTS",
             f"fps={fmt.fps_text}",
-            f"scale={rect.width}:{rect.height}",
-            "setsar=1",
-            "format=rgba",
-            *([f"colorchannelmixer=aa={clip.opacity:.4f}"] if clip.opacity < 1 else []),
+            *look,
             # One spare frame: the overlay ends a stream at its last frame's time, so
             # without it the clip's last frame would not show; ``enable`` hides the spare.
             f"tpad=stop_mode=clone:stop={frames + 1}",
