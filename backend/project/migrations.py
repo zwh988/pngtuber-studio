@@ -77,6 +77,12 @@ def _v6_to_v7(data: dict[str, Any]) -> dict[str, Any]:
     return data
 
 
+def _v7_to_v8(data: dict[str, Any]) -> dict[str, Any]:
+    """v8 lets keys and reactions sit past the footage at a timeline time
+    (``timeline_ms``, keyframes decision 4). Every v7 item is anchored: nothing to do."""
+    return data
+
+
 # Maps "from version" -> function upgrading that version to version + 1.
 MIGRATIONS: dict[int, Migration] = {
     1: _v1_to_v2,
@@ -85,6 +91,7 @@ MIGRATIONS: dict[int, Migration] = {
     4: _v4_to_v5,
     5: _v5_to_v6,
     6: _v6_to_v7,
+    7: _v7_to_v8,
 }
 
 

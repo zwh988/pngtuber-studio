@@ -12,9 +12,17 @@ from pydantic import BaseModel, Field
 
 from backend.audio.chainspec import FxChainError, processing_spec
 from backend.audio.trim import TrimBounds, processed_duration_ms, trimmed_duration_ms
-from backend.edl.anchoring import check_references, find_orphans
+from backend.edl.anchoring import check_references, find_orphans, item_timeline_ms
 from backend.edl.timemap import ClipSpan, clip_spans, timeline_duration, to_timeline
-from backend.project.schema import AudioLane, AvatarSettings, Project, Take, VideoLane
+from backend.project.schema import (
+    AudioLane,
+    AvatarSettings,
+    Keyframe,
+    Project,
+    Reaction,
+    Take,
+    VideoLane,
+)
 from backend.voice.keys import fx_version as chain_version
 from backend.voice.overflow import PlacedLine, available_slack_ms, find_overflows
 from backend.voice.stretch import fit_stretch, stretched_duration_ms
@@ -109,9 +117,11 @@ class TimelineKeyframe(BaseModel):
     ease_strength: float = 1.0
     # Timeline time of the anchor; None when it cannot be mapped (orphaned, parked).
     t_ms: int | None
-    anchor_clip_id: str
-    anchor_source_ms: int
+    # None for a key at a timeline time past the footage (``pinned``, schema v8).
+    anchor_clip_id: str | None
+    anchor_source_ms: int | None
     orphaned: bool
+    pinned: bool = False
 
 
 class TimelineReaction(BaseModel):
@@ -122,9 +132,10 @@ class TimelineReaction(BaseModel):
     intensity: float
     duration_ms: int
     t_ms: int | None
-    anchor_clip_id: str
-    anchor_source_ms: int
+    anchor_clip_id: str | None
+    anchor_source_ms: int | None
     orphaned: bool
+    pinned: bool = False
 
 
 class TimelineAudioClip(BaseModel):
@@ -390,9 +401,8 @@ def build_timeline(
     )
 
 
-def _mapped(project: Project, spans: list[ClipSpan], item: object) -> int | None:
-    anchor = item.anchor  # type: ignore[attr-defined]
-    return to_timeline(project.clips, anchor, spans=spans)
+def _mapped(project: Project, spans: list[ClipSpan], item: Keyframe | Reaction) -> int | None:
+    return item_timeline_ms(project.clips, item, spans=spans)
 
 
 def _by_time(t_ms: int | None, item_id: str) -> tuple[bool, int, str]:
@@ -408,9 +418,10 @@ def _build_keyframes(project: Project, spans: list[ClipSpan]) -> list[TimelineKe
             interpolation=key.interpolation,
             ease_strength=key.ease_strength,
             t_ms=_mapped(project, spans, key),
-            anchor_clip_id=key.anchor.clip_id,
-            anchor_source_ms=key.anchor.source_ms,
+            anchor_clip_id=None if key.anchor is None else key.anchor.clip_id,
+            anchor_source_ms=None if key.anchor is None else key.anchor.source_ms,
             orphaned=key.orphaned,
+            pinned=key.anchor is None,
         )
         for key in project.keyframes
     ]
@@ -426,9 +437,10 @@ def _build_reactions(project: Project, spans: list[ClipSpan]) -> list[TimelineRe
             intensity=r.intensity,
             duration_ms=r.duration_ms,
             t_ms=_mapped(project, spans, r),
-            anchor_clip_id=r.anchor.clip_id,
-            anchor_source_ms=r.anchor.source_ms,
+            anchor_clip_id=None if r.anchor is None else r.anchor.clip_id,
+            anchor_source_ms=None if r.anchor is None else r.anchor.source_ms,
             orphaned=r.orphaned,
+            pinned=r.anchor is None,
         )
         for r in project.reactions
     ]

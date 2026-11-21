@@ -19,7 +19,7 @@ from collections.abc import Sequence
 from dataclasses import dataclass
 from typing import Literal
 
-from backend.edl.timemap import ClipSpan, clip_spans
+from backend.edl.timemap import ClipSpan, clip_spans, to_timeline
 from backend.project.schema import (
     Anchor,
     Clip,
@@ -30,6 +30,8 @@ from backend.project.schema import (
 )
 
 AnchoredItem = Placement | Keyframe | Reaction
+# Where a key or reaction sits: a footage anchor, or a timeline time past the footage.
+Place = Anchor | int
 
 
 # --------------------------------------------------------------------------
@@ -38,12 +40,13 @@ AnchoredItem = Placement | Keyframe | Reaction
 
 
 def anchored_items(project: Project, clip_id: str | None = None) -> list[AnchoredItem]:
-    """Every placement, keyframe and reaction (in that order), optionally only
-    those anchored to ``clip_id``."""
+    """Every placement, keyframe and reaction (in that order) with an anchor,
+    optionally only those anchored to ``clip_id``. Keys and reactions at a timeline
+    time (past the footage) are left out: footage edits never move or orphan them."""
     items: list[AnchoredItem] = [
         *project.placements,
-        *project.keyframes,
-        *project.reactions,
+        *(key for key in project.keyframes if key.anchor is not None),
+        *(r for r in project.reactions if r.anchor is not None),
     ]
     if clip_id is None:
         return items
@@ -68,6 +71,41 @@ def item_kind(item: AnchoredItem) -> str:
     if isinstance(item, Keyframe):
         return "keyframe"
     return "reaction"
+
+
+def item_timeline_ms(
+    clips: Sequence[Clip],
+    item: Keyframe | Reaction,
+    *,
+    spans: Sequence[ClipSpan] | None = None,
+) -> int | None:
+    """A key's or reaction's timeline time: its anchor mapped through the clips, or
+    its own timeline time when it sits past the footage. None when unmappable."""
+    if item.anchor is None:
+        return item.timeline_ms
+    return to_timeline(clips, item.anchor, spans=spans)
+
+
+def place_of(item: Keyframe | Reaction) -> Place:
+    """The item's place (a copy of its anchor, or its timeline time)."""
+    if item.anchor is not None:
+        return item.anchor.model_copy()
+    assert item.timeline_ms is not None
+    return item.timeline_ms
+
+
+def set_place(item: Keyframe | Reaction, place: Place) -> None:
+    """Put the item at an anchor or a timeline time. Both fields change together
+    (the model allows exactly one), so this bypasses the per-field assignment check
+    after validating the new value itself."""
+    if isinstance(place, Anchor):
+        values = {"anchor": Anchor.model_validate(place.model_dump()), "timeline_ms": None}
+    else:
+        if isinstance(place, bool) or place < 0:
+            raise ValueError("a timeline time must not be negative")
+        values = {"anchor": None, "timeline_ms": int(place)}
+    item.__dict__.update(values)
+    item.__pydantic_fields_set__.update(values)
 
 
 def find_orphans(project: Project) -> list[AnchoredItem]:

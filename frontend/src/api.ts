@@ -310,9 +310,12 @@ export type TimelineKeyframe = {
   /** 0 linear, 1 normal, 2 strong. */
   ease_strength: number;
   t_ms: number | null;
-  anchor_clip_id: string;
-  anchor_source_ms: number;
+  /** Null for a key pinned at a timeline time past the footage (schema v8). */
+  anchor_clip_id: string | null;
+  anchor_source_ms: number | null;
   orphaned: boolean;
+  /** Past the footage: kept at its timeline time, never moved by footage edits. */
+  pinned: boolean;
 };
 
 export type TimelineReaction = {
@@ -321,9 +324,10 @@ export type TimelineReaction = {
   intensity: number;
   duration_ms: number;
   t_ms: number | null;
-  anchor_clip_id: string;
-  anchor_source_ms: number;
+  anchor_clip_id: string | null;
+  anchor_source_ms: number | null;
   orphaned: boolean;
+  pinned: boolean;
 };
 
 export type AvatarSettings = {

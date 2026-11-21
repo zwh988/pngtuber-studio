@@ -841,6 +841,19 @@
     } else {
       row(MOTION_Y, null);
     }
+    /** Pin mark: an item past the footage, held at its timeline time (keyframes decision 4). */
+    const pin = (px: number, py: number): void => {
+      ctx.beginPath();
+      ctx.moveTo(px, py);
+      ctx.lineTo(px - 3, py + 4);
+      ctx.strokeStyle = c.keyText;
+      ctx.lineWidth = 1.5;
+      ctx.stroke();
+      ctx.beginPath();
+      ctx.arc(px, py, 2.5, 0, Math.PI * 2);
+      ctx.fillStyle = c.keyText;
+      ctx.fill();
+    };
     for (const r of reactions) {
       const t = shownMs(r.id, r.t_ms);
       if (t === null) continue;
@@ -859,6 +872,7 @@
         ctx.lineWidth = 2;
         ctx.strokeRect(x0, REACT_Y + 3, w, ROW_H - 6);
       }
+      if (r.pinned) pin(x0 + 1, REACT_Y + 3);
       if (pickedReaction) {
         selectRect(x0, REACT_Y + 3, w, ROW_H - 6);
       }
@@ -895,6 +909,7 @@
         ctx.lineWidth = 2;
         ctx.stroke();
       }
+      if (key.pinned) pin(x + KEY_R - 1, cy - KEY_R + 1);
       const text =
         key.lane_id === "expression"
           ? String(key.value)
@@ -1477,7 +1492,8 @@
         const points = itemSnapPoints(d.ids, e.altKey);
         const target = points === null ? raw : Math.round(snapEdge(raw, points, SNAP_PX / pxPerMs));
         const times = d.ids.map((id) => itemTime(d.kind, id)).filter((t): t is number => t !== null);
-        const delta = clampShift(times, target - d.fromMs, 0, Math.max(0, durationMs - 1));
+        // Keys and reactions may sit past the footage (keyframes decision 4), up to the timeline end.
+        const delta = clampShift(times, target - d.fromMs, 0, Math.max(0, contentMs - 1));
         d.toMs = d.fromMs + delta;
         dragUi = { kind: "imove", ids: d.ids, deltaMs: delta };
         return;
@@ -1793,7 +1809,7 @@
       from Explorer, onto a video lane (or "+ Video lane"); they show over the main footage. Drag music or sound effects from Explorer onto an audio lane
       (or onto "+ Audio lane" for a new lane); drag an audio clip to move it, also up or down to
       another lane, and drag its edge to trim it. With the magnet on, audio and lane clips snap to clip edges and the playhead (hold Alt to drag freely); S splits the selected audio or lane clip at the playhead. Avatar keys and reactions: click to select (the playhead goes there; on the collapsed Motion row the keys at one time are one group), Shift-click to add or remove, drag over empty avatar rows to box-select, drag sideways to
-      move (the whole selection, snapping with the magnet); &lt; and &gt; step between keys. Wheel scrolls, Ctrl+wheel zooms.
+      move (the whole selection, snapping with the magnet); &lt; and &gt; step between keys. Past the end of the footage a key or reaction keeps its timeline time (pin mark) and no footage edit moves it; moving it onto footage anchors it again. Wheel scrolls, Ctrl+wheel zooms.
     </p>
   {/if}
   <div class="body">

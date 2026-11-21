@@ -144,8 +144,9 @@
     return typeof value === "number" ? value : 0;
   }
 
-  function when(t: number | null, orphaned: boolean): string {
+  function when(t: number | null, orphaned: boolean, pinned = false): string {
     if (orphaned) return "orphaned (its footage was cut away; move it to settle it)";
+    if (pinned && t !== null) return `${clock(t)}, pinned past the footage (footage edits do not move it)`;
     return t === null ? "not on the timeline" : clock(t);
   }
 </script>
@@ -156,7 +157,7 @@
   <Section title="Selected" collapsible={false}>
     {#if selectedKey !== null}
       {@const key = selectedKey}
-      <p class="what"><strong>{laneLabel(key.lane_id)} key</strong> at <span class="num">{when(key.t_ms, key.orphaned)}</span></p>
+      <p class="what"><strong>{laneLabel(key.lane_id)} key</strong> at <span class="num">{when(key.t_ms, key.orphaned, key.pinned)}</span></p>
       {#if selectedCount > 1}
         <p class="hint">{selectedCount} keys selected: Delete removes them all; drag one on the timeline to move them together. The settings below are this key's.</p>
       {/if}
@@ -288,7 +289,7 @@
       </div>
     {:else if selectedReaction !== null}
       {@const r = selectedReaction}
-      <p class="what"><strong>{reactionLabel(r.type)}</strong> at <span class="num">{when(r.t_ms, r.orphaned)}</span></p>
+      <p class="what"><strong>{reactionLabel(r.type)}</strong> at <span class="num">{when(r.t_ms, r.orphaned, r.pinned)}</span></p>
       <label>
         Type
         <select

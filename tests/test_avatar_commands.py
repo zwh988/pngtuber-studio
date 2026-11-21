@@ -81,7 +81,7 @@ def test_keyframe_value_checks() -> None:
     with pytest.raises(CommandError):
         AddKeyframe("expression", 0, "smile", "ease_in_out")
     with pytest.raises(CommandError):
-        AddKeyframe("x", 25_000, 0.5).apply(project)  # past the footage
+        AddKeyframe("x", -1, 0.5).apply(project)  # before the timeline (past it: allowed, v8)
     key = AddKeyframe("expression", 0, " cheeky ")
     key.apply(project)
     assert project.keyframes[0].value == "cheeky"

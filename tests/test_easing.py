@@ -61,7 +61,7 @@ def test_lane_uses_the_keys_easing_and_strength() -> None:
 
 
 def test_v6_smooth_keys_become_ease_in_out() -> None:
-    assert SCHEMA_VERSION == 7
+    assert SCHEMA_VERSION >= 7
     key = {"id": "a" * 12, "lane_id": "x", "anchor": {"clip_id": "b" * 12, "source_ms": 0}}
     data = {
         "schema_version": 6,
@@ -71,7 +71,7 @@ def test_v6_smooth_keys_become_ease_in_out() -> None:
             {**key, "id": "c" * 12, "value": 0.5, "interpolation": "hold"},
         ],
     }
-    result = migrate(data)
+    result = migrate(data, target=7)
     assert result["schema_version"] == 7
     assert data["keyframes"][0]["interpolation"] == "smooth"  # input untouched
     project = Project.model_validate(result)

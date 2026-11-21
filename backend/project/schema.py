@@ -24,7 +24,7 @@ from pydantic import (
     model_validator,
 )
 
-SCHEMA_VERSION = 7
+SCHEMA_VERSION = 8
 
 # Picture-in-picture limits of a video-lane clip (schema v6, M8-2).
 LANE_SCALE_MIN = 0.05
@@ -231,10 +231,19 @@ class Placement(_Model):
     stretch: float = Field(default=STRETCH_MIN, ge=STRETCH_MIN, le=STRETCH_MAX)
 
 
+def _one_place(item: "Keyframe | Reaction") -> None:
+    if (item.anchor is None) == (item.timeline_ms is None):
+        raise ValueError("give an anchor or a timeline time, not both or neither")
+
+
 class Keyframe(_Model):
     id: EntityId
     lane_id: str
-    anchor: Anchor
+    # A footage moment (rule 4), or, past the end of the footage, a timeline time that
+    # no footage edit moves (schema v8, keyframes decision 4). Exactly one is set;
+    # ``backend.edl.anchoring.set_place`` switches between them.
+    anchor: Anchor | None = None
+    timeline_ms: Ms | None = None
     # Numeric lanes use float; the expression lane uses an expression name.
     value: float | str
     # Easing to the next key (schema v7, keyframes decision 2); expression keys hold.
@@ -243,14 +252,26 @@ class Keyframe(_Model):
     ease_strength: float = Field(default=1.0, ge=0.0, le=2.0)
     orphaned: bool = False
 
+    @model_validator(mode="after")
+    def _placed(self) -> "Keyframe":
+        _one_place(self)
+        return self
+
 
 class Reaction(_Model):
     id: EntityId
     type: Literal["shake", "hop", "pop_in", "squish"]
-    anchor: Anchor
+    # As ``Keyframe``: an anchor, or a timeline time past the footage (schema v8).
+    anchor: Anchor | None = None
+    timeline_ms: Ms | None = None
     intensity: float = Field(default=1.0, ge=0.0)
     duration_ms: PositiveMs = 500
     orphaned: bool = False
+
+    @model_validator(mode="after")
+    def _placed(self) -> "Reaction":
+        _one_place(self)
+        return self
 
 
 AudioGain = Annotated[float, Field(ge=AUDIO_GAIN_MIN_DB, le=AUDIO_GAIN_MAX_DB)]

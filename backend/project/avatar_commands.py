@@ -6,6 +6,10 @@ Keyframes and reactions are anchored to footage (rule 4): a command takes a
 remove the footage under them flag and park them (the M2 parking code already
 covers ``Keyframe`` and ``Reaction``); moving an orphan settles it.
 
+Past the end of the footage there is nothing to anchor to, so the item keeps the
+timeline time itself (keyframes decision 4): no footage edit moves or orphans it, and
+it stays there if the footage later grows under it. Each move decides again.
+
 Values are checked against the lane table (``backend/avatar/lanes.py``): numeric lanes
 take a number inside the lane's range, the expression lane a non-empty name, which
 is resolved against the art only when drawn (so a key survives a change of art).
@@ -24,11 +28,11 @@ from backend.avatar.lanes import (
     LaneKey,
 )
 from backend.avatar.solver import REACTIONS
-from backend.edl.timemap import to_source, to_timeline
+from backend.edl.anchoring import Place, item_timeline_ms, place_of, set_place
+from backend.edl.timemap import to_source
 from backend.project.commands import Command, CommandError
 from backend.project.line_commands import NoChange
 from backend.project.schema import (
-    Anchor,
     AvatarSettings,
     Keyframe,
     Project,
@@ -80,13 +84,22 @@ class SetAvatarArtFolder(Command):
 # --- helpers -------------------------------------------------------------------------
 
 
-def _anchor_at(project: Project, timeline_ms: int) -> Anchor:
+def _place_at(project: Project, timeline_ms: int) -> Place:
+    """The footage anchor at a timeline time, or the time itself past the footage."""
     if timeline_ms < 0:
         raise CommandError("timeline time must not be negative")
     anchor = to_source(project.clips, timeline_ms)
-    if anchor is None:
-        raise CommandError(f"there is no footage at {timeline_ms} ms on the timeline")
-    return anchor
+    return int(timeline_ms) if anchor is None else anchor
+
+
+def _copy(place: Place) -> Place:
+    return place if isinstance(place, int) else place.model_copy()
+
+
+def _placed_fields(place: Place) -> dict[str, object]:
+    if isinstance(place, int):
+        return {"timeline_ms": place}
+    return {"anchor": place.model_copy()}
 
 
 def key_near(project: Project, lane_id: str, timeline_ms: int) -> Keyframe | None:
@@ -96,7 +109,7 @@ def key_near(project: Project, lane_id: str, timeline_ms: int) -> Keyframe | Non
     for key in project.keyframes:
         if key.lane_id != lane_id or key.orphaned:
             continue
-        t = to_timeline(project.clips, key.anchor)
+        t = item_timeline_ms(project.clips, key)
         if t is None:
             continue
         gap = abs(t - timeline_ms)
@@ -181,7 +194,7 @@ class AddKeyframe(Command):
         )
         self.timeline_ms = timeline_ms
         self.keyframe_id = keyframe_id if keyframe_id is not None else new_id()
-        self._anchor: Anchor | None = None
+        self._place: Place | None = None
 
     @property
     def label(self) -> str:
@@ -190,16 +203,16 @@ class AddKeyframe(Command):
     def apply(self, project: Project) -> None:
         if any(k.id == self.keyframe_id for k in project.keyframes):
             raise CommandError(f"keyframe id {self.keyframe_id!r} already exists")
-        anchor = self._anchor or _anchor_at(project, self.timeline_ms)
+        place = self._place if self._place is not None else _place_at(project, self.timeline_ms)
         key = Keyframe(
             id=self.keyframe_id,
             lane_id=self.lane_id,
-            anchor=anchor.model_copy(),
             value=self.value,
             interpolation=self.interpolation,
+            **_placed_fields(place),  # type: ignore[arg-type]
         )
         project.keyframes.append(key)
-        self._anchor = anchor
+        self._place = place
 
     def revert(self, project: Project) -> None:
         index, _ = _find_key(project, self.keyframe_id)
@@ -229,34 +242,35 @@ class RemoveKeyframe(Command):
 
 
 class _MoveAnchored(Command):
-    """Shared by keyframe and reaction moves: a new anchor, and an orphan settles."""
+    """Shared by keyframe and reaction moves: a new place (anchored on footage, a
+    timeline time past it; decided again on every move), and an orphan settles."""
 
     kind = ""
 
     def __init__(self, item_id: str, timeline_ms: int) -> None:
         self.item_id = item_id
         self.timeline_ms = timeline_ms
-        self._anchor: Anchor | None = None
-        self._old: tuple[Anchor, bool] | None = None
+        self._place: Place | None = None
+        self._old: tuple[Place, bool] | None = None
 
     def _find(self, project: Project) -> Keyframe | Reaction:
         raise NotImplementedError
 
     def apply(self, project: Project) -> None:
         item = self._find(project)
-        anchor = self._anchor or _anchor_at(project, self.timeline_ms)
-        if anchor == item.anchor and not item.orphaned:
+        place = self._place if self._place is not None else _place_at(project, self.timeline_ms)
+        if place == place_of(item) and not item.orphaned:
             raise NoChange(f"the {self.kind} is already there")
-        self._old = (item.anchor.model_copy(), item.orphaned)
-        item.anchor = anchor.model_copy()
+        self._old = (place_of(item), item.orphaned)
+        set_place(item, _copy(place))
         item.orphaned = False
-        self._anchor = anchor
+        self._place = place
 
     def revert(self, project: Project) -> None:
         if self._old is None:
             raise CommandError("nothing to restore: command was not applied")
         item = self._find(project)
-        item.anchor = self._old[0].model_copy()
+        set_place(item, _copy(self._old[0]))
         item.orphaned = self._old[1]
 
 
@@ -376,7 +390,7 @@ class KeyLane(Command):
                 add = AddKeyframe(
                     self.lane_id, self.timeline_ms, self.value, keyframe_id=self.keyframe_id
                 )
-                add._anchor = _anchor_at(project, self.timeline_ms)
+                add._place = _place_at(project, self.timeline_ms)
                 self._inner = add
         self._inner.apply(project)
 
@@ -398,7 +412,7 @@ def lane_value_at(project: Project, lane_id: str, timeline_ms: int) -> float:
     for key in project.keyframes:
         if key.lane_id != lane_id or key.orphaned or isinstance(key.value, str):
             continue
-        t = to_timeline(project.clips, key.anchor)
+        t = item_timeline_ms(project.clips, key)
         if t is not None:
             keys.append(
                 LaneKey(t, float(key.value), key.interpolation, key.ease_strength)
@@ -464,7 +478,7 @@ class AddReaction(Command):
         self.intensity = float(intensity)
         self.duration_ms = int(duration_ms)
         self.reaction_id = reaction_id if reaction_id is not None else new_id()
-        self._anchor: Anchor | None = None
+        self._place: Place | None = None
 
     @property
     def label(self) -> str:
@@ -473,17 +487,17 @@ class AddReaction(Command):
     def apply(self, project: Project) -> None:
         if any(r.id == self.reaction_id for r in project.reactions):
             raise CommandError(f"reaction id {self.reaction_id!r} already exists")
-        anchor = self._anchor or _anchor_at(project, self.timeline_ms)
+        place = self._place if self._place is not None else _place_at(project, self.timeline_ms)
         project.reactions.append(
             Reaction(
                 id=self.reaction_id,
                 type=self.type,  # type: ignore[arg-type]
-                anchor=anchor.model_copy(),
                 intensity=self.intensity,
                 duration_ms=self.duration_ms,
+                **_placed_fields(place),  # type: ignore[arg-type]
             )
         )
-        self._anchor = anchor
+        self._place = place
 
     def revert(self, project: Project) -> None:
         index, _ = _find_reaction(project, self.reaction_id)
