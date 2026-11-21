@@ -24,7 +24,7 @@ from pydantic import (
     model_validator,
 )
 
-SCHEMA_VERSION = 8
+SCHEMA_VERSION = 9
 
 # Picture-in-picture limits of a video-lane clip (schema v6, M8-2).
 LANE_SCALE_MIN = 0.05
@@ -363,6 +363,42 @@ class VideoLane(_Model):
     locked: bool = False
 
 
+ClipKeyProperty = Literal["x", "y", "scale", "opacity"]
+CLIP_KEY_PROPERTIES: tuple[ClipKeyProperty, ...] = ("x", "y", "scale", "opacity")
+# The range of each keyable property; the same as the ``LaneClip`` fields.
+CLIP_KEY_RANGES: dict[str, tuple[float, float]] = {
+    "x": (-1.0, 2.0),
+    "y": (-1.0, 2.0),
+    "scale": (LANE_SCALE_MIN, LANE_SCALE_MAX),
+    "opacity": (0.0, 1.0),
+}
+
+
+class ClipKey(_Model):
+    """A key on an image lane clip (schema v9, keyframes decisions 3 and 5).
+
+    ``t_ms`` is ms from the clip's start, so the key moves with the clip. A trim can
+    leave a key outside the clip (below 0 or past its length): it is kept and still
+    shapes the curve, and comes back into view when the clip is lengthened again.
+    """
+
+    id: EntityId
+    prop: ClipKeyProperty
+    t_ms: int
+    value: float
+    interpolation: Literal["hold", "linear", "ease_in", "ease_out", "ease_in_out"] = (
+        "ease_in_out"
+    )
+    ease_strength: float = Field(default=1.0, ge=0.0, le=2.0)
+
+    @model_validator(mode="after")
+    def _in_range(self) -> "ClipKey":
+        lo, hi = CLIP_KEY_RANGES[self.prop]
+        if not lo <= self.value <= hi:
+            raise ValueError(f"a {self.prop} key must be between {lo:g} and {hi:g}")
+        return self
+
+
 class LaneClip(_Model):
     """A recording or a still on a video lane (v6, M8-2).
 
@@ -397,9 +433,16 @@ class LaneClip(_Model):
     mute: bool = False
     # The recording frame a freeze frame holds (ms into the recording); None otherwise.
     freeze_ms: Ms | None = None
+    # Keys on x, y, scale, opacity (schema v9; image clips only, keyframes decision 5).
+    # A property with keys follows them; one without uses the single value above.
+    keys: list[ClipKey] = Field(default_factory=list)
 
     @model_validator(mode="after")
     def _check(self) -> "LaneClip":
+        if self.keys and self.image_id is None:
+            raise ValueError("only an image clip can have keys")
+        if len({key.id for key in self.keys}) != len(self.keys):
+            raise ValueError("duplicate key ids on a lane clip")
         if (self.source_id is None) == (self.image_id is None):
             raise ValueError("a lane clip shows exactly one recording or image")
         if self.out_ms <= self.in_ms:

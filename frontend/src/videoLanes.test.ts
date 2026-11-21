@@ -43,6 +43,7 @@ function clip(id: string, lane: string, start: number, inMs: number, outMs: numb
     gain_db: 0,
     mute: false,
     missing: false,
+    keys: [],
     freeze_ms: null,
     ...over,
   };

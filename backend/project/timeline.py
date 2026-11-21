@@ -17,6 +17,7 @@ from backend.edl.timemap import ClipSpan, clip_spans, timeline_duration, to_time
 from backend.project.schema import (
     AudioLane,
     AvatarSettings,
+    ClipKey,
     Keyframe,
     Project,
     Reaction,
@@ -211,6 +212,8 @@ class TimelineLaneClip(BaseModel):
     missing: bool = False
     # A freeze frame: the recording frame it holds (ms into the recording), else None.
     freeze_ms: int | None = None
+    # Keys on an image clip (schema v9): ``t_ms`` is ms from the clip start.
+    keys: list[ClipKey] = Field(default_factory=list)
 
 
 def _build_lane_clips(
@@ -258,6 +261,7 @@ def _build_lane_clips(
                 gain_db=clip.gain_db,
                 mute=clip.mute,
                 freeze_ms=clip.freeze_ms,
+                keys=[key.model_copy() for key in clip.keys],
                 missing=(source is None and image is None)
                 or (clip.source_id is not None and clip.source_id in missing_source_ids),
             )

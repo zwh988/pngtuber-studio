@@ -140,6 +140,22 @@ def _check_fits(project: Project, clip: LaneClip) -> None:
         raise CommandError("another clip is already on that lane at that time")
 
 
+def shifted_keys(
+    clip: LaneClip, delta_ms: int, new_ids: dict[str, str] | None = None
+) -> list[dict[str, object]]:
+    """The clip's keys with ``t_ms`` moved by ``delta_ms`` (a start trim or the right
+    part of a split, so each key stays on the same timeline moment), as dicts for
+    ``_build``. ``new_ids`` maps old key ids to the ids the copies get."""
+    result = []
+    for key in clip.keys:
+        data = key.model_dump()
+        data["t_ms"] = key.t_ms + delta_ms
+        if new_ids is not None:
+            data["id"] = new_ids[key.id]
+        result.append(data)
+    return result
+
+
 def _build(clip: LaneClip, **changes: object) -> LaneClip:
     try:
         return LaneClip.model_validate({**clip.model_dump(), **changes})
@@ -478,7 +494,8 @@ class MoveLaneClip(_ReplaceLaneClip):
 class TrimLaneClip(_ReplaceLaneClip):
     """Drag a clip edge to a timeline time. For a recording the start edge moves
     ``timeline_ms`` and ``in_ms`` together (the picture under the rest stays put);
-    a still just gets shorter or longer."""
+    a still just gets shorter or longer. Keys stay on their timeline moment (a start
+    trim moves their clip time the other way); keys left outside the clip are kept."""
 
     def __init__(
         self, clip_id: str, edge: Literal["start", "end"], timeline_ms: int
@@ -507,7 +524,13 @@ class TrimLaneClip(_ReplaceLaneClip):
                     )
             if out_ms - in_ms < MIN_LANE_CLIP_MS:
                 raise CommandError("the clip would be too short")
-            return _build(clip, timeline_ms=self.edge_ms, in_ms=in_ms, out_ms=out_ms)
+            return _build(
+                clip,
+                timeline_ms=self.edge_ms,
+                in_ms=in_ms,
+                out_ms=out_ms,
+                keys=shifted_keys(clip, -delta),
+            )
         out_ms = clip.in_ms + (self.edge_ms - clip.timeline_ms)
         if out_ms - clip.in_ms < MIN_LANE_CLIP_MS:
             raise CommandError("the clip would be too short")
@@ -518,7 +541,9 @@ class SplitLaneClip(Command):
     """Cut one video-lane clip in two at a timeline time (M8-2 addition).
 
     Both parts keep the position, size, opacity and sound settings; the right part
-    gets a new id (or ``right_clip_id``). A still is split into two stills.
+    gets a new id (or ``right_clip_id``). A still is split into two stills. Both
+    parts share the keys (the right part gets copies with new ids, the same on
+    redo), so the motion runs on across the cut.
     """
 
     def __init__(
@@ -528,6 +553,7 @@ class SplitLaneClip(Command):
         self.at_ms = timeline_ms
         self.right_id = right_clip_id or new_id()
         self._old: LaneClip | None = None
+        self._key_ids: dict[str, str] = {}
 
     @property
     def label(self) -> str:
@@ -541,11 +567,14 @@ class SplitLaneClip(Command):
             raise CommandError("the playhead is not inside the clip")
         if clip.is_still:
             left = _build(clip, out_ms=offset)
+            for key in clip.keys:
+                self._key_ids.setdefault(key.id, new_id())
             right = _build(
                 clip,
                 id=self.right_id,
                 timeline_ms=self.at_ms,
                 out_ms=clip.out_ms - offset,
+                keys=shifted_keys(clip, -offset, self._key_ids),
             )
         else:
             cut = clip.in_ms + offset

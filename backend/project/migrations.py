@@ -83,6 +83,14 @@ def _v7_to_v8(data: dict[str, Any]) -> dict[str, Any]:
     return data
 
 
+def _v8_to_v9(data: dict[str, Any]) -> dict[str, Any]:
+    """v9 adds keys on image lane clips (keyframes decision 5), none yet."""
+    for clip in data.get("lane_clips") or []:
+        if isinstance(clip, dict):
+            clip.setdefault("keys", [])
+    return data
+
+
 # Maps "from version" -> function upgrading that version to version + 1.
 MIGRATIONS: dict[int, Migration] = {
     1: _v1_to_v2,
@@ -92,6 +100,7 @@ MIGRATIONS: dict[int, Migration] = {
     5: _v5_to_v6,
     6: _v6_to_v7,
     7: _v7_to_v8,
+    8: _v8_to_v9,
 }
 
 

@@ -112,11 +112,11 @@ def test_schema_needs_exactly_one_place() -> None:
 
 
 def test_v7_projects_open_and_pinned_items_round_trip() -> None:
-    assert SCHEMA_VERSION == 8
+    assert SCHEMA_VERSION >= 8
     key = {"id": K1, "lane_id": "x", "anchor": {"clip_id": CLIP_A, "source_ms": 0}, "value": 0.5}
-    result = migrate({"schema_version": 7, "name": "x", "keyframes": [key]})
+    result = migrate({"schema_version": 7, "name": "x", "keyframes": [key]}, target=8)
     assert result["schema_version"] == 8
-    project = Project.model_validate(result)
+    project = Project.model_validate(migrate(result))
     assert project.keyframes[0].anchor is not None
     stack = CommandStack(project)
     stack.execute(AddReaction("hop", 99_000, reaction_id=R1))

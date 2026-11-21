@@ -242,6 +242,19 @@ export type TimelineLaneClip = {
   missing: boolean;
   /** A freeze frame: the recording frame it holds (ms into the recording); null otherwise. */
   freeze_ms: number | null;
+  /** Keys on an image clip (schema v9); `t_ms` is ms from the clip start. */
+  keys: ClipKey[];
+};
+
+export type ClipKeyProp = "x" | "y" | "scale" | "opacity";
+
+export type ClipKey = {
+  id: string;
+  prop: ClipKeyProp;
+  t_ms: number;
+  value: number;
+  interpolation: Interpolation;
+  ease_strength: number;
 };
 
 export type ImportedLaneMedia = {
@@ -465,6 +478,17 @@ export type EditOp =
       gain_db?: number;
       mute?: boolean;
     }
+  | { op: "key_lane_clip"; clip_id: string; prop: ClipKeyProp; timeline_ms: number; value: number; key_id?: string }
+  | { op: "move_clip_key"; clip_id: string; key_id: string; timeline_ms: number }
+  | {
+      op: "set_clip_key";
+      clip_id: string;
+      key_id: string;
+      value?: number;
+      interpolation?: Interpolation;
+      ease_strength?: number;
+    }
+  | { op: "remove_clip_key"; clip_id: string; key_id: string }
   | {
       op: "set_avatar_settings";
       x?: number;

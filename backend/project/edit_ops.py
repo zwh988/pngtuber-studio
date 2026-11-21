@@ -41,6 +41,12 @@ from backend.project.avatar_commands import (
     SetReaction,
 )
 from backend.project.clip_commands import AddClip, RemoveClip, ReorderClip, SetSpeed
+from backend.project.clip_key_commands import (
+    KeyLaneClip,
+    MoveClipKey,
+    RemoveClipKey,
+    SetClipKey,
+)
 from backend.project.commands import Command, CommandError
 from backend.project.cut_commands import FreezeClip, RippleDelete, SplitClip, TrimClip
 from backend.project.export_commands import SetExportSettings
@@ -427,6 +433,40 @@ class SetLaneClipOp(_Op):
     mute: bool | None = None
 
 
+class KeyLaneClipOp(_Op):
+    """Set an image clip's x, y, scale or opacity at a timeline time (keyframes
+    decision 3): changes the key within one frame of it, else adds one."""
+
+    op: Literal["key_lane_clip"] = "key_lane_clip"
+    clip_id: str
+    prop: Literal["x", "y", "scale", "opacity"]
+    timeline_ms: int
+    value: float
+    key_id: str | None = Field(default=None, pattern=r"^[0-9a-f]{12}$")
+
+
+class MoveClipKeyOp(_Op):
+    op: Literal["move_clip_key"] = "move_clip_key"
+    clip_id: str
+    key_id: str
+    timeline_ms: int
+
+
+class SetClipKeyOp(_Op):
+    op: Literal["set_clip_key"] = "set_clip_key"
+    clip_id: str
+    key_id: str
+    value: float | None = None
+    interpolation: Interpolation | None = None
+    ease_strength: float | None = None
+
+
+class RemoveClipKeyOp(_Op):
+    op: Literal["remove_clip_key"] = "remove_clip_key"
+    clip_id: str
+    key_id: str
+
+
 EditOp = Annotated[
     AddClipOp
     | RemoveClipOp
@@ -474,7 +514,11 @@ EditOp = Annotated[
     | SplitLaneClipOp
     | FreezeLaneClipOp
     | SetAvatarLayerOp
-    | SetLaneClipOp,
+    | SetLaneClipOp
+    | KeyLaneClipOp
+    | MoveClipKeyOp
+    | SetClipKeyOp
+    | RemoveClipKeyOp,
     Field(discriminator="op"),
 ]
 
@@ -573,6 +617,20 @@ def _build_video_lane_command(op: EditOp) -> Command | None:
             gain_db=op.gain_db,
             mute=op.mute,
         )
+    if isinstance(op, KeyLaneClipOp):
+        return KeyLaneClip(op.clip_id, op.prop, op.timeline_ms, op.value, key_id=op.key_id)
+    if isinstance(op, MoveClipKeyOp):
+        return MoveClipKey(op.clip_id, op.key_id, op.timeline_ms)
+    if isinstance(op, SetClipKeyOp):
+        return SetClipKey(
+            op.clip_id,
+            op.key_id,
+            value=op.value,
+            interpolation=op.interpolation,
+            ease_strength=op.ease_strength,
+        )
+    if isinstance(op, RemoveClipKeyOp):
+        return RemoveClipKey(op.clip_id, op.key_id)
     return None
 
 
