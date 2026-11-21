@@ -2,7 +2,7 @@
 
 - **Milestone item:** follow-up after M8-2 (`PROJECT_STATE.md`, Next up 2)
 - **Spec sections:** 4.2, 5, 8, 9
-- **Status:** in progress (branch `m8-keyframes`)
+- **Status:** done (branch `m8-keyframes`, 2026-11-22; user confirmed every step in the app; not merged yet)
 
 ## Goal
 
@@ -43,12 +43,19 @@ Avatar keys are easy to change after they are set, keys can ease in or out, vide
 | 4 | Keys and reactions past the footage | Placed or moved past the footage end: a timeline time (no anchor), never moved by footage edits, stays so if the footage grows over it (pin mark). A user move decides again (onto footage: anchored). Never orphaned. Rule 4's exception in `CLAUDE.md` gains these |
 | 5 | Which lane clips get keys? | Images only (PNG, JPG: one image clip type) for now; keys on recordings and freeze frames go to the backlog as a future improvement (user) |
 
+## As built
+
+- Steps 2 to 8 landed as one commit each (`git log m8-keyframes`); step 3 was split into 3a (playhead onto keys, edits within one frame, previous/next), 3b (groups, Shift-click, box select, group move and delete, snapping) and 3c (typed values, the moment's x/y/size/rotation together).
+- Lane-clip keys are on image clips only (decision 5); the third criterion holds for image clips.
+- Schema v7 (easing), v8 (keys and reactions past the footage), v9 (image clip keys).
+- Not built: an easing curve drawn between keys on the timeline; multi-select for image clip keys.
+
 ## Acceptance criteria
 
-- [ ] A selected key's value and time can be changed without hunting for the exact playhead time (per decision 1)
-- [ ] Easing options work in the preview and the export (solver output)
-- [ ] A lane clip can fade and move over time; the preview and the export match frame for frame within rounding
-- [ ] Keys and reactions can be placed past the end of the footage and export there
-- [ ] Every change is one undo step; old projects open (migration)
-- [ ] Tests for all pure logic; pytest, ruff, `npm run check`, `npm test`, `npm run build` clean
-- [ ] `PROJECT_STATE.md` and spec updated
+- [x] A selected key's value and time can be changed without hunting for the exact playhead time (per decision 1)
+- [x] Easing options work in the preview and the export (solver output)
+- [x] A lane clip can fade and move over time; the preview and the export match frame for frame within rounding
+- [x] Keys and reactions can be placed past the end of the footage and export there
+- [x] Every change is one undo step; old projects open (migration)
+- [x] Tests for all pure logic; pytest, ruff, `npm run check`, `npm test`, `npm run build` clean
+- [x] `PROJECT_STATE.md` and spec updated
