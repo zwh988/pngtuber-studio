@@ -1,0 +1,644 @@
+{
+ "_note": "Generated from backend/export/clip_keys.py; checked by tests/test_clip_key_eval.py and frontend/src/clipKeys.test.ts.",
+ "cases": [
+  {
+   "name": "no keys: the clip's own values",
+   "clip": {
+    "timeline_ms": 1000,
+    "x": 0.5,
+    "y": 0.4,
+    "scale": 0.8,
+    "opacity": 0.9,
+    "keys": []
+   },
+   "samples": [
+    {
+     "t": 0,
+     "expect": {
+      "x": 0.5,
+      "y": 0.4,
+      "scale": 0.8,
+      "opacity": 0.9
+     }
+    },
+    {
+     "t": 1000,
+     "expect": {
+      "x": 0.5,
+      "y": 0.4,
+      "scale": 0.8,
+      "opacity": 0.9
+     }
+    },
+    {
+     "t": 2500,
+     "expect": {
+      "x": 0.5,
+      "y": 0.4,
+      "scale": 0.8,
+      "opacity": 0.9
+     }
+    },
+    {
+     "t": 9000,
+     "expect": {
+      "x": 0.5,
+      "y": 0.4,
+      "scale": 0.8,
+      "opacity": 0.9
+     }
+    }
+   ]
+  },
+  {
+   "name": "linear opacity fade in, held before and after",
+   "clip": {
+    "timeline_ms": 1000,
+    "x": 0.5,
+    "y": 0.4,
+    "scale": 0.8,
+    "opacity": 0.9,
+    "keys": [
+     {
+      "id": "000000000001",
+      "prop": "opacity",
+      "t_ms": 0,
+      "value": 0.0,
+      "interpolation": "linear",
+      "ease_strength": 1.0
+     },
+     {
+      "id": "000000000002",
+      "prop": "opacity",
+      "t_ms": 1000,
+      "value": 1.0,
+      "interpolation": "linear",
+      "ease_strength": 1.0
+     }
+    ]
+   },
+   "samples": [
+    {
+     "t": 0,
+     "expect": {
+      "x": 0.5,
+      "y": 0.4,
+      "scale": 0.8,
+      "opacity": 0.0
+     }
+    },
+    {
+     "t": 1000,
+     "expect": {
+      "x": 0.5,
+      "y": 0.4,
+      "scale": 0.8,
+      "opacity": 0.0
+     }
+    },
+    {
+     "t": 1250,
+     "expect": {
+      "x": 0.5,
+      "y": 0.4,
+      "scale": 0.8,
+      "opacity": 0.25
+     }
+    },
+    {
+     "t": 1500,
+     "expect": {
+      "x": 0.5,
+      "y": 0.4,
+      "scale": 0.8,
+      "opacity": 0.5
+     }
+    },
+    {
+     "t": 1999,
+     "expect": {
+      "x": 0.5,
+      "y": 0.4,
+      "scale": 0.8,
+      "opacity": 0.999
+     }
+    },
+    {
+     "t": 2000,
+     "expect": {
+      "x": 0.5,
+      "y": 0.4,
+      "scale": 0.8,
+      "opacity": 1.0
+     }
+    },
+    {
+     "t": 4000,
+     "expect": {
+      "x": 0.5,
+      "y": 0.4,
+      "scale": 0.8,
+      "opacity": 1.0
+     }
+    }
+   ]
+  },
+  {
+   "name": "each easing on its own property",
+   "clip": {
+    "timeline_ms": 0,
+    "x": 0.5,
+    "y": 0.4,
+    "scale": 0.8,
+    "opacity": 0.9,
+    "keys": [
+     {
+      "id": "000000000001",
+      "prop": "x",
+      "t_ms": 0,
+      "value": 0.1,
+      "interpolation": "ease_in_out",
+      "ease_strength": 1.0
+     },
+     {
+      "id": "000000000002",
+      "prop": "x",
+      "t_ms": 2000,
+      "value": 0.9,
+      "interpolation": "linear",
+      "ease_strength": 1.0
+     },
+     {
+      "id": "000000000003",
+      "prop": "y",
+      "t_ms": 0,
+      "value": 0.2,
+      "interpolation": "ease_out",
+      "ease_strength": 2.0
+     },
+     {
+      "id": "000000000004",
+      "prop": "y",
+      "t_ms": 2000,
+      "value": 0.8,
+      "interpolation": "linear",
+      "ease_strength": 1.0
+     },
+     {
+      "id": "000000000005",
+      "prop": "scale",
+      "t_ms": 0,
+      "value": 0.5,
+      "interpolation": "ease_in",
+      "ease_strength": 0.5
+     },
+     {
+      "id": "000000000006",
+      "prop": "scale",
+      "t_ms": 2000,
+      "value": 1.5,
+      "interpolation": "linear",
+      "ease_strength": 1.0
+     },
+     {
+      "id": "000000000007",
+      "prop": "opacity",
+      "t_ms": 0,
+      "value": 1.0,
+      "interpolation": "ease_in",
+      "ease_strength": 1.5
+     },
+     {
+      "id": "000000000008",
+      "prop": "opacity",
+      "t_ms": 2000,
+      "value": 0.0,
+      "interpolation": "linear",
+      "ease_strength": 1.0
+     }
+    ]
+   },
+   "samples": [
+    {
+     "t": 0,
+     "expect": {
+      "x": 0.1,
+      "y": 0.2,
+      "scale": 0.5,
+      "opacity": 1.0
+     }
+    },
+    {
+     "t": 250,
+     "expect": {
+      "x": 0.13437500000000002,
+      "y": 0.398046875,
+      "scale": 0.5703125,
+      "opacity": 0.9912109375
+     }
+    },
+    {
+     "t": 500,
+     "expect": {
+      "x": 0.225,
+      "y": 0.546875,
+      "scale": 0.65625,
+      "opacity": 0.9609375
+     }
+    },
+    {
+     "t": 1000,
+     "expect": {
+      "x": 0.5,
+      "y": 0.7250000000000001,
+      "scale": 0.875,
+      "opacity": 0.8125
+     }
+    },
+    {
+     "t": 1500,
+     "expect": {
+      "x": 0.775,
+      "y": 0.7906250000000001,
+      "scale": 1.15625,
+      "opacity": 0.5078125
+     }
+    },
+    {
+     "t": 1750,
+     "expect": {
+      "x": 0.865625,
+      "y": 0.798828125,
+      "scale": 1.3203125,
+      "opacity": 0.2822265625
+     }
+    },
+    {
+     "t": 2000,
+     "expect": {
+      "x": 0.9,
+      "y": 0.8,
+      "scale": 1.5,
+      "opacity": 0.0
+     }
+    }
+   ]
+  },
+  {
+   "name": "hold jumps at the next key",
+   "clip": {
+    "timeline_ms": 500,
+    "x": 0.5,
+    "y": 0.4,
+    "scale": 0.8,
+    "opacity": 0.9,
+    "keys": [
+     {
+      "id": "000000000001",
+      "prop": "x",
+      "t_ms": 0,
+      "value": 0.2,
+      "interpolation": "hold",
+      "ease_strength": 1.0
+     },
+     {
+      "id": "000000000002",
+      "prop": "x",
+      "t_ms": 1000,
+      "value": 0.7,
+      "interpolation": "hold",
+      "ease_strength": 1.0
+     },
+     {
+      "id": "000000000003",
+      "prop": "x",
+      "t_ms": 2000,
+      "value": 0.4,
+      "interpolation": "linear",
+      "ease_strength": 1.0
+     }
+    ]
+   },
+   "samples": [
+    {
+     "t": 500,
+     "expect": {
+      "x": 0.2,
+      "y": 0.4,
+      "scale": 0.8,
+      "opacity": 0.9
+     }
+    },
+    {
+     "t": 1000,
+     "expect": {
+      "x": 0.2,
+      "y": 0.4,
+      "scale": 0.8,
+      "opacity": 0.9
+     }
+    },
+    {
+     "t": 1499,
+     "expect": {
+      "x": 0.2,
+      "y": 0.4,
+      "scale": 0.8,
+      "opacity": 0.9
+     }
+    },
+    {
+     "t": 1500,
+     "expect": {
+      "x": 0.7,
+      "y": 0.4,
+      "scale": 0.8,
+      "opacity": 0.9
+     }
+    },
+    {
+     "t": 2499,
+     "expect": {
+      "x": 0.7,
+      "y": 0.4,
+      "scale": 0.8,
+      "opacity": 0.9
+     }
+    },
+    {
+     "t": 2500,
+     "expect": {
+      "x": 0.4,
+      "y": 0.4,
+      "scale": 0.8,
+      "opacity": 0.9
+     }
+    },
+    {
+     "t": 3000,
+     "expect": {
+      "x": 0.4,
+      "y": 0.4,
+      "scale": 0.8,
+      "opacity": 0.9
+     }
+    }
+   ]
+  },
+  {
+   "name": "two keys at one time: the last wins",
+   "clip": {
+    "timeline_ms": 0,
+    "x": 0.5,
+    "y": 0.4,
+    "scale": 0.8,
+    "opacity": 0.9,
+    "keys": [
+     {
+      "id": "000000000001",
+      "prop": "scale",
+      "t_ms": 1000,
+      "value": 0.3,
+      "interpolation": "linear",
+      "ease_strength": 1.0
+     },
+     {
+      "id": "000000000002",
+      "prop": "scale",
+      "t_ms": 1000,
+      "value": 0.6,
+      "interpolation": "linear",
+      "ease_strength": 1.0
+     },
+     {
+      "id": "000000000003",
+      "prop": "scale",
+      "t_ms": 2000,
+      "value": 1.2,
+      "interpolation": "linear",
+      "ease_strength": 1.0
+     }
+    ]
+   },
+   "samples": [
+    {
+     "t": 0,
+     "expect": {
+      "x": 0.5,
+      "y": 0.4,
+      "scale": 0.6,
+      "opacity": 0.9
+     }
+    },
+    {
+     "t": 1000,
+     "expect": {
+      "x": 0.5,
+      "y": 0.4,
+      "scale": 0.6,
+      "opacity": 0.9
+     }
+    },
+    {
+     "t": 1500,
+     "expect": {
+      "x": 0.5,
+      "y": 0.4,
+      "scale": 0.8999999999999999,
+      "opacity": 0.9
+     }
+    },
+    {
+     "t": 2000,
+     "expect": {
+      "x": 0.5,
+      "y": 0.4,
+      "scale": 1.2,
+      "opacity": 0.9
+     }
+    }
+   ]
+  },
+  {
+   "name": "a key before the clip start still shapes the curve (after a trim)",
+   "clip": {
+    "timeline_ms": 2000,
+    "x": 0.5,
+    "y": 0.4,
+    "scale": 0.8,
+    "opacity": 0.9,
+    "keys": [
+     {
+      "id": "000000000001",
+      "prop": "x",
+      "t_ms": -1000,
+      "value": 0.0,
+      "interpolation": "ease_in_out",
+      "ease_strength": 1.0
+     },
+     {
+      "id": "000000000002",
+      "prop": "x",
+      "t_ms": 1000,
+      "value": 1.0,
+      "interpolation": "linear",
+      "ease_strength": 1.0
+     }
+    ]
+   },
+   "samples": [
+    {
+     "t": 2000,
+     "expect": {
+      "x": 0.5,
+      "y": 0.4,
+      "scale": 0.8,
+      "opacity": 0.9
+     }
+    },
+    {
+     "t": 2500,
+     "expect": {
+      "x": 0.84375,
+      "y": 0.4,
+      "scale": 0.8,
+      "opacity": 0.9
+     }
+    },
+    {
+     "t": 3000,
+     "expect": {
+      "x": 1.0,
+      "y": 0.4,
+      "scale": 0.8,
+      "opacity": 0.9
+     }
+    },
+    {
+     "t": 3500,
+     "expect": {
+      "x": 1.0,
+      "y": 0.4,
+      "scale": 0.8,
+      "opacity": 0.9
+     }
+    }
+   ]
+  },
+  {
+   "name": "one key: a constant that overrides the clip value",
+   "clip": {
+    "timeline_ms": 0,
+    "x": 0.5,
+    "y": 0.4,
+    "scale": 0.8,
+    "opacity": 0.9,
+    "keys": [
+     {
+      "id": "000000000001",
+      "prop": "opacity",
+      "t_ms": 700,
+      "value": 0.25,
+      "interpolation": "linear",
+      "ease_strength": 1.0
+     }
+    ]
+   },
+   "samples": [
+    {
+     "t": 0,
+     "expect": {
+      "x": 0.5,
+      "y": 0.4,
+      "scale": 0.8,
+      "opacity": 0.25
+     }
+    },
+    {
+     "t": 700,
+     "expect": {
+      "x": 0.5,
+      "y": 0.4,
+      "scale": 0.8,
+      "opacity": 0.25
+     }
+    },
+    {
+     "t": 5000,
+     "expect": {
+      "x": 0.5,
+      "y": 0.4,
+      "scale": 0.8,
+      "opacity": 0.25
+     }
+    }
+   ]
+  },
+  {
+   "name": "frame times that are not whole ms (30 fps export)",
+   "clip": {
+    "timeline_ms": 0,
+    "x": 0.5,
+    "y": 0.4,
+    "scale": 0.8,
+    "opacity": 0.9,
+    "keys": [
+     {
+      "id": "000000000001",
+      "prop": "y",
+      "t_ms": 0,
+      "value": 0.0,
+      "interpolation": "ease_out",
+      "ease_strength": 1.0
+     },
+     {
+      "id": "000000000002",
+      "prop": "y",
+      "t_ms": 1000,
+      "value": 1.0,
+      "interpolation": "linear",
+      "ease_strength": 1.0
+     }
+    ]
+   },
+   "samples": [
+    {
+     "t": 33.333333333333336,
+     "expect": {
+      "x": 0.5,
+      "y": 0.06555555555555559,
+      "scale": 0.8,
+      "opacity": 0.9
+     }
+    },
+    {
+     "t": 66.66666666666667,
+     "expect": {
+      "x": 0.5,
+      "y": 0.12888888888888883,
+      "scale": 0.8,
+      "opacity": 0.9
+     }
+    },
+    {
+     "t": 500.5,
+     "expect": {
+      "x": 0.5,
+      "y": 0.7504997499999999,
+      "scale": 0.8,
+      "opacity": 0.9
+     }
+    },
+    {
+     "t": 966.6666666666666,
+     "expect": {
+      "x": 0.5,
+      "y": 0.9988888888888889,
+      "scale": 0.8,
+      "opacity": 0.9
+     }
+    }
+   ]
+  }
+ ]
+}
