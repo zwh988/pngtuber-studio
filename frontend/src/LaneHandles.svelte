@@ -5,9 +5,11 @@
    * `draft` holds the new values (LaneLayers draws them); on release one `set_lane_clip` is sent,
    * so each drag is one undo step. Shown only while paused, for a clip at the playhead on a lane
    * that is visible and unlocked. It sits above the avatar overlay, so while a lane clip is
-   * selected its box wins over the avatar where they overlap.
+   * selected its box wins over the avatar where they overlap. The box starts from the clip's
+   * keyed values at the playhead; the editor keys the keyed properties there (keyframes step 7).
    */
   import type { TimelineLaneClip, VideoLane } from "./api";
+  import { clipValuesAt, isKeyed } from "./clipKeys";
   import { activeLaneClips, movedCentre, pipRect, resizedScale } from "./videoLanes";
 
   export type LaneDraft = { id: string; x: number; y: number; scale: number };
@@ -41,8 +43,9 @@
     return lanes.find((lane) => lane.id === shown.lane_id)?.locked ? null : shown;
   });
   const values = $derived(
-    clip === null ? null : draft !== null && draft.id === clip.id ? draft : { x: clip.x, y: clip.y, scale: clip.scale },
+    clip === null ? null : draft !== null && draft.id === clip.id ? draft : clipValuesAt(clip, playheadMs),
   );
+  const keyed = $derived(clip !== null && (isKeyed(clip, "x") || isKeyed(clip, "y") || isKeyed(clip, "scale")));
   const rect = $derived(
     clip === null || values === null ? null : pipRect(boxW, boxH, clip.media_width, clip.media_height, values),
   );
@@ -109,7 +112,9 @@
     <div
       class="box"
       role="presentation"
-      title="Drag to move, drag a corner to resize"
+      title={keyed
+        ? "Drag to move, drag a corner to resize: keyed values get a key at the playhead"
+        : "Drag to move, drag a corner to resize"}
       style:left="{rect.left}px"
       style:top="{rect.top}px"
       style:width="{rect.width}px"

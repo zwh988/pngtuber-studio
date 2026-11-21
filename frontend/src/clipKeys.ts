@@ -1,4 +1,5 @@
-import type { ClipKey, ClipKeyProp, Interpolation, TimelineLaneClip } from "./api";
+import type { ClipKey, ClipKeyProp, EditOp, Interpolation, TimelineLaneClip } from "./api";
+import { KEY_NEAR_MS } from "./keyNav";
 
 /**
  * Keyed values of an image lane clip (keyframes task, step 6). Pure.
@@ -90,4 +91,57 @@ export function clipValuesAt(clip: KeyedClip, timelineMs: number): ClipValues {
 /** Whether the property has keys (then preview drags and the clip bar key it). */
 export function isKeyed(clip: Pick<TimelineLaneClip, "keys">, prop: ClipKeyProp): boolean {
   return (clip.keys ?? []).some((k) => k.prop === prop);
+}
+
+/** The property's key nearest a timeline time, within one frame (backend `clip_key_near`). */
+export function clipKeyNear(
+  clip: Pick<TimelineLaneClip, "timeline_ms" | "keys">,
+  prop: ClipKeyProp,
+  timelineMs: number,
+): ClipKey | null {
+  const t = timelineMs - clip.timeline_ms;
+  let best: ClipKey | null = null;
+  for (const key of clip.keys ?? []) {
+    if (key.prop !== prop) continue;
+    const gap = Math.abs(key.t_ms - t);
+    if (gap <= KEY_NEAR_MS && (best === null || gap < Math.abs(best.t_ms - t))) best = key;
+  }
+  return best;
+}
+
+/** Keys inside the clip (a trim can leave some outside: kept, but not drawn). */
+export function visibleClipKeys(clip: Pick<TimelineLaneClip, "timeline_ms" | "end_ms" | "keys">): ClipKey[] {
+  const length = clip.end_ms - clip.timeline_ms;
+  return (clip.keys ?? []).filter((k) => k.t_ms >= 0 && k.t_ms <= length);
+}
+
+/** Whether the playhead is on the clip, where keyed properties can be set. */
+export function onClip(clip: Pick<TimelineLaneClip, "timeline_ms" | "end_ms">, timelineMs: number): boolean {
+  return timelineMs >= clip.timeline_ms && timelineMs <= clip.end_ms;
+}
+
+/**
+ * The ops for changing a clip's x, y, scale or opacity (keyframes decision 3): a keyed
+ * property is keyed at the playhead (`key_lane_clip`, which edits the key within a frame
+ * or adds one), the others change the clip's own value in one `set_lane_clip`. A keyed
+ * property cannot change while the playhead is off the clip: it lands in `skipped`.
+ */
+export function clipEditOps(
+  clip: Pick<TimelineLaneClip, "id" | "timeline_ms" | "end_ms" | "keys">,
+  change: Partial<ClipValues>,
+  playheadMs: number,
+): { ops: EditOp[]; skipped: ClipKeyProp[] } {
+  const ops: EditOp[] = [];
+  const skipped: ClipKeyProp[] = [];
+  const plain: Partial<ClipValues> = {};
+  const at = Math.round(playheadMs);
+  for (const prop of CLIP_KEY_PROPS) {
+    const value = change[prop];
+    if (value === undefined) continue;
+    if (!isKeyed(clip, prop)) plain[prop] = value;
+    else if (onClip(clip, at)) ops.push({ op: "key_lane_clip", clip_id: clip.id, prop, timeline_ms: at, value });
+    else skipped.push(prop);
+  }
+  if (Object.keys(plain).length > 0) ops.unshift({ op: "set_lane_clip", clip_id: clip.id, ...plain });
+  return { ops, skipped };
 }

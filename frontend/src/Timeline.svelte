@@ -44,6 +44,7 @@
   import { FALLBACK, readTimelineColors, type TimelineColors } from "./timelineTheme";
   import { SNAP_PX, snapEdge, snapMove, snapPoints } from "./snap";
   import { clampShift, keyGroup, keySelection, stepKey, toggleGroup } from "./keyNav";
+  import { visibleClipKeys } from "./clipKeys";
   import {
     ArrowDown,
     ArrowUp,
@@ -101,6 +102,7 @@
     selectedLaneClipId = $bindable(null),
     onmovelane,
     ontrimlane,
+    onmoveclipkey,
     onvideolane,
     onaddvideolane,
     onremovevideolane,
@@ -162,6 +164,8 @@
     /** A lane clip was dragged: where its start goes and the lane it lands on. */
     onmovelane?: (clipId: string, timelineMs: number, laneId: string) => Promise<void>;
     ontrimlane?: (clipId: string, edge: "start" | "end", timelineMs: number) => Promise<void>;
+    /** A key on an image clip was dragged to a timeline time (keyframes step 7). */
+    onmoveclipkey?: (clipId: string, keyId: string, timelineMs: number) => Promise<void>;
     onvideolane?: (laneId: string, change: { name?: string; hidden?: boolean; locked?: boolean }) => Promise<void>;
     onaddvideolane?: () => Promise<void>;
     onremovevideolane?: (laneId: string) => Promise<void>;
@@ -195,6 +199,8 @@
   const REACT_Y = $derived(EXPR_Y + ROW_H + 3);
   const MOTION_Y = $derived(REACT_Y + ROW_H + 3);
   const KEY_R = 5;
+  /** Diamonds of image-clip keys, along the bottom of the clip block. */
+  const CLIP_KEY_R = 4;
   /** Collapsed: one row with every motion key. Expanded: one row per motion lane. */
   let lanesOpen = $state(false);
   /** The how-to text under the toolbar (the "?" button). */
@@ -283,7 +289,8 @@
   type LaneDrag =
     | { mode: "vpress"; clip: TimelineLaneClip; startX: number }
     | { mode: "vmove"; clip: TimelineLaneClip; grabDx: number; startMs: number; laneIndex: number }
-    | { mode: "vtrim"; clip: TimelineLaneClip; edge: "start" | "end"; ms: number };
+    | { mode: "vtrim"; clip: TimelineLaneClip; edge: "start" | "end"; ms: number }
+    | { mode: "ckey"; clip: TimelineLaneClip; keyId: string; startX: number; fromMs: number; toMs: number };
   type Drag =
     | LaneDrag
     | AudioDrag
@@ -305,7 +312,8 @@
     | { kind: "amove"; clipId: string; startMs: number; laneIndex: number; fits: boolean }
     | { kind: "atrim"; clip: TimelineAudioClip }
     | { kind: "imove"; ids: string[]; deltaMs: number }
-    | { kind: "box"; x0: number; y0: number; x1: number; y1: number };
+    | { kind: "box"; x0: number; y0: number; x1: number; y1: number }
+    | { kind: "ckey"; keyId: string; ms: number };
 
   /** Pointer interaction in progress (not reactive: only the handlers use it). */
   let drag: Drag | null = null;
@@ -527,6 +535,7 @@
       ctx.textBaseline = "top";
     }
     const vIndexOf = new Map(videoLanes.map((lane, index) => [lane.id, index]));
+    const uiCk = dragUi !== null && dragUi.kind === "ckey" ? dragUi : null;
     for (const original of laneClips) {
       const clip = uiV !== null && uiV.kind === "vtrim" && uiV.clip.id === original.id ? uiV.clip : original;
       const index = vIndexOf.get(clip.lane_id);
@@ -569,6 +578,26 @@
       ctx.globalAlpha = 1;
       if (picked) {
         selectRect(x0, y, Math.max(1, w - 1), h);
+      }
+      // Keys on an image clip (keyframes step 7): diamonds along the bottom of the block.
+      for (const key of visibleClipKeys(clip)) {
+        const ms = uiCk !== null && uiCk.keyId === key.id ? uiCk.ms : clip.timeline_ms + key.t_ms;
+        const kx = xOf(ms);
+        if (kx < x0 - CLIP_KEY_R || kx > x0 + w + CLIP_KEY_R) continue;
+        const ky = y + h - CLIP_KEY_R - 2;
+        ctx.beginPath();
+        ctx.moveTo(kx, ky - CLIP_KEY_R);
+        ctx.lineTo(kx + CLIP_KEY_R, ky);
+        ctx.lineTo(kx, ky + CLIP_KEY_R);
+        ctx.lineTo(kx - CLIP_KEY_R, ky);
+        ctx.closePath();
+        ctx.fillStyle = key.prop === "opacity" ? c.reaction : key.interpolation !== "hold" ? c.motion : c.motionHold;
+        ctx.fill();
+        if (Math.abs(ms - playheadMs) <= 34) {
+          ctx.strokeStyle = c.selected;
+          ctx.lineWidth = 1.5;
+          ctx.stroke();
+        }
       }
     }
 
@@ -1172,6 +1201,19 @@
       }
       return null;
     }
+    /** A key diamond of an image clip under the pointer (the bottom strip of the block). */
+    function hitClipKey(x: number, y: number, clip: TimelineLaneClip): string | null {
+      const lane = videoLaneAt(y, VIDEO_TOP, videoLanes.length, avatarAt);
+      if (typeof lane !== "number" || clip.image_id === null) return null;
+      const bottom = video.laneY(lane) + VIDEO_LANE_H - 2;
+      if (y < bottom - 2 * CLIP_KEY_R - 4) return null;
+      let best: { id: string; gap: number } | null = null;
+      for (const key of visibleClipKeys(clip)) {
+        const gap = Math.abs(x - xPos(clip.timeline_ms + key.t_ms));
+        if (gap <= CLIP_KEY_R + 2 && (best === null || gap < best.gap)) best = { id: key.id, gap };
+      }
+      return best?.id ?? null;
+    }
     function laneLocked(laneId: string): boolean {
       return videoLanes.find((lane) => lane.id === laneId)?.locked ?? false;
     }
@@ -1292,6 +1334,18 @@
         selectedPlacementId = null;
         selectedKeyId = null;
         selectedReactionId = null;
+        const keyId = hitClipKey(x, y, shot.clip);
+        if (keyId !== null) {
+          // A clip key: the playhead goes onto it (the clip bar then edits it); drag to move it.
+          const key = shot.clip.keys.find((k) => k.id === keyId);
+          const t = shot.clip.timeline_ms + (key?.t_ms ?? 0);
+          playheadMs = t;
+          drag =
+            locked || laneLocked(shot.clip.lane_id)
+              ? null
+              : { mode: "ckey", clip: shot.clip, keyId, startX: x, fromMs: t, toMs: t };
+          return;
+        }
         if (locked || laneLocked(shot.clip.lane_id)) {
           drag = null;
         } else if (shot.part === "body") {
@@ -1456,6 +1510,20 @@
         updateLaneMove(d, x, y, e.altKey);
         return;
       }
+      if (d.mode === "ckey") {
+        if (Math.abs(x - d.startX) <= 3 && d.toMs === d.fromMs) return;
+        const raw = Math.round(d.fromMs + (x - d.startX) / pxPerMs);
+        // Always onto its own clip's start and end (Alt: free); with the magnet on also onto
+        // the playhead, other clips' edges and the clip's other keys.
+        const others = d.clip.keys.filter((k) => k.id !== d.keyId).map((k) => d.clip.timeline_ms + k.t_ms);
+        const points = e.altKey
+          ? null
+          : [d.clip.timeline_ms, d.clip.end_ms, ...(snapOn ? [playheadMs, ...others, ...(snapTargets(d.clip.id, false) ?? [])] : [])];
+        const target = points === null ? raw : Math.round(snapEdge(raw, points, SNAP_PX / pxPerMs));
+        d.toMs = Math.min(Math.max(target, d.clip.timeline_ms), d.clip.end_ms);
+        dragUi = { kind: "ckey", keyId: d.keyId, ms: d.toMs };
+        return;
+      }
       if (d.mode === "vtrim") {
         d.ms = laneTrimTarget(d.clip, d.edge, snappedEdge(d.clip.id, scrollMs + x / pxPerMs, e.altKey), laneClips);
         dragUi = { kind: "vtrim", clip: withLaneTrim(d.clip, d.edge, d.ms) };
@@ -1592,6 +1660,15 @@
         return;
       }
       if (d.mode === "vpress") {
+        return;
+      }
+      if (d.mode === "ckey") {
+        if (d.toMs !== d.fromMs && onmoveclipkey !== undefined) {
+          playheadMs = d.toMs; // the playhead follows the key
+          void finish(onmoveclipkey(d.clip.id, d.keyId, d.toMs));
+        } else {
+          dragUi = null;
+        }
         return;
       }
       if (d.mode === "amove") {

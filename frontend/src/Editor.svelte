@@ -30,6 +30,7 @@
     trimClip,
     undoEdit,
     type EditOp,
+    type Interpolation,
     type EditResult,
     type FootageItem,
     type FrameTrack,
@@ -41,6 +42,7 @@
   import { AudioClipPlayback } from "./audioClipPlayback";
   import { audioEndMs, audioPeakBuckets } from "./audioLanes";
   import { FOOTAGE_DRAG_TYPE, avatarSlot, laneEndMs } from "./videoLanes";
+  import { CLIP_KEY_PROPS, clipEditOps, clipKeyNear, clipValuesAt, isKeyed, onClip, type ClipValues } from "./clipKeys";
   import { clock } from "./format";
   import { lufsText } from "./loudness";
   import AvatarOverlay from "./AvatarOverlay.svelte";
@@ -61,6 +63,7 @@
     ArrowLeft,
     Cpu,
     Snowflake,
+    Diamond,
     Gauge,
     HardDrive,
     Keyboard,
@@ -686,6 +689,24 @@
     await edit(() => editBatch(label, ops));
   }
 
+  /**
+   * Change a lane clip's x, y, scale or opacity from the preview or the clip bar (keyframes
+   * step 7): keyed properties get a key at the playhead, the others change the clip's own
+   * value; properties that already have the value at the playhead are left alone.
+   */
+  async function setLaneValues(clipId: string, label: string, change: Partial<ClipValues>): Promise<void> {
+    const shot = timeline?.lane_clips.find((v) => v.id === clipId);
+    if (shot === undefined) return;
+    const now = clipValuesAt(shot, playheadMs);
+    const wanted: Partial<ClipValues> = {};
+    for (const prop of CLIP_KEY_PROPS) {
+      const value = change[prop];
+      if (value !== undefined && Math.abs(value - now[prop]) > 1e-6) wanted[prop] = value;
+    }
+    const { ops } = clipEditOps(shot, wanted, playheadMs);
+    if (ops.length > 0) await laneEdit(label, ops);
+  }
+
   /** One audio lane or clip edit, as one undo step (M8-1). */
   async function audioEdit(label: string, ops: EditOp[]): Promise<void> {
     player?.pause();
@@ -1104,8 +1125,7 @@
                   {playheadMs}
                   editable={!playing && !busy}
                   bind:draft={laneDraft}
-                  oncommit={(clipId, change) =>
-                    laneEdit("Move or resize a clip on a video lane", [{ op: "set_lane_clip", clip_id: clipId, ...change }])}
+                  oncommit={(clipId, change) => setLaneValues(clipId, "Move or resize a clip on a video lane", change)}
                 />
               {/snippet}
             </Player>
@@ -1311,6 +1331,8 @@
               laneEdit("Move clip on a video lane", [{ op: "move_lane_clip", clip_id: id, timeline_ms: ms, lane_id: laneId }])}
             ontrimlane={(id, edge, ms) =>
               laneEdit("Trim clip on a video lane", [{ op: "trim_lane_clip", clip_id: id, edge, timeline_ms: ms }])}
+            onmoveclipkey={(id, keyId, ms) =>
+              laneEdit("Move clip key", [{ op: "move_clip_key", clip_id: id, key_id: keyId, timeline_ms: ms }])}
             onvideolane={(laneId, change) =>
               laneEdit(change.name !== undefined ? "Rename video lane" : "Change video lane", [
                 { op: "set_video_lane", lane_id: laneId, ...change },
@@ -1380,41 +1402,112 @@
               {#if shot.missing}
                 <span class="error">The file is missing.</span>
               {/if}
+              {@const now = clipValuesAt(shot, playheadMs)}
+              {@const here = onClip(shot, playheadMs)}
               {#each [["X", "x", -100, 200], ["Y", "y", -100, 200], ["Size", "scale", 5, 400], ["Opacity", "opacity", 0, 100]] as const as [title, key, lo, hi] (key)}
-                <label class="inline">
+                {@const keyed = isKeyed(shot, key)}
+                {@const near = clipKeyNear(shot, key, playheadMs)}
+                <label class="inline" title={keyed ? (here ? `${title} is keyed: a change keys it at the playhead` : `${title} is keyed: put the playhead on the clip to change it`) : undefined}>
                   {title}
                   <input
                     class="num small"
+                    class:keyed
                     type="number"
                     min={lo}
                     max={hi}
                     step="1"
-                    value={pct(shot[key])}
-                    disabled={busy}
+                    value={pct(now[key])}
+                    disabled={busy || (keyed && !here)}
                     onkeydown={(e) => e.stopPropagation()}
                     onchange={(e) => {
                       const raw = e.currentTarget.valueAsNumber;
                       if (!Number.isFinite(raw)) {
-                        e.currentTarget.value = String(pct(shot[key]));
+                        e.currentTarget.value = String(pct(now[key]));
                         return;
                       }
                       const value = Math.min(hi, Math.max(lo, raw)) / 100;
-                      if (Math.abs(value - shot[key]) > 0.0005) {
-                        setShot(key === "opacity" ? "Change clip opacity" : "Place clip on a video lane", { [key]: value });
+                      if (Math.abs(value - now[key]) > 0.0005) {
+                        void setLaneValues(shot.id, key === "opacity" ? "Change clip opacity" : "Place clip on a video lane", { [key]: value });
                       }
                     }}
                   />
                   %
                 </label>
+                {#if shot.image_id !== null}
+                  <IconButton
+                    icon={Diamond}
+                    size="sm"
+                    variant="secondary"
+                    pressed={near !== null}
+                    iconFill={near !== null ? "currentColor" : "none"}
+                    label={near !== null ? `Remove the ${title} key at the playhead` : `Key ${title} at the playhead (it then changes over time)`}
+                    disabled={busy || !here}
+                    onclick={() =>
+                      void laneEdit(
+                        near !== null ? "Remove clip key" : "Key clip",
+                        near !== null
+                          ? [{ op: "remove_clip_key", clip_id: shot.id, key_id: near.id }]
+                          : [{ op: "key_lane_clip", clip_id: shot.id, prop: key, timeline_ms: Math.round(playheadMs), value: now[key] }],
+                      )}
+                  />
+                {/if}
               {/each}
               <Button
                 size="sm"
-                disabled={busy || (shot.x === 0.5 && shot.y === 0.5 && shot.scale === 1)}
-                title="Back to full frame, centred"
-                onclick={() => setShot("Place clip on a video lane", { x: 0.5, y: 0.5, scale: 1 })}
+                disabled={busy || (now.x === 0.5 && now.y === 0.5 && now.scale === 1)}
+                title="Back to full frame, centred (keyed values get a key at the playhead)"
+                onclick={() => void setLaneValues(shot.id, "Place clip on a video lane", { x: 0.5, y: 0.5, scale: 1 })}
               >
                 Full frame
               </Button>
+              {@const atKeys = CLIP_KEY_PROPS.map((p) => clipKeyNear(shot, p, playheadMs)).filter((k) => k !== null)}
+              {#if shot.image_id !== null && atKeys.length > 0}
+                {@const first = atKeys[0]}
+                {@const setEase = (label: string, change: { interpolation?: Interpolation; ease_strength?: number }) =>
+                  void laneEdit(
+                    label,
+                    atKeys.map((k) => ({ op: "set_clip_key", clip_id: shot.id, key_id: k.id, ...change }) as EditOp),
+                  )}
+                <label class="inline" title="Easing from the key(s) at the playhead to the next key of each property">
+                  Easing
+                  <select
+                    value={first.interpolation}
+                    disabled={busy}
+                    onkeydown={(e) => e.stopPropagation()}
+                    onchange={(e) => setEase("Change clip key easing", { interpolation: e.currentTarget.value as Interpolation })}
+                  >
+                    <option value="ease_in_out">Ease in and out</option>
+                    <option value="ease_in">Ease in</option>
+                    <option value="ease_out">Ease out</option>
+                    <option value="linear">Linear</option>
+                    <option value="hold">Hold</option>
+                  </select>
+                </label>
+                {#if first.interpolation !== "hold" && first.interpolation !== "linear"}
+                  <label class="inline" title="0 is linear, 1 normal, 2 strong">
+                    Strength
+                    <input
+                      class="num small"
+                      type="number"
+                      min="0"
+                      max="2"
+                      step="0.1"
+                      value={first.ease_strength}
+                      disabled={busy}
+                      onkeydown={(e) => e.stopPropagation()}
+                      onchange={(e) => {
+                        const raw = e.currentTarget.valueAsNumber;
+                        if (!Number.isFinite(raw)) {
+                          e.currentTarget.value = String(first.ease_strength);
+                          return;
+                        }
+                        const value = Math.round(Math.min(2, Math.max(0, raw)) * 100) / 100;
+                        if (value !== first.ease_strength) setEase("Change clip key easing", { ease_strength: value });
+                      }}
+                    />
+                  </label>
+                {/if}
+              {/if}
               {#if shot.source_id !== null && shot.freeze_ms === null}
                 <Button
                   size="sm"
@@ -1912,6 +2005,9 @@
   }
   .inline input.small {
     width: 64px;
+  }
+  .inline input.keyed {
+    border-color: var(--accent);
   }
   .keys {
     margin-top: 8px;

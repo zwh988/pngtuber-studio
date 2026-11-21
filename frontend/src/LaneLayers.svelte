@@ -4,12 +4,15 @@
    * the main footage (and under the avatar) where `pipRect` puts it, at its opacity. Recordings
    * play in their own <video>, kept in step with the playhead; their sound goes through the
    * shared audio graph at the clip's level. Clips starting soon are loaded ahead, out of sight.
+   * An image clip with keys is drawn at its keyed position, size and opacity at the playhead
+   * (`clipValuesAt`, the export's evaluation; keyframes step 7).
    */
   import { untrack } from "svelte";
   import { imageMediaUrl, sourceMediaUrl, type TimelineLaneClip, type VideoLane } from "./api";
   import type { AudioGraph } from "./audioGraph";
   import { dbToGain } from "./audioMix";
   import type { LaneDraft } from "./LaneHandles.svelte";
+  import { clipValuesAt } from "./clipKeys";
   import { activeLaneClips, laneSourceMs, pipRect, upcomingLaneClips } from "./videoLanes";
 
   let {
@@ -105,7 +108,8 @@
 
 <div class="lanes" bind:clientWidth={boxW} bind:clientHeight={boxH} aria-hidden="true">
   {#each shown as clip (clip.id)}
-    {@const r = pipRect(boxW, boxH, clip.media_width, clip.media_height, draft !== null && draft.id === clip.id ? draft : clip)}
+    {@const v = clipValuesAt(clip, playheadMs)}
+    {@const r = pipRect(boxW, boxH, clip.media_width, clip.media_height, draft !== null && draft.id === clip.id ? draft : v)}
     {#if clip.image_id !== null}
       <img
         src={imageMediaUrl(clip.image_id)}
@@ -114,7 +118,7 @@
         style:top="{r.top}px"
         style:width="{r.width}px"
         style:height="{r.height}px"
-        style:opacity={clip.opacity}
+        style:opacity={v.opacity}
         style:z-index={depth.get(clip.lane_id) ?? 0}
         style:visibility={activeIds.has(clip.id) ? "visible" : "hidden"}
       />
@@ -130,7 +134,7 @@
         style:top="{r.top}px"
         style:width="{r.width}px"
         style:height="{r.height}px"
-        style:opacity={clip.opacity}
+        style:opacity={v.opacity}
         style:z-index={depth.get(clip.lane_id) ?? 0}
         style:visibility={activeIds.has(clip.id) ? "visible" : "hidden"}
       ></video>

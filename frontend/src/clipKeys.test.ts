@@ -1,6 +1,6 @@
 import { describe, expect, it } from "vitest";
 import type { ClipKey } from "./api";
-import { clipValuesAt, ease, isKeyed, laneValue } from "./clipKeys";
+import { clipEditOps, clipKeyNear, clipValuesAt, ease, isKeyed, laneValue, visibleClipKeys } from "./clipKeys";
 import table from "../../tests/fixtures/clip_key_cases.json";
 
 type Case = {
@@ -47,5 +47,35 @@ describe("ease and lanes", () => {
   it("knows which properties are keyed", () => {
     expect(isKeyed(cases[1].clip, "opacity")).toBe(true);
     expect(isKeyed(cases[1].clip, "x")).toBe(false);
+  });
+});
+
+describe("editing a keyed clip", () => {
+  const key = (id: string, prop: ClipKey["prop"], t_ms: number, value: number): ClipKey => ({
+    id,
+    prop,
+    t_ms,
+    value,
+    interpolation: "linear",
+    ease_strength: 1,
+  });
+  const clip = { id: "c", timeline_ms: 1000, end_ms: 6000, keys: [key("a", "x", 0, 0.2), key("b", "x", 6000, 0.9)] };
+
+  it("keys keyed properties at the playhead and sets the rest on the clip", () => {
+    expect(clipEditOps(clip, { x: 0.4, y: 0.6, scale: 0.5 }, 2000.4)).toEqual({
+      ops: [
+        { op: "set_lane_clip", clip_id: "c", y: 0.6, scale: 0.5 },
+        { op: "key_lane_clip", clip_id: "c", prop: "x", timeline_ms: 2000, value: 0.4 },
+      ],
+      skipped: [],
+    });
+    expect(clipEditOps(clip, { x: 0.4 }, 9000)).toEqual({ ops: [], skipped: ["x"] });
+  });
+
+  it("finds the key at the playhead and hides keys outside the clip", () => {
+    expect(clipKeyNear(clip, "x", 1030)?.id).toBe("a");
+    expect(clipKeyNear(clip, "x", 1040)).toBeNull();
+    expect(clipKeyNear(clip, "y", 1000)).toBeNull();
+    expect(visibleClipKeys(clip).map((k) => k.id)).toEqual(["a"]);
   });
 });
