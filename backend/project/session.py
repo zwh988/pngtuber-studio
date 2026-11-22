@@ -25,6 +25,8 @@ from backend.audio.cleanup import (
     run_cache_cleanup,
     run_cleanup,
 )
+from backend.audio.clipfx import clip_fx_key, clip_processing_spec
+from backend.audio.clipfx_render import AUDIO_FX_DIR, render_clip_fx
 from backend.audio.clipimport import (
     AudioImportError,
     AudioImportResult,
@@ -39,6 +41,7 @@ from backend.audio.fxstate import FxProcessing, FxState, build_fx_state
 from backend.audio.prefetch import Prefetcher, plan_jobs
 from backend.audio.processed import (
     TrimCache,
+    _lock_for,
     ensure_processed,
     measure_bounds,
     trim_bounds_for,
@@ -868,6 +871,17 @@ class Session:
                 continue
             if decoded is not None:
                 audio_paths[audio_file.id] = decoded
+        # M8-4: the rendered FX file of each audio clip that has FX (the preview plays it too).
+        audio_fx_paths: dict[str, Path] = {}
+        for sound in project.audio_clips:
+            if sound.fx is None:
+                continue
+            try:
+                rendered = self.audio_clip_fx_path(sound.id)
+            except SessionError:
+                continue  # pre-flight reported it
+            if rendered is not None:
+                audio_fx_paths[sound.id] = rendered
         return ExportInputs(
             project=project,
             timeline=timeline,
@@ -876,6 +890,7 @@ class Session:
             art=art,
             art_root=art_root,
             audio_paths=audio_paths,
+            audio_fx_paths=audio_fx_paths,
             image_paths=image_paths,
         )
 
@@ -925,6 +940,17 @@ class Session:
                 for i in project.image_files
                 if i.id in used_images and not (folder / i.path).is_file()
             }
+            fx_clips = [
+                c.id for c in project.audio_clips if c.fx is not None and c.file_id not in missing_audio
+            ]
+        # M8-4: render every audio clip's FX now (outside the lock), so a render that fails
+        # stops the export here and the export itself finds the files ready.
+        fx_problems: dict[str, str] = {}
+        for clip_id in fx_clips:
+            try:
+                self.audio_clip_fx_path(clip_id)
+            except SessionError as exc:
+                fx_problems[clip_id] = str(exc)
         return preflight(
             project,
             timeline,
@@ -935,6 +961,7 @@ class Session:
             tools_problem=tools_problem,
             missing_audio_file_ids=missing_audio,
             missing_image_ids=missing_images,
+            audio_fx_problems=fx_problems,
         )
 
     def envelope(self, take_id: str, stretch: float = 1.0) -> EnvelopeReport | None:
@@ -1440,6 +1467,35 @@ class Session:
             return ensure_decoded(folder, audio_file, self._decode)
         except AudioImportError as exc:
             raise SessionError(str(exc)) from exc
+
+    def audio_clip_fx_path(self, clip_id: str) -> Path | None:
+        """An audio clip's processed file (M8-4), rendered when missing; None when the
+        clip is unknown or plays its file as it is. The render runs outside the session
+        lock, once per (file, chain) key; clips sharing both share the file."""
+        with self._lock:
+            folder, stack = self._require_open()
+            clip = next((c for c in stack.project.audio_clips if c.id == clip_id), None)
+            if clip is None:
+                return None
+            audio_file = next((f for f in stack.project.audio_files if f.id == clip.file_id), None)
+            fx = None if clip.fx is None else clip.fx.model_copy(deep=True)
+        if audio_file is None:
+            return None
+        try:
+            spec = clip_processing_spec(fx)
+        except FxChainError as exc:
+            raise SessionError(f"the clip's FX cannot be used: {exc}") from exc
+        if spec is None:
+            return None
+        dest = folder / AUDIO_FX_DIR / f"{clip_fx_key(audio_file.id, spec)}.wav"
+        with _lock_for(f"clipfx:{dest.name}"):
+            if not dest.is_file():
+                try:
+                    src = ensure_decoded(folder, audio_file, self._decode)
+                    render_clip_fx(src, dest, spec)
+                except (AudioImportError, ProcessError) as exc:
+                    raise SessionError(f"cannot render the FX of {audio_file.name}: {exc}") from exc
+        return dest
 
     # ---- recent projects ---------------------------------------------------
 

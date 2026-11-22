@@ -7,7 +7,7 @@ out or drawn with a fallback). Each issue may carry a timeline time so the expor
 screen can jump there.
 """
 
-from collections.abc import Collection, Sequence
+from collections.abc import Collection, Mapping, Sequence
 from typing import Literal
 
 from pydantic import BaseModel, Field
@@ -61,6 +61,7 @@ def preflight(
     tools_problem: str | None = None,
     missing_audio_file_ids: Collection[str] = (),
     missing_image_ids: Collection[str] = (),
+    audio_fx_problems: Mapping[str, str] | None = None,
 ) -> PreflightReport:
     """Check a project before export.
 
@@ -69,7 +70,8 @@ def preflight(
     ``art_status`` / ``art_problem`` / ``art_warnings`` come from the avatar state;
     ``tools_problem`` says why ffmpeg or NVENC cannot be used (None when they can);
     ``missing_audio_file_ids`` are imported audio files no longer in ``audio/`` (M8-1);
-    ``missing_image_ids`` are imported images no longer in ``images/`` (M8-2).
+    ``missing_image_ids`` are imported images no longer in ``images/`` (M8-2);
+    ``audio_fx_problems`` maps an audio clip id to why its FX could not be rendered (M8-4).
     """
     issues: list[PreflightIssue] = []
 
@@ -193,6 +195,18 @@ def preflight(
                 "audio_file_missing",
                 f"The audio file {names.get(sound.file_id, '?')} is missing from the "
                 "project's audio folder; remove its clips or drop the file again.",
+                sound.id,
+                sound.timeline_ms,
+            )
+
+    fx_problems = audio_fx_problems or {}
+    for sound in sorted(project.audio_clips, key=lambda c: (c.timeline_ms, c.id)):
+        if sound.id in fx_problems:
+            add(
+                "error",
+                "audio_fx_failed",
+                f"The FX of the audio clip {names.get(sound.file_id, '?')} could not be "
+                f"rendered ({fx_problems[sound.id]}); change or remove them.",
                 sound.id,
                 sound.timeline_ms,
             )

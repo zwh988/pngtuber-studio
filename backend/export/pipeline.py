@@ -70,6 +70,8 @@ class ExportInputs:
     art_root: Path | None
     # M8-1: the decoded 48 kHz WAV of each imported audio file, by file id.
     audio_paths: dict[str, Path] = field(default_factory=dict)
+    # M8-4: the rendered FX file of each audio clip with FX, by clip id.
+    audio_fx_paths: dict[str, Path] = field(default_factory=dict)
     # M8-2: each imported image (video lanes), by image id.
     image_paths: dict[str, Path] = field(default_factory=dict)
 
@@ -179,7 +181,12 @@ def run_export(
         progress=lambda f: report("voice", f * VOICE_SHARE),
     )
     music = write_audio_clip_track(
-        project, total_ms, out_dir, inputs.audio_paths, should_stop=should_stop
+        project,
+        total_ms,
+        out_dir,
+        inputs.audio_paths,
+        fx_paths=inputs.audio_fx_paths,
+        should_stop=should_stop,
     )
     mark = timed("voice", mark)
     report("render", VOICE_SHARE)

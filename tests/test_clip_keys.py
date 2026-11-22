@@ -146,9 +146,9 @@ def test_schema_checks() -> None:
 
 
 def test_v8_projects_open_and_keys_reach_the_timeline() -> None:
-    assert SCHEMA_VERSION == 9
+    assert SCHEMA_VERSION >= 9
     clip = {"id": C1, "lane_id": V2, "image_id": IMG, "timeline_ms": 0, "out_ms": 1000}
-    result = migrate({"schema_version": 8, "name": "x", "lane_clips": [clip]})
+    result = migrate({"schema_version": 8, "name": "x", "lane_clips": [clip]}, target=9)
     assert result["schema_version"] == 9 and result["lane_clips"][0]["keys"] == []
     project, stack = with_image()
     stack.execute(KeyLaneClip(C1, "opacity", 1200, 0.5, key_id=K1))

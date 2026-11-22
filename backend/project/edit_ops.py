@@ -22,6 +22,7 @@ from backend.project.audio_commands import (
     RemoveAudioClip,
     RemoveAudioLane,
     SetAudioClip,
+    SetAudioClipFx,
     SetAudioLane,
     SplitAudioClip,
     TrimAudioClip,
@@ -56,6 +57,7 @@ from backend.project.placement_commands import (
     RemovePlacement,
     SetPlacementStretch,
 )
+from backend.project.schema import ClipFx
 from backend.project.video_lane_commands import (
     AddLaneClip,
     AddVideoLane,
@@ -433,6 +435,14 @@ class SetLaneClipOp(_Op):
     mute: bool | None = None
 
 
+class SetAudioClipFxOp(_Op):
+    """An audio clip's whole FX chain (M8-4), as the FX tab holds it; null clears it."""
+
+    op: Literal["set_audio_clip_fx"] = "set_audio_clip_fx"
+    clip_id: str
+    fx: ClipFx | None = None
+
+
 class KeyLaneClipOp(_Op):
     """Set an image clip's x, y, scale or opacity at a timeline time (keyframes
     decision 3): changes the key within one frame of it, else adds one."""
@@ -518,7 +528,8 @@ EditOp = Annotated[
     | KeyLaneClipOp
     | MoveClipKeyOp
     | SetClipKeyOp
-    | RemoveClipKeyOp,
+    | RemoveClipKeyOp
+    | SetAudioClipFxOp,
     Field(discriminator="op"),
 ]
 
@@ -631,6 +642,8 @@ def _build_video_lane_command(op: EditOp) -> Command | None:
         )
     if isinstance(op, RemoveClipKeyOp):
         return RemoveClipKey(op.clip_id, op.key_id)
+    if isinstance(op, SetAudioClipFxOp):
+        return SetAudioClipFx(op.clip_id, op.fx)
     return None
 
 

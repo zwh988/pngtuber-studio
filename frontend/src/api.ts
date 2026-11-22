@@ -1,3 +1,5 @@
+import type { FxChain } from "./fxApi";
+
 export type ProjectSummary = {
   name: string;
   folder: string;
@@ -295,7 +297,14 @@ export type TimelineAudioClip = {
   gain_db: number;
   fade_in_ms: number;
   fade_out_ms: number;
+  /** The clip's FX chain (M8-4); null plays the file as it is. */
+  fx: ClipFx | null;
+  /** Key of the rendered file; null when the clip plays its file as it is. */
+  fx_key: string | null;
 };
+
+/** An audio clip's FX chain (M8-4): the voice chain plus a loudness switch (off by default). */
+export type ClipFx = FxChain & { loudness_enabled: boolean };
 
 export type ImportedAudio = {
   name: string;
@@ -489,6 +498,7 @@ export type EditOp =
       ease_strength?: number;
     }
   | { op: "remove_clip_key"; clip_id: string; key_id: string }
+  | { op: "set_audio_clip_fx"; clip_id: string; fx: ClipFx | null }
   | {
       op: "set_avatar_settings";
       x?: number;
@@ -676,6 +686,17 @@ export function getAudioPeaks(fileId: string, buckets: number): Promise<PeaksRep
 /** The decoded WAV of an imported audio file (what preview and export play). */
 export function audioMediaUrl(fileId: string): string {
   return `/media/audio/${encodeURIComponent(fileId)}`;
+}
+
+/** What an audio clip plays (M8-4): its file through its FX (one render per file and chain), else the file. */
+export function audioClipSource(clip: { id: string; file_id: string; fx_key?: string | null }): { key: string; url: string } {
+  if (clip.fx_key !== undefined && clip.fx_key !== null) {
+    return {
+      key: `fx:${clip.fx_key}`,
+      url: `/media/audioclip/${encodeURIComponent(clip.id)}?v=${encodeURIComponent(clip.fx_key)}`,
+    };
+  }
+  return { key: clip.file_id, url: audioMediaUrl(clip.file_id) };
 }
 
 /** URL a <video> tag can play for a source of the open project (Range supported). */

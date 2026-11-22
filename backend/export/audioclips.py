@@ -26,6 +26,7 @@ from pathlib import Path
 import numpy as np
 import soundfile
 
+from backend.audio.clipfx import clip_fx_key_for
 from backend.audio.clipimport import DECODED_RATE
 from backend.export.errors import ExportCancelled, ExportError
 from backend.export.voicetrack import _write_float_wav, ms_to_samples
@@ -162,13 +163,18 @@ def write_audio_clip_track(
     out_dir: Path,
     decoded_paths: Mapping[str, Path],
     *,
+    fx_paths: Mapping[str, Path] | None = None,
     should_stop: Callable[[], bool] = lambda: False,
 ) -> AudioClipTrackReport | None:
     """Write ``audio_clips.wav`` into ``out_dir``; None when no clip is heard.
 
     ``decoded_paths`` maps a file id to its decoded 48 kHz WAV. A heard clip whose
-    file is not there is an error (pre-flight reports it first).
+    file is not there is an error (pre-flight reports it first). ``fx_paths`` (M8-4)
+    maps a clip id to its file rendered through its FX, which that clip plays instead
+    (the same file the preview plays); a clip with FX that is not there is an error.
     """
+    fx_paths = fx_paths or {}
+    fx_clip_ids = {c.id for c in project.audio_clips if c.fx is not None and clip_fx_key_for(c.file_id, c.fx) is not None}
     cues = audio_clip_schedule(project, total_ms)
     if not cues:
         return None
@@ -178,9 +184,16 @@ def write_audio_clip_track(
     for cue in cues:
         if should_stop():
             raise ExportCancelled("export cancelled")
-        if cue.file_id not in cache:
+        name = files[cue.file_id].name if cue.file_id in files else cue.file_id
+        if cue.clip_id in fx_clip_ids:
+            path = fx_paths.get(cue.clip_id)
+            if path is None or not path.is_file():
+                raise ExportError(f"the FX of an audio clip of {name} could not be rendered")
+            source = f"fx:{path.name}"
+        else:
             path = decoded_paths.get(cue.file_id)
-            name = files[cue.file_id].name if cue.file_id in files else cue.file_id
+            source = cue.file_id
+        if source not in cache:
             if path is None or not path.is_file():
                 raise ExportError(f"the audio file {name} is missing")
             try:
@@ -191,8 +204,8 @@ def write_audio_clip_track(
                 raise ExportError(
                     f"{name}: decoded at {rate} Hz, expected {DECODED_RATE}"
                 )
-            cache[cue.file_id] = data
-        items.append((cue, cache[cue.file_id]))
+            cache[source] = data
+        items.append((cue, cache[source]))
     track, peak, cut_ms = mix_audio_clips(items, DECODED_RATE, total_ms)
     _write_float_wav(out_dir / AUDIO_CLIPS_NAME, track, DECODED_RATE)
     used = sorted({cue.file_id for cue in cues})

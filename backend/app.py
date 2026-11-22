@@ -763,6 +763,18 @@ def create_app(
         # The decoded WAV of an imported file: what preview and export both play.
         return range_response(decoded_audio(file_id), request.headers.get("range"))
 
+    @app.get("/media/audioclip/{clip_id}")
+    def get_audio_clip_fx_media(clip_id: str, request: Request) -> Response:
+        # M8-4: an audio clip's file through its FX chain (rendered on first request,
+        # then kept); the query's v= (the clip's fx_key) only keeps the browser cache honest.
+        try:
+            path = active.audio_clip_fx_path(clip_id)
+        except _API_ERRORS as exc:
+            raise HTTPException(status_code=400, detail=str(exc)) from exc
+        if path is None or not path.is_file():
+            raise HTTPException(status_code=404, detail="no FX render for this clip")
+        return range_response(path, request.headers.get("range"))
+
     @app.get("/api/audio/{file_id}/peaks")
     def get_audio_peaks(file_id: str, buckets: int = 400) -> PeaksReport:
         try:

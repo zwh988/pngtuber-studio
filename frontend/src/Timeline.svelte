@@ -956,7 +956,7 @@
         ctx.textBaseline = "top";
         ctx.font = font(10, 600);
         const level = clip.gain_db === 0 ? "" : `  ${clip.gain_db > 0 ? "+" : ""}${clip.gain_db} dB`;
-        ctx.fillText(`${clip.name}${level}`, x0 + 4, y + 3);
+        ctx.fillText(`${clip.fx !== null && clip.fx !== undefined ? "FX · " : ""}${clip.name}${level}`, x0 + 4, y + 3);
         ctx.restore();
       }
       ctx.globalAlpha = 1;

@@ -17,11 +17,15 @@ from typing import Literal
 
 from pydantic import ValidationError
 
+from backend.audio.chainspec import FxChainError
+from backend.audio.clipfx import validate_clip_fx
 from backend.project.commands import Command, CommandError
+from backend.project.line_commands import NoChange
 from backend.project.schema import (
     AudioClip,
     AudioFile,
     AudioLane,
+    ClipFx,
     Project,
     new_id,
 )
@@ -558,3 +562,26 @@ class SetAudioClip(_ReplaceClip):
 
     def changed(self, project: Project, clip: AudioClip) -> AudioClip:
         return _build_clip(clip, **self.changes)
+
+class SetAudioClipFx(_ReplaceClip):
+    """Set or clear an audio clip's FX chain (M8-4); None plays the file as it is.
+    Several of these in one batch apply one chain to several clips in one undo step."""
+
+    def __init__(self, clip_id: str, fx: ClipFx | None) -> None:
+        if fx is not None:
+            try:
+                validate_clip_fx(fx)
+            except FxChainError as exc:
+                raise CommandError(str(exc)) from exc
+        self.clip_id = clip_id
+        self.fx = None if fx is None else fx.model_copy(deep=True)
+
+    @property
+    def label(self) -> str:
+        return "Clear audio clip FX" if self.fx is None else "Change audio clip FX"
+
+    def changed(self, project: Project, clip: AudioClip) -> AudioClip:
+        if clip.fx == self.fx:
+            raise NoChange("the clip already has these FX")
+        return _build_clip(clip, fx=None if self.fx is None else self.fx.model_dump())
+

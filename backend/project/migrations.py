@@ -91,6 +91,14 @@ def _v8_to_v9(data: dict[str, Any]) -> dict[str, Any]:
     return data
 
 
+def _v9_to_v10(data: dict[str, Any]) -> dict[str, Any]:
+    """v10 adds an FX chain per audio clip (M8-4), none yet."""
+    for clip in data.get("audio_clips") or []:
+        if isinstance(clip, dict):
+            clip.setdefault("fx", None)
+    return data
+
+
 # Maps "from version" -> function upgrading that version to version + 1.
 MIGRATIONS: dict[int, Migration] = {
     1: _v1_to_v2,
@@ -101,6 +109,7 @@ MIGRATIONS: dict[int, Migration] = {
     6: _v6_to_v7,
     7: _v7_to_v8,
     8: _v8_to_v9,
+    9: _v9_to_v10,
 }
 
 

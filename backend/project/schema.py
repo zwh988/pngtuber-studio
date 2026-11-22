@@ -24,7 +24,7 @@ from pydantic import (
     model_validator,
 )
 
-SCHEMA_VERSION = 9
+SCHEMA_VERSION = 10
 
 # Picture-in-picture limits of a video-lane clip (schema v6, M8-2).
 LANE_SCALE_MIN = 0.05
@@ -318,6 +318,8 @@ class AudioClip(_Model):
     gain_db: AudioGain = 0.0
     fade_in_ms: Ms = 0
     fade_out_ms: Ms = 0
+    # The clip's own FX chain (schema v10, M8-4); None plays the file as it is.
+    fx: "ClipFx | None" = None
 
     @model_validator(mode="after")
     def _check_times(self) -> "AudioClip":
@@ -494,6 +496,17 @@ class FxChain(_Model):
     compressor: CompressorSettings = Field(default_factory=CompressorSettings)
     effects: list[EffectSpec] = Field(default_factory=list)
     loudness_target_lufs: float = -16.0
+
+
+class ClipFx(FxChain):
+    """An audio clip's FX chain (M8-4 decision 1): the voice chain's EQ, compressor and
+    effect list; loudness levelling to ``loudness_target_lufs`` only when
+    ``loudness_enabled`` (off by default). No silence trim and no stretch."""
+
+    loudness_enabled: bool = False
+
+
+AudioClip.model_rebuild()
 
 
 class AvatarSettings(_Model):

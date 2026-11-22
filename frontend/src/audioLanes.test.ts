@@ -30,6 +30,8 @@ function clip(id: string, lane: string, start: number, inMs: number, outMs: numb
     gain_db: 0,
     fade_in_ms: 0,
     fade_out_ms: 0,
+    fx: null,
+    fx_key: null,
   };
 }
 

@@ -11,12 +11,14 @@ from collections.abc import Collection, Mapping, Sequence
 from pydantic import BaseModel, Field
 
 from backend.audio.chainspec import FxChainError, processing_spec
+from backend.audio.clipfx import clip_fx_key_for
 from backend.audio.trim import TrimBounds, processed_duration_ms, trimmed_duration_ms
 from backend.edl.anchoring import check_references, find_orphans, item_timeline_ms
 from backend.edl.timemap import ClipSpan, clip_spans, timeline_duration, to_timeline
 from backend.project.schema import (
     AudioLane,
     AvatarSettings,
+    ClipFx,
     ClipKey,
     Keyframe,
     Project,
@@ -155,6 +157,10 @@ class TimelineAudioClip(BaseModel):
     gain_db: float
     fade_in_ms: int
     fade_out_ms: int
+    # The clip's FX chain (M8-4) and the key of its processed file: None plays the
+    # decoded file as it is (no FX, FX that do nothing, or a chain that cannot be used).
+    fx: ClipFx | None = None
+    fx_key: str | None = None
 
 
 def _build_audio_clips(project: Project) -> list[TimelineAudioClip]:
@@ -177,6 +183,8 @@ def _build_audio_clips(project: Project) -> list[TimelineAudioClip]:
                 gain_db=clip.gain_db,
                 fade_in_ms=clip.fade_in_ms,
                 fade_out_ms=clip.fade_out_ms,
+                fx=None if clip.fx is None else clip.fx.model_copy(deep=True),
+                fx_key=clip_fx_key_for(clip.file_id, clip.fx),
             )
         )
     result.sort(key=lambda c: (lane_order.get(c.lane_id, len(lane_order)), c.timeline_ms))

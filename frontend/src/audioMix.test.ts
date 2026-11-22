@@ -1,4 +1,5 @@
 import { describe, expect, it } from "vitest";
+import { audioClipSource } from "./api";
 import type { AudioLane, TimelineAudioClip } from "./api";
 import { dbToGain, gainAt, gainPoints, planClips } from "./audioMix";
 
@@ -16,6 +17,8 @@ function clip(over: Partial<TimelineAudioClip> = {}): TimelineAudioClip {
     gain_db: 0,
     fade_in_ms: 0,
     fade_out_ms: 0,
+    fx: null,
+    fx_key: null,
     ...over,
   };
 }
@@ -80,5 +83,15 @@ describe("planClips", () => {
     expect(planClips(clips, [lane("L1"), lane("L2", { solo: true })], 0).map((p) => p.clipId)).toEqual(["c2"]);
     const [only] = planClips([clip()], [lane("L1", { gain_db: -6 })], 0);
     expect(only?.points[0]?.[1]).toBeCloseTo(dbToGain(-6));
+  });
+});
+
+describe("what an audio clip plays (M8-4)", () => {
+  it("is its file, or its file through its FX, one render per file and chain", () => {
+    expect(audioClipSource({ id: "c1", file_id: "f1", fx_key: null })).toEqual({ key: "f1", url: "/media/audio/f1" });
+    const a = audioClipSource({ id: "c1", file_id: "f1", fx_key: "abc" });
+    const b = audioClipSource({ id: "c2", file_id: "f1", fx_key: "abc" });
+    expect(a).toEqual({ key: "fx:abc", url: "/media/audioclip/c1?v=abc" });
+    expect(b.key).toBe(a.key); // two clips with the same file and chain share one buffer
   });
 });

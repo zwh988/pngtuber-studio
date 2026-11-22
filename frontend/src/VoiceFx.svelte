@@ -12,6 +12,7 @@
   } from "./fxApi";
   import FxSlider from "./FxSlider.svelte";
   import { ChevronDown, ChevronUp, Play, Plus, Square, Trash2 } from "@lucide/svelte";
+  import type { ClipFx, EditOp, TimelineAudioClip } from "./api";
   import Banner from "./ui/Banner.svelte";
   import Button from "./ui/Button.svelte";
   import IconButton from "./ui/IconButton.svelte";
@@ -31,6 +32,9 @@
     placements,
     selectedPlacementId,
     onedited,
+    clip = null,
+    groupClipIds = [],
+    oncommitclip,
   }: {
     /** True while this tab is showing; the chain is fetched and polled only then. */
     active: boolean;
@@ -40,7 +44,37 @@
     selectedPlacementId: string | null;
     /** An edit went onto the shared undo stack: refresh the undo and redo buttons. */
     onedited: () => void;
+    /** The selected audio clip (M8-4): the tab then edits that clip's FX instead of the voice. */
+    clip?: TimelineAudioClip | null;
+    /** The other selected audio clips (timeline box select), for "Apply to selected clips". */
+    groupClipIds?: string[];
+    /** Commit timeline ops (one undo step); false when refused. */
+    oncommitclip?: (label: string, ops: EditOp[]) => Promise<boolean>;
   } = $props();
+
+  /** A clip without FX starts from a chain that does nothing (backend `ClipFx()`). */
+  function emptyClipFx(): ClipFx {
+    return {
+      eq_bass_db: 0,
+      eq_mid_db: 0,
+      eq_treble_db: 0,
+      compressor: { enabled: false, threshold_db: -18, ratio: 3, attack_ms: 10, release_ms: 100 },
+      effects: [],
+      loudness_target_lufs: -16,
+      loudness_enabled: false,
+    };
+  }
+
+  /** The chain shown: the selected clip's (M8-4), else the voice chain. */
+  const clipChain = $derived(clip === null ? null : (clip.fx ?? emptyClipFx()));
+
+  function setClipFx(label: string, ids: string[], value: ClipFx | null): Promise<void> {
+    if (oncommitclip === undefined) return Promise.resolve();
+    const ops = ids.map((id) => ({ op: "set_audio_clip_fx", clip_id: id, fx: value }) as EditOp);
+    return oncommitclip(label, ops).then((ok) => {
+      if (!ok) resync += 1;
+    });
+  }
 
   let fx = $state<FxState | null>(null);
   let error = $state<string | null>(null);
@@ -121,6 +155,11 @@
   }
 
   function editChain(mutate: (chain: FxChain) => void): Promise<void> {
+    if (clip !== null && clipChain !== null) {
+      const next = $state.snapshot(clipChain) as ClipFx;
+      mutate(next);
+      return setClipFx("Change audio clip FX", [clip.id], next);
+    }
     return send((state) => {
       const chain = $state.snapshot(state.chain) as FxChain;
       mutate(chain);
@@ -222,7 +261,38 @@
   {:else}
     {@const state = fx}
     {@const limits = state.limits}
-    <p class="status">{processingText(state.processing)}</p>
+    {@const chain = clipChain ?? state.chain}
+    {#if clip !== null}
+      {@const others = groupClipIds.filter((id) => id !== clip.id)}
+      <section class="target">
+        <h3>FX of audio clip: {clip.name}</h3>
+        <p class="hint">
+          Runs on the clip's whole file before its fades and level; moving or trimming the clip keeps
+          them. A change is rendered when the clip next plays (a moment for a long file). Select no
+          audio clip to edit the voice chain.
+        </p>
+        <div class="row">
+          {#if others.length > 0}
+            <Button
+              size="sm"
+              onclick={() =>
+                void setClipFx(
+                  `Apply FX to ${others.length + 1} clips`,
+                  [clip.id, ...others],
+                  clip.fx === null ? null : ($state.snapshot(clip.fx) as ClipFx),
+                )}
+            >
+              Apply to the {others.length + 1} selected clips
+            </Button>
+          {/if}
+          <Button size="sm" variant="danger" disabled={clip.fx === null} onclick={() => void setClipFx("Remove audio clip FX", [clip.id], null)}>
+            Remove FX
+          </Button>
+        </div>
+      </section>
+    {:else}
+      <p class="status">{processingText(state.processing)}</p>
+    {/if}
     {#if state.problem !== null}
       <Banner kind="error">{state.problem}</Banner>
     {/if}
@@ -230,7 +300,8 @@
       <Banner kind="error">{error}</Banner>
     {/if}
 
-    {#key resync}
+    {#key `${resync}:${clip?.id ?? "voice"}`}
+      {#if clip === null}
       <section>
         <h3>Presets</h3>
         <div class="presets" role="group" aria-label="Voice FX presets">
@@ -268,6 +339,7 @@
         </div>
         <p class="hint">{auditionText}</p>
       </section>
+      {/if}
 
       <section>
         <h3>Equaliser</h3>
@@ -276,7 +348,7 @@
           min={-limits.eq_gain_limit_db}
           max={limits.eq_gain_limit_db}
           step={0.5}
-          value={state.chain.eq_bass_db}
+          value={chain.eq_bass_db}
           unit="dB"
           signed
           oncommit={(v) =>
@@ -289,7 +361,7 @@
           min={-limits.eq_gain_limit_db}
           max={limits.eq_gain_limit_db}
           step={0.5}
-          value={state.chain.eq_mid_db}
+          value={chain.eq_mid_db}
           unit="dB"
           signed
           oncommit={(v) =>
@@ -302,7 +374,7 @@
           min={-limits.eq_gain_limit_db}
           max={limits.eq_gain_limit_db}
           step={0.5}
-          value={state.chain.eq_treble_db}
+          value={chain.eq_treble_db}
           unit="dB"
           signed
           oncommit={(v) =>
@@ -317,7 +389,7 @@
         <label class="check">
           <input
             type="checkbox"
-            checked={state.chain.compressor.enabled}
+            checked={chain.compressor.enabled}
             onchange={(e) => {
               const on = e.currentTarget.checked;
               void editChain((c) => {
@@ -332,9 +404,9 @@
           min={limits.compressor.threshold_db[0]}
           max={limits.compressor.threshold_db[1]}
           step={1}
-          value={state.chain.compressor.threshold_db}
+          value={chain.compressor.threshold_db}
           unit="dB"
-          disabled={!state.chain.compressor.enabled}
+          disabled={!chain.compressor.enabled}
           oncommit={(v) =>
             editChain((c) => {
               c.compressor.threshold_db = v;
@@ -345,9 +417,9 @@
           min={limits.compressor.ratio[0]}
           max={limits.compressor.ratio[1]}
           step={0.5}
-          value={state.chain.compressor.ratio}
+          value={chain.compressor.ratio}
           unit=": 1"
-          disabled={!state.chain.compressor.enabled}
+          disabled={!chain.compressor.enabled}
           oncommit={(v) =>
             editChain((c) => {
               c.compressor.ratio = v;
@@ -358,9 +430,9 @@
           min={limits.compressor.attack_ms[0]}
           max={limits.compressor.attack_ms[1]}
           step={1}
-          value={state.chain.compressor.attack_ms}
+          value={chain.compressor.attack_ms}
           unit="ms"
-          disabled={!state.chain.compressor.enabled}
+          disabled={!chain.compressor.enabled}
           oncommit={(v) =>
             editChain((c) => {
               c.compressor.attack_ms = v;
@@ -371,9 +443,9 @@
           min={limits.compressor.release_ms[0]}
           max={limits.compressor.release_ms[1]}
           step={5}
-          value={state.chain.compressor.release_ms}
+          value={chain.compressor.release_ms}
           unit="ms"
-          disabled={!state.chain.compressor.enabled}
+          disabled={!chain.compressor.enabled}
           oncommit={(v) =>
             editChain((c) => {
               c.compressor.release_ms = v;
@@ -383,10 +455,10 @@
 
       <section>
         <h3>Effects</h3>
-        {#if state.chain.effects.length === 0}
+        {#if chain.effects.length === 0}
           <p class="hint">No effects. They run in the order listed, after the compressor.</p>
         {/if}
-        {#each state.chain.effects as spec, i (i)}
+        {#each chain.effects as spec, i (i)}
           {@const info = state.effects.find((e) => e.type === spec.type)}
           <div class="effect">
             <div class="effect-head">
@@ -406,7 +478,7 @@
                 icon={ChevronDown}
                 size="sm"
                 label="Move down (runs later)"
-                disabled={i === state.chain.effects.length - 1}
+                disabled={i === chain.effects.length - 1}
                 onclick={() =>
                   void editChain((c) => {
                     c.effects = moveItem(c.effects, i, 1);
@@ -462,6 +534,38 @@
         {/if}
       </section>
 
+{#if clip !== null}
+      <section>
+        <h3>Loudness</h3>
+        <label class="check">
+          <input
+            type="checkbox"
+            checked={clipChain?.loudness_enabled ?? false}
+            onchange={(e) => {
+              const on = e.currentTarget.checked;
+              void editChain((c) => {
+                (c as ClipFx).loudness_enabled = on;
+              });
+            }}
+          />
+          Level the clip's loudness
+        </label>
+        <FxSlider
+          label="Target"
+          min={limits.loudness_min_lufs}
+          max={limits.loudness_max_lufs}
+          step={0.5}
+          value={chain.loudness_target_lufs}
+          unit="LUFS"
+          disabled={!(clipChain?.loudness_enabled ?? false)}
+          oncommit={(v) =>
+            editChain((c) => {
+              c.loudness_target_lufs = v;
+            })}
+        />
+        <p class="hint">Off: the file keeps its own loudness (the clip level still applies). On: the whole file is levelled to the target, with a limiter at -1 dBFS.</p>
+      </section>
+      {:else}
       <section>
         <h3>Loudness</h3>
         <FxSlider
@@ -469,7 +573,7 @@
           min={limits.loudness_min_lufs}
           max={limits.loudness_max_lufs}
           step={0.5}
-          value={state.chain.loudness_target_lufs}
+          value={chain.loudness_target_lufs}
           unit="LUFS"
           oncommit={(v) =>
             editChain((c) => {
@@ -489,6 +593,7 @@
         />
         <p class="hint">The recording's own sound, relative to its original level.</p>
       </section>
+      {/if}
     {/key}
   {/if}
 </div>

@@ -1222,7 +1222,7 @@
               class:on={tab === "fx"}
               onclick={() => (tab = "fx")}
             >
-              Voice FX
+              FX
             </button>
             <button
               type="button"
@@ -1305,6 +1305,14 @@
                 placements={timeline?.placements ?? []}
                 {selectedPlacementId}
                 onedited={() => void syncHistory()}
+                clip={selectedAudioClip}
+                groupClipIds={selectedAudioClip !== null && selectedClipIds.includes(selectedAudioClip.id)
+                  ? selectedClipIds.filter((id) => timeline?.audio_clips.some((a) => a.id === id))
+                  : []}
+                oncommitclip={async (label, ops) => {
+                  await audioEdit(label, ops);
+                  return error === null;
+                }}
               />
             </div>
           </div>
@@ -1617,6 +1625,14 @@
               {@const length = sound.end_ms - sound.timeline_ms}
               <strong>Audio: {sound.name}</strong>
               <span class="hint num">{clock(sound.timeline_ms)} to {clock(sound.end_ms)}</span>
+              <Button
+                size="sm"
+                variant={sound.fx !== null ? "primary" : "secondary"}
+                title={sound.fx !== null ? "This clip has FX: edit them in the FX tab" : "Add FX to this clip in the FX tab"}
+                onclick={() => (tab = "fx")}
+              >
+                {sound.fx !== null ? "FX on" : "FX"}
+              </Button>
               <label class="inline">
                 Level
                 <input
