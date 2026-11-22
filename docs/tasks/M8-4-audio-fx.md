@@ -2,7 +2,7 @@
 
 - **Milestone item:** `IMPLEMENTATION_PLAN.md` M8-4 (audio FX on audio clips, one FX chain per clip; user 2026-11-20)
 - **Spec sections:** 4.2, 5, 7, 10
-- **Status:** in progress (branch `m8-4-audio-fx`)
+- **Status:** done (branch `m8-4-audio-fx`, 2026-11-23; user confirmed in the app; not merged yet)
 
 ## Goal
 
@@ -37,10 +37,15 @@ Each music or sound-effect clip on an audio lane can have its own FX chain (EQ, 
 | 4 | Where to edit | The Voice FX tab becomes "FX" and follows the selection: an audio clip's chain when one is selected, else the voice. Apply the clip's FX to every selected audio clip; reset. An FX badge on the clip (user, as recommended) |
 | - | Assumption (stated) | The chain processes the clip's whole file once; the cut, fades, clip level and lane level come after it, so a reverb tail stops at the clip's end |
 
+## As built
+
+- Steps 2 to 5 landed in one commit (they share `session.py` and the tests); step 6 is the docs.
+- Renders are made on demand (the preview's first request, pre-flight, export inputs), not by a background thread.
+
 ## Acceptance criteria
 
-- [ ] A clip's FX are heard in the preview and in the export, and they sound the same (same file)
-- [ ] Moving, trimming or splitting a clip never re-renders; changing its FX renders once
-- [ ] Every change is one undo step; old projects open (migration)
-- [ ] Tests for all pure logic; pytest, ruff, `npm run check`, `npm test`, `npm run build` clean
-- [ ] `PROJECT_STATE.md` and spec updated
+- [x] A clip's FX are heard in the preview and in the export, and they sound the same (same file)
+- [x] Moving, trimming or splitting a clip never re-renders; changing its FX renders once
+- [x] Every change is one undo step; old projects open (migration)
+- [x] Tests for all pure logic; pytest, ruff, `npm run check`, `npm test`, `npm run build` clean
+- [x] `PROJECT_STATE.md` and spec updated
