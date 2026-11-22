@@ -115,6 +115,13 @@ export function visibleClipKeys(clip: Pick<TimelineLaneClip, "timeline_ms" | "en
   return (clip.keys ?? []).filter((k) => k.t_ms >= 0 && k.t_ms <= length);
 }
 
+/** How many keys a trim left before the clip's start and after its end (kept, not drawn). */
+export function hiddenClipKeys(clip: Pick<TimelineLaneClip, "timeline_ms" | "end_ms" | "keys">): { before: number; after: number } {
+  const length = clip.end_ms - clip.timeline_ms;
+  const keys = clip.keys ?? [];
+  return { before: keys.filter((k) => k.t_ms < 0).length, after: keys.filter((k) => k.t_ms > length).length };
+}
+
 /** Whether the playhead is on the clip, where keyed properties can be set. */
 export function onClip(clip: Pick<TimelineLaneClip, "timeline_ms" | "end_ms">, timelineMs: number): boolean {
   return timelineMs >= clip.timeline_ms && timelineMs <= clip.end_ms;
@@ -144,4 +151,32 @@ export function clipEditOps(
   }
   if (Object.keys(plain).length > 0) ops.unshift({ op: "set_lane_clip", clip_id: clip.id, ...plain });
   return { ops, skipped };
+}
+
+export type CurveKey = { t_ms: number; value: number; interpolation: Interpolation; strength: number };
+
+/**
+ * The value curve through some keys, as a polyline for drawing on the timeline (keyframes
+ * polish): from the first key to the last, `steps` points per segment along its easing (the
+ * same `ease` as the evaluation); a hold segment is a flat line and a jump at the next key.
+ */
+export function keyCurve(keys: readonly CurveKey[], steps = 16): { t: number; v: number }[] {
+  const ordered = [...keys].sort((a, b) => a.t_ms - b.t_ms);
+  const points: { t: number; v: number }[] = [];
+  for (let i = 0; i < ordered.length; i += 1) {
+    const key = ordered[i];
+    const next = ordered[i + 1];
+    points.push({ t: key.t_ms, v: key.value });
+    if (next === undefined || next.t_ms === key.t_ms) continue;
+    if (key.interpolation === "hold") {
+      points.push({ t: next.t_ms, v: key.value });
+      continue;
+    }
+    for (let s = 1; s < steps; s += 1) {
+      const u = s / steps;
+      const p = ease(key.interpolation, u, key.strength);
+      points.push({ t: key.t_ms + (next.t_ms - key.t_ms) * u, v: key.value + (next.value - key.value) * p });
+    }
+  }
+  return points;
 }

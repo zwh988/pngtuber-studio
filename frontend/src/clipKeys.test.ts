@@ -1,6 +1,6 @@
 import { describe, expect, it } from "vitest";
 import type { ClipKey } from "./api";
-import { clipEditOps, clipKeyNear, clipValuesAt, ease, isKeyed, laneValue, visibleClipKeys } from "./clipKeys";
+import { clipEditOps, clipKeyNear, clipValuesAt, ease, hiddenClipKeys, isKeyed, keyCurve, laneValue, visibleClipKeys } from "./clipKeys";
 import table from "../../tests/fixtures/clip_key_cases.json";
 
 type Case = {
@@ -77,5 +77,30 @@ describe("editing a keyed clip", () => {
     expect(clipKeyNear(clip, "x", 1040)).toBeNull();
     expect(clipKeyNear(clip, "y", 1000)).toBeNull();
     expect(visibleClipKeys(clip).map((k) => k.id)).toEqual(["a"]);
+    expect(hiddenClipKeys(clip)).toEqual({ before: 0, after: 1 });
+    expect(hiddenClipKeys({ ...clip, keys: [key("z", "y", -5, 0.1)] })).toEqual({ before: 1, after: 0 });
+  });
+});
+
+describe("key curves for the timeline", () => {
+  it("follows each segment's easing, and holds then jumps", () => {
+    const pts = keyCurve(
+      [
+        { t_ms: 0, value: 0, interpolation: "ease_in", strength: 1 },
+        { t_ms: 100, value: 1, interpolation: "hold", strength: 1 },
+        { t_ms: 200, value: 0.5, interpolation: "linear", strength: 1 },
+      ],
+      4,
+    );
+    expect(pts).toEqual([
+      { t: 0, v: 0 },
+      { t: 25, v: 0.0625 },
+      { t: 50, v: 0.25 },
+      { t: 75, v: 0.5625 },
+      { t: 100, v: 1 },
+      { t: 200, v: 1 },
+      { t: 200, v: 0.5 },
+    ]);
+    expect(keyCurve([])).toEqual([]);
   });
 });

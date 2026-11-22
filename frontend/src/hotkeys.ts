@@ -47,7 +47,7 @@ export const HOTKEY_GROUPS: HotkeyGroup[] = [
     items: [
       { keys: ["E"], action: "Expression key at the playhead" },
       { keys: ["R"], action: "Reaction at the playhead" },
-      { keys: ["<"], alts: [[">"]], action: "Previous / next avatar key (selects it, playhead on it)" },
+      { keys: ["<"], alts: [[">"]], action: "Previous / next key: the selected image clip's keys, else avatar keys (selects it, playhead on it)" },
     ],
   },
   {

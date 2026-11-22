@@ -105,6 +105,10 @@
   let selectedAudioClipId = $state<string | null>(null);
   /** Selected clip on a video lane (M8-2). */
   let selectedLaneClipId = $state<string | null>(null);
+  /** Selected keys of the selected image clip (timeline Shift-click and Shift-drag; keyframes polish). */
+  let selectedClipKeyIds = $state<string[]>([]);
+  /** Several video- and audio-lane clips (timeline box select and Shift-click; keyframes polish). */
+  let selectedClipIds = $state<string[]>([]);
   /** The selected lane clip's position and size while it is dragged in the preview. */
   let laneDraft = $state<LaneDraft | null>(null);
   let player = $state<ReturnType<typeof Player> | null>(null);
@@ -778,6 +782,40 @@
   /** Delete: remove the selected placed line, or else the selected clip. */
   function removeSelected(): void {
     const shot = selectedLaneClip;
+    const keyIds = shot === null ? [] : selectedClipKeyIds.filter((id) => shot.keys.some((k) => k.id === id));
+    if (shot !== null && keyIds.length > 0) {
+      // Selected image clip keys go first; Delete again then removes the clip.
+      void laneEdit(
+        keyIds.length === 1 ? "Remove clip key" : `Remove ${keyIds.length} clip keys`,
+        keyIds.map((id) => ({ op: "remove_clip_key", clip_id: shot.id, key_id: id }) as EditOp),
+      ).then(() => {
+        if (error === null) selectedClipKeyIds = [];
+      });
+      return;
+    }
+    // Several lane clips selected (box select, Shift-click): remove them all as one undo step.
+    const primary = selectedLaneClipId ?? selectedAudioClipId;
+    const group =
+      primary !== null && selectedClipIds.includes(primary)
+        ? selectedClipIds.filter(
+            (id) => timeline?.lane_clips.some((v) => v.id === id) || timeline?.audio_clips.some((a) => a.id === id),
+          )
+        : [];
+    if (group.length > 1) {
+      const ops = group.map((id) =>
+        timeline?.lane_clips.some((v) => v.id === id)
+          ? ({ op: "remove_lane_clip", clip_id: id } as EditOp)
+          : ({ op: "remove_audio_clip", clip_id: id } as EditOp),
+      );
+      void laneEdit(`Remove ${group.length} clips`, ops).then(() => {
+        if (error === null) {
+          selectedClipIds = [];
+          selectedLaneClipId = null;
+          selectedAudioClipId = null;
+        }
+      });
+      return;
+    }
     if (shot !== null) {
       void laneEdit("Remove clip from a video lane", [{ op: "remove_lane_clip", clip_id: shot.id }]).then(() => {
         if (error === null) {
@@ -1331,8 +1369,22 @@
               laneEdit("Move clip on a video lane", [{ op: "move_lane_clip", clip_id: id, timeline_ms: ms, lane_id: laneId }])}
             ontrimlane={(id, edge, ms) =>
               laneEdit("Trim clip on a video lane", [{ op: "trim_lane_clip", clip_id: id, edge, timeline_ms: ms }])}
-            onmoveclipkey={(id, keyId, ms) =>
-              laneEdit("Move clip key", [{ op: "move_clip_key", clip_id: id, key_id: keyId, timeline_ms: ms }])}
+            bind:selectedClipKeyIds
+            bind:selectedClipIds
+            onmoveclips={(moves) =>
+              laneEdit(
+                `Move ${moves.length} clips`,
+                moves.map((m) =>
+                  m.kind === "lane"
+                    ? ({ op: "move_lane_clip", clip_id: m.id, timeline_ms: m.ms } as EditOp)
+                    : ({ op: "move_audio_clip", clip_id: m.id, timeline_ms: m.ms } as EditOp),
+                ),
+              )}
+            onmoveclipkeys={(id, moves) =>
+              laneEdit(
+                moves.length === 1 ? "Move clip key" : `Move ${moves.length} clip keys`,
+                moves.map((m) => ({ op: "move_clip_key", clip_id: id, key_id: m.id, timeline_ms: m.ms }) as EditOp),
+              )}
             onvideolane={(laneId, change) =>
               laneEdit(change.name !== undefined ? "Rename video lane" : "Change video lane", [
                 { op: "set_video_lane", lane_id: laneId, ...change },
@@ -1420,6 +1472,7 @@
                     disabled={busy || (keyed && !here)}
                     onkeydown={(e) => e.stopPropagation()}
                     onchange={(e) => {
+                      e.currentTarget.blur(); // hand the keys back to the editor's shortcuts
                       const raw = e.currentTarget.valueAsNumber;
                       if (!Number.isFinite(raw)) {
                         e.currentTarget.value = String(pct(now[key]));
@@ -1460,7 +1513,8 @@
               >
                 Full frame
               </Button>
-              {@const atKeys = CLIP_KEY_PROPS.map((p) => clipKeyNear(shot, p, playheadMs)).filter((k) => k !== null)}
+              {@const picked = shot.keys.filter((k) => selectedClipKeyIds.includes(k.id))}
+              {@const atKeys = picked.length > 0 ? picked : CLIP_KEY_PROPS.map((p) => clipKeyNear(shot, p, playheadMs)).filter((k) => k !== null)}
               {#if shot.image_id !== null && atKeys.length > 0}
                 {@const first = atKeys[0]}
                 {@const setEase = (label: string, change: { interpolation?: Interpolation; ease_strength?: number }) =>
@@ -1468,13 +1522,21 @@
                     label,
                     atKeys.map((k) => ({ op: "set_clip_key", clip_id: shot.id, key_id: k.id, ...change }) as EditOp),
                   )}
-                <label class="inline" title="Easing from the key(s) at the playhead to the next key of each property">
-                  Easing
+                <label
+                  class="inline"
+                  title={picked.length > 0
+                    ? `Easing of the ${picked.length} selected key(s) to the next key of each property`
+                    : "Easing from the key(s) at the playhead to the next key of each property"}
+                >
+                  {picked.length > 1 ? `Easing (${picked.length} keys)` : "Easing"}
                   <select
                     value={first.interpolation}
                     disabled={busy}
                     onkeydown={(e) => e.stopPropagation()}
-                    onchange={(e) => setEase("Change clip key easing", { interpolation: e.currentTarget.value as Interpolation })}
+                    onchange={(e) => {
+                      e.currentTarget.blur(); // hand the keys back to the editor's shortcuts
+                      setEase("Change clip key easing", { interpolation: e.currentTarget.value as Interpolation });
+                    }}
                   >
                     <option value="ease_in_out">Ease in and out</option>
                     <option value="ease_in">Ease in</option>
@@ -1496,6 +1558,7 @@
                       disabled={busy}
                       onkeydown={(e) => e.stopPropagation()}
                       onchange={(e) => {
+                        e.currentTarget.blur(); // hand the keys back to the editor's shortcuts
                         const raw = e.currentTarget.valueAsNumber;
                         if (!Number.isFinite(raw)) {
                           e.currentTarget.value = String(first.ease_strength);
